@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { PublicService } from './public.service';
 
 @Controller('v1/public')
@@ -11,8 +11,8 @@ export class PublicController {
   }
 
   @Get('orgs/:orgSlug')
-  getOrgWatch(@Param('orgSlug') orgSlug: string) {
-    return this.pub.getOrgWatch(orgSlug);
+  getOrgWatch(@Param('orgSlug') orgSlug: string, @Query('key') key?: string) {
+    return this.pub.getOrgWatch(orgSlug, key);
   }
 
   @Get('orgs/:orgSlug/stream')

@@ -7,7 +7,7 @@ export class PublicService {
 
   async getCatalog() {
     return this.prisma.organization.findMany({
-      where: { isActive: true, events: { some: { status: 'live', isPublic: true } } },
+      where: { isActive: true },
       select: {
         slug: true,
         name: true,
@@ -17,17 +17,25 @@ export class PublicService {
           select: { id: true, title: true, startedAt: true },
         },
       },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
-  async getOrgWatch(orgSlug: string) {
+  async getOrgWatch(orgSlug: string, key?: string) {
     const org = await this.prisma.organization.findUnique({
       where: { slug: orgSlug, isActive: true },
       select: {
         slug: true,
         name: true,
+        description: true,
         events: {
-          where: { status: 'live' },
+          where: {
+            status: 'live',
+            OR: [
+              { isPublic: true },
+              ...(key ? [{ isPublic: false, previewKey: key }] : []),
+            ],
+          },
           take: 1,
           select: { id: true, title: true, description: true, isPublic: true, startedAt: true },
         },
