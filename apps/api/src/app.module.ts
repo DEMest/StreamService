@@ -4,9 +4,10 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { MediamtxModule } from './mediamtx/mediamtx.module';
 import { AdminModule } from './admin/admin.module';
+import { OrgModule } from './org/org.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, MediamtxModule, AdminModule],
+  imports: [PrismaModule, AuthModule, MediamtxModule, AdminModule, OrgModule],
   controllers: [HealthController],
 })
 export class AppModule {}
