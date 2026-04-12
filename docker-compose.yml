@@ -26,8 +26,8 @@ services:
 
   api:
     build:
-      context: ./apps/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/api/Dockerfile
     container_name: streamservice-api
     ports:
       - "${API_PORT:-3001}:3001"
@@ -47,8 +47,8 @@ services:
 
   web:
     build:
-      context: ./apps/web
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/web/Dockerfile
       args:
         HLS_UPSTREAM: http://mediamtx:8888
         API_UPSTREAM: http://api:3001
