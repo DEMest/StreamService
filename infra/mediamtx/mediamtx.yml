@@ -9,11 +9,6 @@ srt:
 
 hls:
   address: :8888
-  alwaysRemux: yes
   segmentCount: 7
   segmentDuration: 1s
   partDuration: 200ms
-
-rtsp: no
-rtmp: no
-webrtc: no
