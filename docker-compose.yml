@@ -1,12 +1,41 @@
 services:
   mediamtx:
     image: bluenviron/mediamtx:latest
-    container_name: mediamtx
+    container_name: streamservice-mediamtx
     restart: unless-stopped
     ports:
-      - "8888:8888"
-      - "8890:8890/udp"
+      - "${MEDIAMTX_HLS_PORT:-8888}:8888"
+      - "${MEDIAMTX_SRT_PORT:-8890}:8890/udp"
     volumes:
       - ./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro
-    # 8888 - HLS playback
-    # 8890 - SRT ingest (UDP)
+
+  api:
+    container_name: streamservice-api
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      API_PORT: 3001
+      STREAM_URL: /hls/live/stream/index.m3u8
+    ports:
+      - "${API_PORT:-3001}:3001"
+    depends_on:
+      - mediamtx
+
+  web:
+    container_name: streamservice-web
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+        NEXT_PUBLIC_STREAM_URL: ${NEXT_PUBLIC_STREAM_URL:-/hls/live/stream/index.m3u8}
+        HLS_UPSTREAM: http://mediamtx:8888
+        API_UPSTREAM: http://api:3001
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - api
+      - mediamtx

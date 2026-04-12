@@ -6,7 +6,7 @@ import ViewSwitcher, { MatId, ViewMode } from "@/components/ViewSwitcher";
 
 const STREAM_URL =
   process.env.NEXT_PUBLIC_STREAM_URL ??
-  "http://localhost:8888/live/stream/index.m3u8";
+  "/hls/live/stream/index.m3u8";
 
 /**
  * Quad view: show the full composite 2x2 stream.
