@@ -1,8 +1,2 @@
 api: true
 apiAddress: :9997
-
-srt:
-  address: :8890
-
-hls:
-  address: :8888
