@@ -15,6 +15,7 @@ RUN pnpm install --frozen-lockfile
 
 COPY . .
 
+RUN npx --yes prisma generate
 RUN pnpm --filter api build
 
 ENV API_PORT=3001
