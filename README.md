@@ -19,77 +19,41 @@ docker-compose.yml
 .env.example
 ```
 
-## Prerequisites
+## One-command server start (recommended)
 
-- Node.js 20+
-- corepack (bundled with modern Node)
-- Docker Desktop (for MediaMTX)
-- ffmpeg (for local test stream ingest)
-
-## Install dependencies
-
-Use `corepack pnpm` to avoid local PATH issues with `pnpm`:
+1. Copy `.env.example` to `.env` and adjust ports if needed.
+2. Run:
 
 ```bash
-corepack pnpm install
+docker compose up -d --build
 ```
 
-## Run web app
+Services:
+
+- Web UI: `http://<server-ip>:3000`
+- API: `http://<server-ip>:3001`
+- HLS: `http://<server-ip>:8888/live/stream/index.m3u8`
+- SRT ingest from vMix: `srt://<server-ip>:8890?streamid=publish:live/stream`
+
+Stop stack:
 
 ```bash
-corepack pnpm --filter web dev
-# http://localhost:3000
+docker compose down
 ```
 
-## Run API
+## vMix to server pipeline
 
-```bash
-corepack pnpm --filter api dev
-# http://localhost:3001
-# GET /health
-# GET /events/current
-```
+In vMix stream settings:
 
-## Run MediaMTX
+- Enable SRT: `on`
+- Type: `Caller`
+- Hostname: `<server-ip>`
+- Port: `8890`
+- Stream ID: `publish:live/stream`
 
-```bash
-docker compose up -d mediamtx
-docker compose ps
-```
-
-Endpoints:
-
-- HLS output: `http://localhost:8888/live/stream/index.m3u8`
-- SRT ingest: `srt://localhost:8890`
-
-## Push a local test stream with ffmpeg
-
-```bash
-ffmpeg -re -f lavfi -i "testsrc=size=1280x720:rate=30" \
-  -f lavfi -i "sine=frequency=1000:sample_rate=48000" \
-  -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p -g 60 \
-  -c:a aac -b:a 128k -f mpegts \
-  "srt://localhost:8890?streamid=publish:live/stream"
-```
-
-Then open:
-
-- `http://localhost:8888/live/stream/index.m3u8` (playlist reachable)
-- `http://localhost:3000` (video visible in player)
-
-## WSL and Windows note
-
-If ffmpeg runs in WSL and web runs on Windows, use the same reachable host for both sides:
-
-- if `localhost:8888` works in Windows browser, keep `NEXT_PUBLIC_STREAM_URL=http://localhost:8888/live/stream/index.m3u8`
-- if not, use WSL IP (from `hostname -I` in WSL), for example:
-  `NEXT_PUBLIC_STREAM_URL=http://172.x.x.x:8888/live/stream/index.m3u8`
-
-Restart web dev server after changing `NEXT_PUBLIC_STREAM_URL`.
+Then open `http://<server-ip>:3000` and switch `Quad/Focus`, `Mat 1..4` in UI.
 
 ## Environment variables
-
-Copy `.env.example` to `.env` and adjust:
 
 ```bash
 cp .env.example .env
@@ -97,11 +61,21 @@ cp .env.example .env
 
 | Variable | Default | Description |
 |---|---|---|
-| `API_PORT` | `3001` | NestJS API port |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:3001` | API base URL for web |
-| `NEXT_PUBLIC_STREAM_URL` | `http://localhost:8888/live/stream/index.m3u8` | HLS URL for web player |
-| `MEDIAMTX_SRT_PORT` | `8890` | SRT ingest port |
+| `WEB_PORT` | `3000` | Port for Next.js web container |
+| `API_PORT` | `3001` | Port for NestJS API container |
 | `MEDIAMTX_HLS_PORT` | `8888` | HLS output port |
+| `MEDIAMTX_SRT_PORT` | `8890` | SRT ingest UDP port |
+| `NEXT_PUBLIC_API_URL` | `/api` | Browser API base path (proxied by web) |
+| `NEXT_PUBLIC_STREAM_URL` | `/hls/live/stream/index.m3u8` | Browser HLS URL (proxied by web) |
+
+## Legacy local dev (without Docker for web/api)
+
+```bash
+corepack pnpm install
+corepack pnpm --filter api dev
+corepack pnpm --filter web dev
+docker compose up -d mediamtx
+```
 
 ## Implemented now
 
@@ -109,7 +83,7 @@ cp .env.example .env
 - Next.js player UI with quad and focus mode placeholders
 - NestJS API with `/health` and `/events/current`
 - MediaMTX local config for `SRT -> HLS`
-- Docker Compose local service for MediaMTX
+- Docker Compose full stack (`web + api + mediamtx`)
 
 ## Intentionally deferred
 

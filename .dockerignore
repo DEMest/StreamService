@@ -1,0 +1,12 @@
+.git
+.gitignore
+.next
+node_modules
+apps/*/node_modules
+apps/*/.next
+apps/*/dist
+docs
+*.log
+pnpm-debug.log*
+.claude
+AGENTS.md

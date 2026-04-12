@@ -14,7 +14,7 @@ export class EventsService {
     return {
       id: "evt-001",
       title: "Regional Wrestling Tournament 2026",
-      streamUrl: process.env.NEXT_PUBLIC_STREAM_URL ?? "/live/stream/index.m3u8",
+      streamUrl: process.env.STREAM_URL ?? "/hls/live/stream/index.m3u8",
       mats: ["Mat 1", "Mat 2", "Mat 3", "Mat 4"],
       layoutMode: "quad",
     };
