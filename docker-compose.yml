@@ -35,6 +35,8 @@ services:
       DATABASE_URL: postgresql://stream:${POSTGRES_PASSWORD:-streampass}@postgres:5432/streamservice
       JWT_SECRET: ${JWT_SECRET:-changeme-in-production}
       MEDIAMTX_API_URL: http://mediamtx:9997
+      MEDIAMTX_API_USER: ${MEDIAMTX_API_USER:-api}
+      MEDIAMTX_API_PASS: ${MEDIAMTX_API_PASS:-mediamtxpass}
       SUPERADMIN_LOGIN: ${SUPERADMIN_LOGIN:-admin}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-adminpass}
     depends_on:

@@ -5,12 +5,18 @@ import axios from 'axios';
 export class MediamtxService {
   private readonly logger = new Logger(MediamtxService.name);
   private readonly base = process.env.MEDIAMTX_API_URL ?? 'http://localhost:9997';
+  private readonly auth = {
+    username: process.env.MEDIAMTX_API_USER ?? 'api',
+    password: process.env.MEDIAMTX_API_PASS ?? 'mediamtxpass',
+  };
 
   async addPath(orgSlug: string, passphrase: string): Promise<void> {
     try {
-      await axios.post(`${this.base}/v3/config/paths/add/live/${orgSlug}`, {
-        srtPublishPassphrase: passphrase,
-      });
+      await axios.post(
+        `${this.base}/v3/config/paths/add/live/${orgSlug}`,
+        { srtPublishPassphrase: passphrase },
+        { auth: this.auth },
+      );
     } catch (err: any) {
       this.logger.warn(`MediaMTX addPath failed for ${orgSlug}: ${err.message}`);
     }
@@ -18,9 +24,11 @@ export class MediamtxService {
 
   async patchPath(orgSlug: string, passphrase: string): Promise<void> {
     try {
-      await axios.patch(`${this.base}/v3/config/paths/patch/live/${orgSlug}`, {
-        srtPublishPassphrase: passphrase,
-      });
+      await axios.post(
+        `${this.base}/v3/config/paths/patch/live/${orgSlug}`,
+        { srtPublishPassphrase: passphrase },
+        { auth: this.auth },
+      );
     } catch (err: any) {
       this.logger.warn(`MediaMTX patchPath failed for ${orgSlug}: ${err.message}`);
     }
@@ -28,7 +36,10 @@ export class MediamtxService {
 
   async deletePath(orgSlug: string): Promise<void> {
     try {
-      await axios.delete(`${this.base}/v3/config/paths/delete/live/${orgSlug}`);
+      await axios.delete(
+        `${this.base}/v3/config/paths/delete/live/${orgSlug}`,
+        { auth: this.auth },
+      );
     } catch (err: any) {
       this.logger.warn(`MediaMTX deletePath failed for ${orgSlug}: ${err.message}`);
     }

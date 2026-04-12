@@ -1,2 +1,13 @@
 api: true
 apiAddress: :9997
+
+authInternalUsers:
+  - user: any
+    pass:
+    permissions:
+      - action: publish
+      - action: read
+  - user: api
+    pass: mediamtxpass
+    permissions:
+      - action: api
