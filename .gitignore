@@ -37,9 +37,5 @@ pnpm-debug.log*
 
 # lock files (keep pnpm-lock.yaml)
 package-lock.json
-<<<<<<< HEAD
 yarn.lock
 AGENTS.md
-=======
-yarn.lock
->>>>>>> 920fcc6 (fix: stabilize local MediaMTX pipeline and update run instructions)
