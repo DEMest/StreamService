@@ -19,6 +19,7 @@ model Organization {
   id                 String   @id @default(cuid())
   slug               String   @unique
   name               String
+  description        String?
   passwordHash       String
   ingestKey          String   @unique
   ingestKeyCreatedAt DateTime @default(now())
@@ -33,6 +34,7 @@ model Event {
   org         Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
   title       String
   description String?
+  previewKey  String?       @unique
   status      String        @default("scheduled")
   isPublic    Boolean       @default(true)
   startedAt   DateTime?
