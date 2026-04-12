@@ -16,18 +16,24 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.auth.login(body.login, body.password);
-    res.cookie('access_token', result.token, {
+    const cookieOptions = {
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: 'lax' as const,
       maxAge: 8 * 60 * 60 * 1000,
-    });
-    return { role: result.role, login: result.login, orgId: (result as any).orgId ?? null };
+      secure: process.env.NODE_ENV === 'production',
+    };
+    res.cookie('access_token', result.token, cookieOptions);
+    return { role: result.role, login: result.login, orgId: result.orgId ?? null };
   }
 
   @Post('logout')
   @HttpCode(200)
   logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie('access_token');
+    res.clearCookie('access_token', {
+      httpOnly: true,
+      sameSite: 'lax' as const,
+      secure: process.env.NODE_ENV === 'production',
+    });
     return { ok: true };
   }
 
