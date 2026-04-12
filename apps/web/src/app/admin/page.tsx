@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { PublicLayout } from '@/components/PublicLayout';
 
 interface Org { id: string; slug: string; name: string; isActive: boolean; createdAt: string }
 
@@ -32,7 +33,8 @@ export default function AdminPage() {
   });
 
   return (
-    <div style={{ background: '#0a0a0a', minHeight: '100vh', color: '#fff', padding: '2rem', maxWidth: '900px', margin: '0 auto' }}>
+    <PublicLayout>
+    <div style={{ padding: '2rem', maxWidth: '900px', margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <h1 style={{ fontSize: '1.25rem', margin: 0 }}>Управление организациями</h1>
         <button onClick={() => setShowCreate((v) => !v)}
@@ -88,5 +90,6 @@ export default function AdminPage() {
         ))}
       </div>
     </div>
+    </PublicLayout>
   );
 }

@@ -2,6 +2,7 @@
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { PublicLayout } from '@/components/PublicLayout';
 
 interface CatalogOrg {
   slug: string;
@@ -16,25 +17,45 @@ export default function CatalogPage() {
     refetchInterval: 30_000,
   });
 
+  const live = data?.filter((o) => o.events.length > 0) ?? [];
+  const offline = data?.filter((o) => o.events.length === 0) ?? [];
+
   return (
-    <div style={{ background: '#0a0a0a', minHeight: '100vh', padding: '2rem', color: '#fff' }}>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '2rem' }}>Прямые трансляции</h1>
-      {isLoading && <p style={{ color: '#888' }}>Загрузка...</p>}
-      {data?.length === 0 && <p style={{ color: '#888' }}>Нет активных трансляций</p>}
-      <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
-        {data?.map((org) => (
-          <Link key={org.slug} href={`/watch/${org.slug}`} style={{ textDecoration: 'none' }}>
-            <div style={{ background: '#1a1a1a', borderRadius: '8px', padding: '1.25rem', cursor: 'pointer', border: '1px solid #2d2d2d' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#e53', display: 'inline-block' }} />
-                <span style={{ color: '#e53', fontSize: '0.75rem', fontWeight: 600 }}>LIVE</span>
-              </div>
-              <p style={{ color: '#fff', fontWeight: 600, margin: '0 0 0.25rem' }}>{org.name}</p>
-              <p style={{ color: '#888', fontSize: '0.875rem', margin: 0 }}>{org.events[0]?.title}</p>
+    <PublicLayout>
+      <div style={{ padding: '2rem' }}>
+        {isLoading && <p style={{ color: '#888' }}>Загрузка...</p>}
+
+        {live.length > 0 && (
+          <>
+            <h2 style={{ fontSize: '1rem', color: '#e53', marginBottom: '1rem' }}>● Сейчас в эфире</h2>
+            <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', marginBottom: '2rem' }}>
+              {live.map((org) => (
+                <Link key={org.slug} href={`/watch/${org.slug}`} style={{ textDecoration: 'none' }}>
+                  <div style={{ background: '#1a1a1a', borderRadius: '8px', padding: '1.25rem', border: '1px solid #e5330033', cursor: 'pointer' }}>
+                    <p style={{ color: '#fff', fontWeight: 600, margin: '0 0 0.25rem' }}>{org.name}</p>
+                    <p style={{ color: '#888', fontSize: '0.875rem', margin: 0 }}>{org.events[0]?.title}</p>
+                  </div>
+                </Link>
+              ))}
             </div>
-          </Link>
-        ))}
+          </>
+        )}
+
+        {offline.length > 0 && (
+          <>
+            <h2 style={{ fontSize: '1rem', color: '#666', marginBottom: '1rem' }}>Все организации</h2>
+            <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+              {offline.map((org) => (
+                <Link key={org.slug} href={`/watch/${org.slug}`} style={{ textDecoration: 'none' }}>
+                  <div style={{ background: '#141414', borderRadius: '8px', padding: '1.25rem', border: '1px solid #2d2d2d', cursor: 'pointer' }}>
+                    <p style={{ color: '#ccc', fontWeight: 600, margin: 0 }}>{org.name}</p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </>
+        )}
       </div>
-    </div>
+    </PublicLayout>
   );
 }
