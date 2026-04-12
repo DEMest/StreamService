@@ -39,9 +39,10 @@ export class OrgService {
   }
 
   async createEvent(orgId: string, data: { title: string; description?: string; isPublic?: boolean }) {
+    const previewKey = data.isPublic === false ? randomBytes(32).toString('hex') : undefined;
     return this.prisma.event.create({
-      data: { orgId, ...data },
-      select: { id: true, title: true, description: true, status: true, isPublic: true, createdAt: true },
+      data: { orgId, previewKey, ...data },
+      select: { id: true, title: true, description: true, status: true, isPublic: true, previewKey: true, createdAt: true },
     });
   }
 
@@ -75,7 +76,14 @@ export class OrgService {
     return this.prisma.event.findMany({
       where: { orgId },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, title: true, status: true, isPublic: true, startedAt: true, endedAt: true, createdAt: true },
+      select: { id: true, title: true, status: true, isPublic: true, previewKey: true, startedAt: true, endedAt: true, createdAt: true },
     });
+  }
+
+  async deleteEvent(orgId: string, eventId: string) {
+    const event = await this.prisma.event.findFirst({ where: { id: eventId, orgId } });
+    if (!event) throw new NotFoundException('Event not found');
+    await this.prisma.event.delete({ where: { id: eventId } });
+    return { ok: true };
   }
 }

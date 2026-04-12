@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { OrgService } from './org.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -42,5 +42,10 @@ export class OrgController {
   @Get('events')
   listEvents(@CurrentUser() user: JwtPayload) {
     return this.org.listEvents(user.orgId!);
+  }
+
+  @Delete('events/:id')
+  deleteEvent(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.org.deleteEvent(user.orgId!, id);
   }
 }
