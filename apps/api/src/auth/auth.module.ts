@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 @Module({
   imports: [
     JwtModule.registerAsync({
+      global: true,
       useFactory: () => ({
         secret: process.env.JWT_SECRET ?? 'dev-secret',
         signOptions: { expiresIn: '8h' },
