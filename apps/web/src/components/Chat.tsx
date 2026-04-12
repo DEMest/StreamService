@@ -21,9 +21,14 @@ export function Chat({ eventId }: Props) {
   useEffect(() => {
     const socket = getSocket();
     socket.emit('join', { eventId });
-    socket.on('history', (msgs: Message[]) => setMessages(msgs));
-    socket.on('message', (msg: Message) => setMessages((prev) => [...prev, msg]));
-    return () => { socket.off('history'); socket.off('message'); };
+    const onHistory = (msgs: Message[]) => setMessages(msgs);
+    const onMessage = (msg: Message) => setMessages((prev) => [...prev, msg]);
+    socket.on('history', onHistory);
+    socket.on('message', onMessage);
+    return () => {
+      socket.off('history', onHistory);
+      socket.off('message', onMessage);
+    };
   }, [eventId]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
