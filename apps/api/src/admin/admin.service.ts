@@ -52,9 +52,12 @@ export class AdminService {
   }
 
   async deleteOrg(slug: string) {
-    const org = await this.prisma.organization.findUnique({ where: { slug } });
-    if (!org) throw new NotFoundException(`Org '${slug}' not found`);
-    await this.prisma.organization.delete({ where: { slug } });
+    try {
+      await this.prisma.organization.delete({ where: { slug } });
+    } catch (e: any) {
+      if (e.code === 'P2025') throw new NotFoundException(`Org '${slug}' not found`);
+      throw e;
+    }
     await this.mediamtx.deletePath(slug);
     return { ok: true };
   }

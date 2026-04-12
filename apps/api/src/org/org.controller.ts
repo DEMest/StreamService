@@ -31,7 +31,11 @@ export class OrgController {
   }
 
   @Patch('events/:id')
-  updateEvent(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() body: any) {
+  updateEvent(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() body: { title?: string; description?: string; isPublic?: boolean; status?: string },
+  ) {
     return this.org.updateEvent(user.orgId!, id, body);
   }
 

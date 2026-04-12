@@ -40,7 +40,8 @@ describe('AdminService', () => {
   });
 
   it('throws NotFoundException when deleting non-existent org', async () => {
-    mockPrisma.organization.findUnique.mockResolvedValue(null);
+    const p2025 = Object.assign(new Error('Not found'), { code: 'P2025' });
+    mockPrisma.organization.delete.mockRejectedValue(p2025);
     await expect(service.deleteOrg('ghost')).rejects.toBeInstanceOf(NotFoundException);
   });
 });

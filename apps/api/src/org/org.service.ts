@@ -50,15 +50,15 @@ export class OrgService {
     eventId: string,
     data: { title?: string; description?: string; isPublic?: boolean; status?: string },
   ) {
+    const event = await this.prisma.event.findFirst({ where: { id: eventId, orgId } });
+    if (!event) throw new NotFoundException('Event not found');
+
     if (data.status === 'live') {
       const liveEvent = await this.prisma.event.findFirst({
         where: { orgId, status: 'live', id: { not: eventId } },
       });
       if (liveEvent) throw new ConflictException('Another event is already live');
     }
-
-    const event = await this.prisma.event.findFirst({ where: { id: eventId, orgId } });
-    if (!event) throw new NotFoundException('Event not found');
 
     const updateData: any = { ...data };
     if (data.status === 'live') updateData.startedAt = new Date();
