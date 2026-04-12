@@ -1,6 +1,6 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
-import { use, useState } from 'react';
+import { useState } from 'react';
 import { api } from '@/lib/api';
 import MatPlayer from '@/components/MatPlayer';
 import ViewSwitcher from '@/components/ViewSwitcher';
@@ -18,8 +18,8 @@ interface OrgWatch {
 
 interface StreamInfo { hlsUrl: string }
 
-export default function WatchPage({ params }: { params: Promise<{ orgSlug: string }> }) {
-  const { orgSlug } = use(params);
+export default function WatchPage({ params }: { params: { orgSlug: string } }) {
+  const { orgSlug } = params;
   const [viewMode, setViewMode] = useState<ViewMode>('quad');
   const [activeMat, setActiveMat] = useState<MatId>(1);
 
