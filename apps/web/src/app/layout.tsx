@@ -1,19 +1,15 @@
-import type { Metadata } from "next";
-import "./globals.css";
+'use client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useState } from 'react';
+import './globals.css';
 
-export const metadata: Metadata = {
-  title: "StreamService — Multiview",
-  description: "Wrestling tournament multiview streaming",
-};
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const [client] = useState(() => new QueryClient());
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="ru">
+      <body>
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      </body>
     </html>
   );
 }
