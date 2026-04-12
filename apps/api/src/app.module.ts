@@ -6,9 +6,10 @@ import { MediamtxModule } from './mediamtx/mediamtx.module';
 import { AdminModule } from './admin/admin.module';
 import { OrgModule } from './org/org.module';
 import { PublicModule } from './public/public.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, MediamtxModule, AdminModule, OrgModule, PublicModule],
+  imports: [PrismaModule, AuthModule, MediamtxModule, AdminModule, OrgModule, PublicModule, ChatModule],
   controllers: [HealthController],
 })
 export class AppModule {}
