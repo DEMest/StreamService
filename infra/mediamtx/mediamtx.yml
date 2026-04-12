@@ -1,7 +1,4 @@
-logLevel: info
-logDestinations: [stdout]
-
-api: yes
+api: true
 apiAddress: :9997
 
 srt:
@@ -9,6 +6,3 @@ srt:
 
 hls:
   address: :8888
-  segmentCount: 7
-  segmentDuration: 1s
-  partDuration: 200ms
