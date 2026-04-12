@@ -17,7 +17,7 @@
     "@nestjs/common": "^10.0.0",
     "@nestjs/core": "^10.0.0",
     "@nestjs/platform-express": "^10.0.0",
-    "@prisma/client": "^7.7.0",
+    "@prisma/client": "^6.19.3",
     "bcrypt": "^6.0.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.1"
@@ -28,8 +28,7 @@
     "@types/bcrypt": "^6.0.0",
     "@types/express": "^5.0.0",
     "@types/node": "^20.0.0",
-    "dotenv": "^17.4.1",
-    "prisma": "^7.7.0",
+    "prisma": "^6.19.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.0.0"
   }
