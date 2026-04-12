@@ -15,10 +15,11 @@ services:
 
   mediamtx:
     image: bluenviron/mediamtx:latest
+    container_name: streamservice-mediamtx
     ports:
       - "${MEDIAMTX_HLS_PORT:-8888}:8888"
       - "${MEDIAMTX_SRT_PORT:-8890}:8890/udp"
-      - "9997:9997"
+      - "127.0.0.1:9997:9997"
     volumes:
       - ./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro
     restart: unless-stopped
@@ -51,13 +52,13 @@ services:
       args:
         HLS_UPSTREAM: http://mediamtx:8888
         API_UPSTREAM: http://api:3001
+        NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL:-http://localhost:3001}
     container_name: streamservice-web
     ports:
       - "${WEB_PORT:-3000}:3000"
     environment:
       NEXT_PUBLIC_API_URL: /api
       NEXT_PUBLIC_STREAM_BASE_URL: /hls/live
-      NEXT_PUBLIC_SOCKET_URL: http://localhost:3001
     depends_on:
       - api
       - mediamtx
