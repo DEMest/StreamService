@@ -1,33 +1,19 @@
-###############################################
-# MediaMTX - local dev configuration
-# Stream flow: vMix -> SRT -> MediaMTX -> HLS
-###############################################
-
-# Log level: debug | info | warn | error
 logLevel: info
 logDestinations: [stdout]
 
-# Control API disabled for MVP local setup
-api: no
+api: yes
+apiAddress: :9997
 
-# HLS output - consumed by the browser via HLS.js
-hls: yes
-hlsAddress: :8888
-hlsAlwaysRemux: yes
-hlsSegmentCount: 7
-hlsSegmentDuration: 1s
-hlsPartDuration: 200ms
+srt:
+  address: :8890
 
-# SRT input - vMix pushes here
-srt: yes
-srtAddress: :8890
+hls:
+  address: :8888
+  alwaysRemux: yes
+  segmentCount: 7
+  segmentDuration: 1s
+  partDuration: 200ms
 
-# Disable unused protocols
-rtmp: no
 rtsp: no
+rtmp: no
 webrtc: no
-
-# Path configuration
-paths:
-  live/stream:
-    source: publisher
