@@ -44,4 +44,4 @@ ENV STREAM_URL=/hls/live/stream/index.m3u8
 
 EXPOSE 3001
 
-CMD ["node", "apps/api/dist/main.js"]
+CMD ["sh", "-c", "pnpm exec prisma db push --accept-data-loss && node apps/api/dist/main.js"]

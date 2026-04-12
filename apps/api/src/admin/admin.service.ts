@@ -1,15 +1,42 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
-export class AdminService {
+export class AdminService implements OnModuleInit {
   constructor(
     private prisma: PrismaService,
     private mediamtx: MediamtxService,
   ) {}
+
+  async onModuleInit() {
+    const login = process.env.SUPERADMIN_LOGIN || 'admin';
+    const password = process.env.SUPERADMIN_PASSWORD || 'adminpass';
+
+    try {
+      const existingAdmin = await this.prisma.user.findUnique({
+        where: { login },
+      });
+
+      if (!existingAdmin) {
+        const passwordHash = await bcrypt.hash(password, 10);
+        await this.prisma.user.create({
+          data: {
+            login,
+            passwordHash,
+            role: 'superadmin',
+          },
+        });
+        console.log(`✅ Суперпользователь '${login}' успешно создан!`);
+      } else {
+        console.log(`Суперпользователь '${login}' уже существует.`);
+      }
+    } catch (error) {
+      console.error('❌ Ошибка при создании суперпользователя', error);
+    }
+  }
 
   private generateIngestKey(): string {
     return randomBytes(18).toString('base64url');
