@@ -1,69 +1,27 @@
-"use client";
+'use client';
 
-export type ViewMode = "quad" | "focus";
-export type MatId = 1 | 2 | 3 | 4;
+export type ViewMode = 'multicam' | 'cam1' | 'cam2' | 'cam3' | 'cam4';
 
-interface ViewSwitcherProps {
+const MODES: { key: ViewMode; label: string }[] = [
+  { key: 'multicam', label: 'Multicam' },
+  { key: 'cam1', label: 'Camera 1' },
+  { key: 'cam2', label: 'Camera 2' },
+  { key: 'cam3', label: 'Camera 3' },
+  { key: 'cam4', label: 'Camera 4' },
+];
+
+interface Props {
   mode: ViewMode;
-  activeMat: MatId;
-  onModeChange: (mode: ViewMode) => void;
-  onMatSelect: (mat: MatId) => void;
+  onChange: (mode: ViewMode) => void;
 }
 
-const MATS: MatId[] = [1, 2, 3, 4];
-
-export default function ViewSwitcher({
-  mode,
-  activeMat,
-  onModeChange,
-  onMatSelect,
-}: ViewSwitcherProps) {
+export default function ViewSwitcher({ mode, onChange }: Props) {
   return (
-    <div style={{ display: "flex", gap: "8px", padding: "12px", flexWrap: "wrap" }}>
-      <button
-        onClick={() => onModeChange("quad")}
-        aria-pressed={mode === "quad"}
-        style={{
-          padding: "6px 14px",
-          background: mode === "quad" ? "#e53e3e" : "#2d2d2d",
-          color: "#fff",
-          border: "none",
-          borderRadius: "4px",
-          cursor: "pointer",
-        }}
-      >
-        Quad
-      </button>
-      <button
-        onClick={() => onModeChange("focus")}
-        aria-pressed={mode === "focus"}
-        style={{
-          padding: "6px 14px",
-          background: mode === "focus" ? "#e53e3e" : "#2d2d2d",
-          color: "#fff",
-          border: "none",
-          borderRadius: "4px",
-          cursor: "pointer",
-        }}
-      >
-        Focus
-      </button>
-      <span style={{ borderLeft: "1px solid #444", margin: "0 4px" }} />
-      {MATS.map((mat) => (
-        <button
-          key={mat}
-          onClick={() => onMatSelect(mat)}
-          aria-pressed={activeMat === mat}
-          style={{
-            padding: "6px 14px",
-            background: activeMat === mat ? "#2b6cb0" : "#2d2d2d",
-            color: "#fff",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-          }}
-        >
-          Mat {mat}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {MODES.map((m) => (
+        <button key={m.key} onClick={() => onChange(m.key)}
+          style={{ padding: '0.5rem 1rem', background: mode === m.key ? '#e53' : '#2d2d2d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', textAlign: 'left' }}>
+          {m.label}
         </button>
       ))}
     </div>
