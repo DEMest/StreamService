@@ -55,22 +55,70 @@ export default function DashboardPage() {
         <h1 style={{ fontSize: '1.25rem', marginBottom: '2rem' }}>{profile?.name} — Панель управления</h1>
 
         <section style={{ background: '#1a1a1a', borderRadius: '8px', padding: '1.5rem', marginBottom: '1.5rem' }}>
-          <h2 style={{ fontSize: '1rem', marginBottom: '1rem', color: '#ccc' }}>Параметры трансляции</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontFamily: 'monospace', fontSize: '0.875rem' }}>
-            <div><span style={{ color: '#888' }}>Порт (SRT): </span><span>8890</span></div>
-            <div><span style={{ color: '#888' }}>Stream ID: </span><span>{streamId}</span></div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ color: '#888' }}>Passphrase: </span>
-              <span>{keyVisible ? profile?.ingestKey : '••••••••••••••••••'}</span>
-              <button onClick={() => setKeyVisible((v) => !v)}
-                style={{ background: '#2d2d2d', border: 'none', color: '#ccc', padding: '0.25rem 0.75rem', borderRadius: '4px', cursor: 'pointer' }}>
-                {keyVisible ? 'Скрыть' : 'Показать'}
-              </button>
-              <button onClick={() => { if (confirm('Сгенерировать новый ключ? Текущий стрим будет прерван.')) rotateMutation.mutate(); }}
-                style={{ background: '#7c3aed', border: 'none', color: '#fff', padding: '0.25rem 0.75rem', borderRadius: '4px', cursor: 'pointer' }}>
-                Сменить ключ
+          <h2 style={{ fontSize: '1rem', marginBottom: '1.25rem', color: '#ccc' }}>Параметры трансляции</h2>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+
+            <div style={{ display: 'flex', alignItems: 'center', padding: '0.625rem 0', borderBottom: '1px solid #1f1f1f', gap: '0.75rem' }}>
+              <span style={{ width: '120px', flexShrink: 0, color: '#666', fontSize: '0.8rem' }}>Протокол</span>
+              <span style={{ flex: 1, fontFamily: 'monospace', fontSize: '0.875rem' }}>SRT</span>
+            </div>
+
+            {(() => {
+              const serverIp = process.env.NEXT_PUBLIC_SERVER_IP ?? '';
+              const serverAddr = serverIp ? `${serverIp}:8890` : ':8890';
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', padding: '0.625rem 0', borderBottom: '1px solid #1f1f1f', gap: '0.75rem' }}>
+                  <span style={{ width: '120px', flexShrink: 0, color: '#666', fontSize: '0.8rem' }}>Сервер</span>
+                  <span style={{ flex: 1, fontFamily: 'monospace', fontSize: '0.875rem' }}>
+                    {serverIp ? serverAddr : <span style={{ color: '#555' }}>Задайте NEXT_PUBLIC_SERVER_IP</span>}
+                  </span>
+                  {serverIp && (
+                    <button
+                      onClick={() => navigator.clipboard.writeText(serverAddr).catch(() => alert(serverAddr))}
+                      style={{ flexShrink: 0, background: '#2d2d2d', border: 'none', color: '#ccc', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                      Копировать
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+
+            <div style={{ display: 'flex', alignItems: 'center', padding: '0.625rem 0', borderBottom: '1px solid #1f1f1f', gap: '0.75rem' }}>
+              <span style={{ width: '120px', flexShrink: 0, color: '#666', fontSize: '0.8rem' }}>Stream ID</span>
+              <span style={{ flex: 1, fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all' }}>{streamId}</span>
+              <button
+                onClick={() => navigator.clipboard.writeText(streamId).catch(() => alert(streamId))}
+                style={{ flexShrink: 0, background: '#2d2d2d', border: 'none', color: '#ccc', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                Копировать
               </button>
             </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', padding: '0.625rem 0', gap: '0.75rem' }}>
+              <span style={{ width: '120px', flexShrink: 0, color: '#666', fontSize: '0.8rem' }}>Passphrase</span>
+              <span style={{ flex: 1, fontFamily: 'monospace', fontSize: '0.875rem' }}>
+                {keyVisible ? profile?.ingestKey : '••••••••••••••••••'}
+              </span>
+              <div style={{ flexShrink: 0, display: 'flex', gap: '0.4rem' }}>
+                {keyVisible && (
+                  <button
+                    onClick={() => navigator.clipboard.writeText(profile?.ingestKey ?? '').catch(() => alert(profile?.ingestKey))}
+                    style={{ background: '#2d2d2d', border: 'none', color: '#ccc', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                    Копировать
+                  </button>
+                )}
+                <button
+                  onClick={() => setKeyVisible((v) => !v)}
+                  style={{ background: '#2d2d2d', border: 'none', color: '#ccc', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>
+                  {keyVisible ? 'Скрыть' : 'Показать'}
+                </button>
+                <button
+                  onClick={() => { if (confirm('Сгенерировать новый ключ? Текущий стрим будет прерван.')) rotateMutation.mutate(); }}
+                  style={{ background: '#7c3aed', border: 'none', color: '#fff', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>
+                  Сменить
+                </button>
+              </div>
+            </div>
+
           </div>
         </section>
 

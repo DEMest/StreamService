@@ -17,10 +17,14 @@ export function Header() {
       <Link href="/" style={{ color: '#fff', textDecoration: 'none', fontWeight: 700, fontSize: '1.1rem' }}>
         StreamService
       </Link>
-      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
         {me ? (
           <>
-            <span style={{ color: '#888', fontSize: '0.875rem' }}>{me.orgSlug ?? 'admin'}</span>
+            {me.orgSlug && (
+              <Link href={`/watch/${me.orgSlug}`} style={{ color: '#888', textDecoration: 'none', fontSize: '0.875rem' }}>
+                Моя страница
+              </Link>
+            )}
             <Link href="/dashboard" style={{ color: '#fff', textDecoration: 'none', background: '#2563eb', padding: '0.375rem 0.875rem', borderRadius: '4px', fontSize: '0.875rem' }}>
               Студия
             </Link>
