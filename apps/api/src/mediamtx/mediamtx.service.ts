@@ -18,14 +18,19 @@ export class MediamtxService {
         { auth: this.auth },
       );
     } catch (err: any) {
-      this.logger.warn(`MediaMTX addPath failed for ${orgSlug}: ${err.message}`);
+      // Path already exists — update it instead
+      if (err.response?.status === 400) {
+        await this.patchPath(orgSlug, passphrase);
+      } else {
+        this.logger.warn(`MediaMTX addPath failed for ${orgSlug}: ${err.message}`);
+      }
     }
   }
 
   async patchPath(orgSlug: string, passphrase: string): Promise<void> {
     try {
       await axios.post(
-        `${this.base}/v3/config/paths/patch/live/${orgSlug}`,
+        `${this.base}/v3/config/paths/replace/live/${orgSlug}`,
         { srtPublishPassphrase: passphrase },
         { auth: this.auth },
       );

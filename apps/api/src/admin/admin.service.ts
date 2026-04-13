@@ -36,6 +36,19 @@ export class AdminService implements OnModuleInit {
     } catch (error) {
       console.error('❌ Ошибка при создании суперпользователя', error);
     }
+
+    // Восстановить пути в MediaMTX для всех существующих организаций
+    try {
+      const orgs = await this.prisma.organization.findMany({
+        select: { slug: true, ingestKey: true },
+      });
+      await Promise.all(orgs.map((org) => this.mediamtx.addPath(org.slug, org.ingestKey)));
+      if (orgs.length > 0) {
+        console.log(`✅ Восстановлено ${orgs.length} путей в MediaMTX`);
+      }
+    } catch (error) {
+      console.error('❌ Ошибка при восстановлении путей MediaMTX', error);
+    }
   }
 
   private generateIngestKey(): string {

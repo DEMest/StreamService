@@ -2,16 +2,17 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import MatPlayer from '@/components/MatPlayer';
 import ViewSwitcher, { type ViewMode } from '@/components/ViewSwitcher';
 import { Chat } from '@/components/Chat';
 
 const CAM_ORIGIN: Record<string, string> = {
-  cam1: '25% 25%',
-  cam2: '75% 25%',
-  cam3: '25% 75%',
-  cam4: '75% 75%',
+  cam1: '0% 0%',
+  cam2: '100% 0%',
+  cam3: '0% 100%',
+  cam4: '100% 100%',
 };
 
 interface OrgWatch {
@@ -35,6 +36,7 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [mobileViewOpen, setMobileViewOpen] = useState(false);
   const uiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevModeRef = useRef<ViewMode>('multicam');
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -88,12 +90,16 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
     else setViewMode('cam4');
   }
 
+  // Instant cut between cameras; smooth zoom only when entering/leaving multicam
+  const camToCam = viewMode !== 'multicam' && prevModeRef.current !== 'multicam';
+  useEffect(() => { prevModeRef.current = viewMode; }, [viewMode]);
+
   const videoStyle: React.CSSProperties = {
     width: '100%',
     height: '100%',
     transform: viewMode === 'multicam' ? 'scale(1)' : 'scale(2)',
     transformOrigin: viewMode === 'multicam' ? '50% 50%' : CAM_ORIGIN[viewMode],
-    transition: 'transform 0.3s ease, transform-origin 0.3s ease',
+    transition: camToCam ? 'none' : 'transform 0.3s ease, transform-origin 0.3s ease',
   };
 
   if (isMobile) {
@@ -153,9 +159,10 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#0a0a0a', color: '#fff', flexDirection: 'column' }}>
       <div style={{ padding: '0.75rem 1rem', background: '#111', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <Link href="/" style={{ color: '#888', textDecoration: 'none', fontSize: '0.875rem' }}>← Главная</Link>
           <span style={{ fontWeight: 700 }}>{org?.name}</span>
-          {event && <span style={{ color: '#888', marginLeft: '1rem', fontSize: '0.875rem' }}>{event.title}</span>}
+          {event && <span style={{ color: '#888', fontSize: '0.875rem' }}>{event.title}</span>}
         </div>
         {event && <span style={{ color: '#e53', fontSize: '0.75rem', fontWeight: 600 }}>● LIVE</span>}
       </div>
