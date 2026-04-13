@@ -16,7 +16,7 @@ import { ChatService } from './chat.service';
 export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
   private readonly logger = new Logger(ChatGateway.name);
-  private readonly socketRoom = new Map<string, string>(); // socketId → orgSlug
+  private readonly socketRoom = new Map<string, string>(); // socketId → eventId
 
   constructor(private chat: ChatService) {}
 
@@ -27,10 +27,10 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   handleConnection() {}
 
   handleDisconnect(client: Socket) {
-    const orgSlug = this.socketRoom.get(client.id);
-    if (!orgSlug) return;
+    const eventId = this.socketRoom.get(client.id);
+    if (!eventId) return;
     this.socketRoom.delete(client.id);
-    const room = `org:${orgSlug}`;
+    const room = `event:${eventId}`;
     const count = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
     this.server.to(room).emit('viewers', count);
   }
@@ -40,12 +40,12 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { orgSlug: string },
   ) {
-    if (!data?.orgSlug) return;
-    client.join(`org:${data.orgSlug}`);
-    this.socketRoom.set(client.id, data.orgSlug);
-    const messages = await this.chat.getRecentMessages(data.orgSlug);
+    if (!data?.eventId) return;
+    client.join(`event:${data.eventId}`);
+    this.socketRoom.set(client.id, data.eventId);
+    const messages = await this.chat.getRecentMessages(data.eventId);
     client.emit('history', messages);
-    const room = `org:${data.orgSlug}`;
+    const room = `event:${data.eventId}`;
     const count = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
     this.server.to(room).emit('viewers', count);
   }

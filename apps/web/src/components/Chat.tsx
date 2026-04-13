@@ -6,11 +6,11 @@ import { NicknameModal } from './NicknameModal';
 interface Message { id: string; nickname: string; content: string; createdAt: string }
 
 interface Props {
-  orgSlug: string;
+  eventId: string;
   onViewersChange?: (count: number) => void;
 }
 
-export function Chat({ orgSlug, onViewersChange }: Props) {
+export function Chat({ eventId, onViewersChange }: Props) {
   const [nickname, setNickname] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');

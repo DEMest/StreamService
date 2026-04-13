@@ -6,17 +6,10 @@ import type { ViewMode } from './ViewSwitcher';
 interface Props {
   streamUrl: string;
   viewMode: ViewMode;
-  volume?: number;
-  isArchive?: boolean;
-  onMutedFallback?: () => void;
-  onTimeUpdate?: (current: number, duration: number, isLive: boolean) => void;
 }
 
 export interface MatPlayerHandle {
   enterIOSFullscreen: () => void;
-  seekTo: (time: number) => void;
-  seekToLive: () => void;
-  getVideoElement: () => HTMLVideoElement | null;
 }
 
 const QUAD: Record<string, [number, number]> = {
@@ -41,11 +34,10 @@ function drawContain(
   ctx.drawImage(video, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
-const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, volume = 1, isArchive = false, onMutedFallback, onTimeUpdate }, ref) => {
+const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode }, ref) => {
   const videoRef  = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const modeRef   = useRef(viewMode);
-  const hlsRef    = useRef<Hls | null>(null);
   modeRef.current = viewMode;
 
   useImperativeHandle(ref, () => ({
@@ -68,52 +60,17 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
         })
         .catch(() => document.body.removeChild(tmp));
     },
-    seekTo(time: number) {
-      const video = videoRef.current;
-      if (video) video.currentTime = time;
-    },
-    seekToLive() {
-      const video = videoRef.current;
-      if (!video) return;
-      if (hlsRef.current) {
-        video.currentTime = hlsRef.current.liveSyncPosition ?? video.duration;
-      } else {
-        video.currentTime = video.duration;
-      }
-    },
-    getVideoElement() {
-      return videoRef.current;
-    },
   }), []);
 
-  // Media setup — HLS for live, direct src for archive
+  // HLS setup
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    let hls: Hls | null = null;
-
-    if (isArchive) {
-      video.src = streamUrl;
-      video.play().catch(() => {
-        video.muted = true;
-        onMutedFallback?.();
-        video.play().catch(() => {});
-      });
-    } else if (Hls.isSupported()) {
-      hls = new Hls({
-        liveDurationInfinity: true,
-        liveBackBufferLength: Infinity,
-      });
-      hlsRef.current = hls;
+    if (Hls.isSupported()) {
+      const hls = new Hls();
       hls.loadSource(streamUrl);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {
-          video.muted = true;
-          onMutedFallback?.();
-          video.play().catch(() => {});
-        });
-      });
+      return () => hls.destroy();
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = streamUrl;
       video.play().catch(() => {
@@ -191,11 +148,54 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
     return () => cancelAnimationFrame(animId);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keep canvas pixel size synced with CSS size
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ro = new ResizeObserver(() => {
+      canvas.width  = Math.round(canvas.offsetWidth  * (window.devicePixelRatio || 1));
+      canvas.height = Math.round(canvas.offsetHeight * (window.devicePixelRatio || 1));
+    });
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, []);
+
+  // Draw loop — modeRef avoids restarting rAF on every mode change
+  useEffect(() => {
+    const video  = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+    let animId: number;
+
+    const draw = () => {
+      animId = requestAnimationFrame(draw);
+      if (video.readyState < 2 || !video.videoWidth) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const cw = canvas.width;
+      const ch = canvas.height;
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      const mode = modeRef.current;
+
+      if (mode === 'multicam') {
+        drawContain(ctx, video, 0, 0, vw, vh, cw, ch);
+      } else {
+        const [qx, qy] = QUAD[mode];
+        drawContain(ctx, video, qx * vw / 2, qy * vh / 2, vw / 2, vh / 2, cw, ch);
+      }
+    };
+
+    animId = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(animId);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#000' }}>
+      {/* opacity:0 + absolute keeps video in render tree so iOS can decode it for canvas */}
       <video
         ref={videoRef}
-        autoPlay playsInline
+        autoPlay muted playsInline
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, pointerEvents: 'none' }}
       />
       <canvas
