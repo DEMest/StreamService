@@ -64,11 +64,14 @@ export class OrgService {
     const updateData: any = { ...data };
     if (data.status === 'live') updateData.startedAt = new Date();
     if (data.status === 'ended') updateData.endedAt = new Date();
+    if (data.isPublic === false && !event.previewKey) {
+      updateData.previewKey = randomBytes(32).toString('hex');
+    }
 
     return this.prisma.event.update({
       where: { id: eventId },
       data: updateData,
-      select: { id: true, title: true, status: true, isPublic: true, startedAt: true, endedAt: true },
+      select: { id: true, title: true, status: true, isPublic: true, previewKey: true, startedAt: true, endedAt: true },
     });
   }
 

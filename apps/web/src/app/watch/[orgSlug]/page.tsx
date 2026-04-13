@@ -74,6 +74,7 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   const event = org?.events[0];
 
   function handleVideoClick(e: React.MouseEvent<HTMLDivElement>) {
+    setMobileViewOpen(false);
     if (viewMode !== 'multicam') {
       setViewMode('multicam');
       return;

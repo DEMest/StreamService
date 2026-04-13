@@ -46,7 +46,7 @@ export default function DashboardPage() {
 
   function copyPreviewLink(previewKey: string) {
     const url = `${window.location.origin}/watch/${profile?.slug}?key=${previewKey}`;
-    navigator.clipboard.writeText(url);
+    navigator.clipboard.writeText(url).catch(() => alert(`Ссылка: ${url}`));
   }
 
   return (
