@@ -1,41 +1,69 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: streamservice
+      POSTGRES_USER: stream
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-streampass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stream -d streamservice"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   mediamtx:
     image: bluenviron/mediamtx:latest
     container_name: streamservice-mediamtx
-    restart: unless-stopped
     ports:
       - "${MEDIAMTX_HLS_PORT:-8888}:8888"
       - "${MEDIAMTX_SRT_PORT:-8890}:8890/udp"
     volumes:
       - ./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro
+    restart: unless-stopped
 
   api:
-    container_name: streamservice-api
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    restart: unless-stopped
-    environment:
-      API_PORT: 3001
-      STREAM_URL: /hls/live/stream/index.m3u8
+    container_name: streamservice-api
     ports:
       - "${API_PORT:-3001}:3001"
+    environment:
+      API_PORT: ${API_PORT:-3001}
+      DATABASE_URL: postgresql://stream:${POSTGRES_PASSWORD:-streampass}@postgres:5432/streamservice
+      JWT_SECRET: ${JWT_SECRET:-changeme-in-production}
+      MEDIAMTX_API_URL: http://mediamtx:9997
+      MEDIAMTX_API_USER: ${MEDIAMTX_API_USER:-api}
+      MEDIAMTX_API_PASS: ${MEDIAMTX_API_PASS:-mediamtxpass}
+      SUPERADMIN_LOGIN: ${SUPERADMIN_LOGIN:-admin}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-adminpass}
     depends_on:
-      - mediamtx
+      postgres:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+    restart: unless-stopped
 
   web:
-    container_name: streamservice-web
     build:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
-        NEXT_PUBLIC_STREAM_URL: ${NEXT_PUBLIC_STREAM_URL:-/hls/live/stream/index.m3u8}
         HLS_UPSTREAM: http://mediamtx:8888
         API_UPSTREAM: http://api:3001
-    restart: unless-stopped
+        NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL:-http://localhost:3001}
+    container_name: streamservice-web
     ports:
       - "${WEB_PORT:-3000}:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: /api
+      NEXT_PUBLIC_STREAM_BASE_URL: /hls/live
     depends_on:
       - api
       - mediamtx
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
