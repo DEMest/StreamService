@@ -171,6 +171,17 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
               </div>
           }
           {stream && (
+            <div style={volControl} onClick={(e) => e.stopPropagation()}>
+              <input
+                type="range" min={0} max={1} step={0.01}
+                value={volume}
+                onChange={(e) => setVolume(parseFloat(e.target.value))}
+                style={volSlider}
+              />
+              <button style={volBtn}><VolumeIcon /></button>
+            </div>
+          )}
+          {stream && (
             <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }} style={fsBtn}>
               {isFullscreen ? <CompressIcon /> : <ExpandIcon />}
             </button>
