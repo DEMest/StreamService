@@ -6,6 +6,7 @@ import type { ViewMode } from './ViewSwitcher';
 interface Props {
   streamUrl: string;
   viewMode: ViewMode;
+  volume?: number;
 }
 
 export interface MatPlayerHandle {
@@ -34,7 +35,7 @@ function drawContain(
   ctx.drawImage(video, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
-const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode }, ref) => {
+const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, volume = 1 }, ref) => {
   const videoRef  = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const modeRef   = useRef(viewMode);
@@ -66,15 +67,34 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode }, r
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    let hls: Hls | null = null;
     if (Hls.isSupported()) {
-      const hls = new Hls();
+      hls = new Hls();
       hls.loadSource(streamUrl);
       hls.attachMedia(video);
-      return () => hls.destroy();
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch(() => {
+          video.muted = true;
+          video.play().catch(() => {});
+        });
+      });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = streamUrl;
+      video.play().catch(() => {
+        video.muted = true;
+        video.play().catch(() => {});
+      });
     }
+    return () => { hls?.destroy(); };
   }, [streamUrl]);
+
+  // Sync volume prop to video element
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.volume = volume;
+    video.muted = volume === 0;
+  }, [volume]);
 
   // Keep canvas pixel size synced with CSS size
   useEffect(() => {
@@ -123,7 +143,7 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode }, r
       {/* opacity:0 + absolute keeps video in render tree so iOS can decode it for canvas */}
       <video
         ref={videoRef}
-        autoPlay muted playsInline
+        autoPlay playsInline
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, pointerEvents: 'none' }}
       />
       <canvas
