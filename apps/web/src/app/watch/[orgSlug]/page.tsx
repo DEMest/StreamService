@@ -134,11 +134,29 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
     else                           setViewMode('cam4');
   }
 
+  function VolumeIcon() {
+    if (volume === 0) return <SpeakerMuteIcon />;
+    if (volume <= 0.5) return <SpeakerLowIcon />;
+    return <SpeakerHighIcon />;
+  }
+
   const fsBtn: React.CSSProperties = {
     position: 'absolute', right: 12, bottom: 12, zIndex: 20,
     background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff',
     width: 36, height: 36, borderRadius: 4, cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
+  };
+  const volControl: React.CSSProperties = {
+    position: 'absolute', right: 56, bottom: 12, zIndex: 20,
+    display: 'flex', alignItems: 'center', gap: 6,
+  };
+  const volBtn: React.CSSProperties = {
+    background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff',
+    width: 36, height: 36, borderRadius: 4, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  };
+  const volSlider: React.CSSProperties = {
+    width: 80, accentColor: '#e53',
   };
 
   // ── Mobile layout ──────────────────────────────────────────────────────────
@@ -257,6 +275,19 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
                 </div>
               )}
             </>
+          )}
+
+          {/* Volume control */}
+          {stream && (
+            <div style={volControl} onClick={(e) => e.stopPropagation()}>
+              <input
+                type="range" min={0} max={1} step={0.01}
+                value={volume}
+                onChange={(e) => setVolume(parseFloat(e.target.value))}
+                style={volSlider}
+              />
+              <button style={volBtn}><VolumeIcon /></button>
+            </div>
           )}
 
           {/* Fullscreen button */}
