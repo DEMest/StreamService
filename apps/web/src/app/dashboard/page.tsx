@@ -120,7 +120,6 @@ export default function DashboardPage() {
         <section style={{ background: '#1a1a1a', borderRadius: '8px', padding: '1.5rem', marginBottom: '1.5rem' }}>
           <h2 style={{ fontSize: '1rem', marginBottom: '1.25rem', color: '#ccc' }}>Параметры трансляции</h2>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-
             <div style={{ display: 'flex', alignItems: 'center', padding: '0.625rem 0', borderBottom: '1px solid #1f1f1f', gap: '0.75rem' }}>
               <span style={{ width: '120px', flexShrink: 0, color: '#666', fontSize: '0.8rem' }}>Протокол</span>
               <span style={{ flex: 1, fontFamily: 'monospace', fontSize: '0.875rem' }}>SRT</span>
@@ -136,9 +135,8 @@ export default function DashboardPage() {
                     {serverIp ? serverAddr : <span style={{ color: '#555' }}>Задайте NEXT_PUBLIC_SERVER_IP</span>}
                   </span>
                   {serverIp && (
-                    <button
-                      onClick={() => navigator.clipboard.writeText(serverAddr).catch(() => alert(serverAddr))}
-                      style={{ flexShrink: 0, background: '#2d2d2d', border: 'none', color: '#ccc', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                    <button onClick={() => copyText(serverAddr)}
+                      style={{ flexShrink: 0, background: '#2d2d2d', border: 'none', color: '#ccc', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>
                       Копировать
                     </button>
                   )}
@@ -149,9 +147,8 @@ export default function DashboardPage() {
             <div style={{ display: 'flex', alignItems: 'center', padding: '0.625rem 0', borderBottom: '1px solid #1f1f1f', gap: '0.75rem' }}>
               <span style={{ width: '120px', flexShrink: 0, color: '#666', fontSize: '0.8rem' }}>Stream ID</span>
               <span style={{ flex: 1, fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all' }}>{streamId}</span>
-              <button
-                onClick={() => navigator.clipboard.writeText(streamId).catch(() => alert(streamId))}
-                style={{ flexShrink: 0, background: '#2d2d2d', border: 'none', color: '#ccc', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+              <button onClick={() => copyText(streamId)}
+                style={{ flexShrink: 0, background: '#2d2d2d', border: 'none', color: '#ccc', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>
                 Копировать
               </button>
             </div>
@@ -163,14 +160,12 @@ export default function DashboardPage() {
               </span>
               <div style={{ flexShrink: 0, display: 'flex', gap: '0.4rem' }}>
                 {keyVisible && (
-                  <button
-                    onClick={() => navigator.clipboard.writeText(profile?.ingestKey ?? '').catch(() => alert(profile?.ingestKey))}
-                    style={{ background: '#2d2d2d', border: 'none', color: '#ccc', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                  <button onClick={() => copyText(profile?.ingestKey ?? '')}
+                    style={{ background: '#2d2d2d', border: 'none', color: '#ccc', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>
                     Копировать
                   </button>
                 )}
-                <button
-                  onClick={() => setKeyVisible((v) => !v)}
+                <button onClick={() => setKeyVisible((v) => !v)}
                   style={{ background: '#2d2d2d', border: 'none', color: '#ccc', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>
                   {keyVisible ? 'Скрыть' : 'Показать'}
                 </button>
@@ -181,7 +176,6 @@ export default function DashboardPage() {
                 </button>
               </div>
             </div>
-
           </div>
         </section>
 
