@@ -16,38 +16,57 @@ model User {
 }
 
 model Organization {
-  id                 String   @id @default(cuid())
-  slug               String   @unique
+  id                 String        @id @default(cuid())
+  slug               String        @unique
   name               String
   description        String?
   passwordHash       String
-  ingestKey          String   @unique
-  ingestKeyCreatedAt DateTime @default(now())
-  isActive           Boolean  @default(true)
-  createdAt          DateTime @default(now())
-  events             Event[]
+  ingestKey          String        @unique
+  ingestKeyCreatedAt DateTime      @default(now())
+  isActive           Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+  // Stream state
+  streamTitle        String        @default("")
+  streamDescription  String?
+  streamIsPublic     Boolean       @default(true)
+  streamPreviewKey   String?       @unique
+  isLive             Boolean       @default(false)
+  autoStream         Boolean       @default(true)
+  currentBroadcastId String?       @unique
+  // Relations
+  broadcasts         Broadcast[]
+  messages           ChatMessage[]
 }
 
-model Event {
-  id          String        @id @default(cuid())
+model Broadcast {
+  id          String       @id @default(cuid())
   orgId       String
-  org         Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   title       String
   description String?
-  previewKey  String?       @unique
-  status      String        @default("scheduled")
-  isPublic    Boolean       @default(true)
-  startedAt   DateTime?
+  startedAt   DateTime
   endedAt     DateTime?
-  createdAt   DateTime      @default(now())
-  messages    ChatMessage[]
+  createdAt   DateTime     @default(now())
+  recording   Recording?
 }
 
 model ChatMessage {
-  id        String   @id @default(cuid())
-  eventId   String
-  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  id        String       @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   nickname  String
   content   String
-  createdAt DateTime @default(now())
+  createdAt DateTime     @default(now())
+}
+
+model Recording {
+  id          String    @id @default(cuid())
+  broadcastId String    @unique
+  broadcast   Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  status      String    @default("processing")
+  filePath    String?
+  fileSize    Int?
+  duration    Int?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
 }

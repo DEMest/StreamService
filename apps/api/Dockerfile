@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
 # openssl для движка Prisma
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl ffmpeg
 
 WORKDIR /app
 
@@ -21,8 +21,11 @@ COPY apps/web/package.json apps/web/package.json
 # Копируем схему
 COPY prisma ./prisma
 
-# Устанавливаем зависимости из lock-файла
-RUN pnpm install --frozen-lockfile
+# Устанавливаем зависимости из lock-файла (retry при нестабильной сети)
+RUN pnpm config set fetch-retries 5 && \
+    pnpm config set fetch-retry-mintimeout 20000 && \
+    pnpm config set fetch-retry-maxtimeout 120000 && \
+    pnpm install --frozen-lockfile
 
 # Убиваем ЛЮБУЮ самодеятельность Prisma.
 # Явно добавляем в корень и CLI, и сам клиент.

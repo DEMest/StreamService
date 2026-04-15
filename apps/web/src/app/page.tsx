@@ -7,7 +7,8 @@ import { PublicLayout } from '@/components/PublicLayout';
 interface CatalogOrg {
   slug: string;
   name: string;
-  events: { id: string; title: string; startedAt: string }[];
+  isLive: boolean;
+  streamTitle: string;
 }
 
 export default function CatalogPage() {
@@ -17,8 +18,8 @@ export default function CatalogPage() {
     refetchInterval: 30_000,
   });
 
-  const live = data?.filter((o) => o.events.length > 0) ?? [];
-  const offline = data?.filter((o) => o.events.length === 0) ?? [];
+  const live = data?.filter((o) => o.isLive) ?? [];
+  const offline = data?.filter((o) => !o.isLive) ?? [];
 
   return (
     <PublicLayout>
@@ -33,7 +34,7 @@ export default function CatalogPage() {
                 <Link key={org.slug} href={`/watch/${org.slug}`} style={{ textDecoration: 'none' }}>
                   <div style={{ background: '#1a1a1a', borderRadius: '8px', padding: '1.25rem', border: '1px solid #e5330033', cursor: 'pointer' }}>
                     <p style={{ color: '#fff', fontWeight: 600, margin: '0 0 0.25rem' }}>{org.name}</p>
-                    <p style={{ color: '#888', fontSize: '0.875rem', margin: 0 }}>{org.events[0]?.title}</p>
+                    <p style={{ color: '#888', fontSize: '0.875rem', margin: 0 }}>{org.streamTitle}</p>
                   </div>
                 </Link>
               ))}

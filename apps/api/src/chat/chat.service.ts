@@ -5,16 +5,26 @@ import { PrismaService } from '../prisma/prisma.service';
 export class ChatService {
   constructor(private prisma: PrismaService) {}
 
-  async saveMessage(eventId: string, nickname: string, content: string) {
+  async saveMessage(orgSlug: string, nickname: string, content: string) {
+    const org = await this.prisma.organization.findUnique({
+      where: { slug: orgSlug },
+      select: { id: true },
+    });
+    if (!org) return null;
     return this.prisma.chatMessage.create({
-      data: { eventId, nickname, content: content.slice(0, 500) },
+      data: { orgId: org.id, nickname, content: content.slice(0, 500) },
       select: { id: true, nickname: true, content: true, createdAt: true },
     });
   }
 
-  async getRecentMessages(eventId: string, limit = 50) {
+  async getRecentMessages(orgSlug: string, limit = 50) {
+    const org = await this.prisma.organization.findUnique({
+      where: { slug: orgSlug },
+      select: { id: true },
+    });
+    if (!org) return [];
     const messages = await this.prisma.chatMessage.findMany({
-      where: { eventId },
+      where: { orgId: org.id },
       orderBy: { createdAt: 'desc' },
       take: limit,
       select: { id: true, nickname: true, content: true, createdAt: true },

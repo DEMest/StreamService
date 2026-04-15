@@ -1,6 +1,14 @@
 api: true
 apiAddress: :9997
 
+hlsSegmentCount: 0
+hlsSegmentDuration: 6s
+
+record: yes
+recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
+recordFormat: fmp4
+recordSegmentDuration: 3h
+
 authInternalUsers:
   - user: any
     pass:
@@ -11,3 +19,14 @@ authInternalUsers:
     pass: mediamtxpass
     permissions:
       - action: api
+
+pathDefaults:
+  runOnReady: >-
+    curl -sf -X POST http://api:3001/v1/internal/mediamtx/webhook
+    -H "Content-Type: application/json"
+    -d "{\"action\":\"publish\",\"path\":\"$MTX_PATH\"}"
+  runOnReadyRestart: no
+  runOnNotReady: >-
+    curl -sf -X POST http://api:3001/v1/internal/mediamtx/webhook
+    -H "Content-Type: application/json"
+    -d "{\"action\":\"unpublish\",\"path\":\"$MTX_PATH\"}"

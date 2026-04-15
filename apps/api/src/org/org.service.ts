@@ -1,6 +1,7 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
+import { RecordingService } from '../recording/recording.service';
 import { randomBytes } from 'crypto';
 
 @Injectable()
@@ -8,6 +9,7 @@ export class OrgService {
   constructor(
     private prisma: PrismaService,
     private mediamtx: MediamtxService,
+    private recording: RecordingService,
   ) {}
 
   async getProfile(orgId: string, revealKey = false) {
@@ -18,6 +20,12 @@ export class OrgService {
         slug: true,
         name: true,
         isActive: true,
+        isLive: true,
+        autoStream: true,
+        streamTitle: true,
+        streamDescription: true,
+        streamIsPublic: true,
+        streamPreviewKey: true,
         ingestKey: revealKey,
         ingestKeyCreatedAt: true,
         createdAt: true,
@@ -38,55 +46,126 @@ export class OrgService {
     return org;
   }
 
-  async createEvent(orgId: string, data: { title: string; description?: string; isPublic?: boolean }) {
-    const previewKey = data.isPublic === false ? randomBytes(32).toString('hex') : undefined;
-    return this.prisma.event.create({
-      data: { orgId, previewKey, ...data },
-      select: { id: true, title: true, description: true, status: true, isPublic: true, previewKey: true, createdAt: true },
-    });
-  }
-
-  async updateEvent(
+  async updateStreamSettings(
     orgId: string,
-    eventId: string,
-    data: { title?: string; description?: string; isPublic?: boolean; status?: string },
+    data: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean },
   ) {
-    const event = await this.prisma.event.findFirst({ where: { id: eventId, orgId } });
-    if (!event) throw new NotFoundException('Event not found');
+    const updateData: Record<string, any> = { ...data };
 
-    if (data.status === 'live') {
-      const liveEvent = await this.prisma.event.findFirst({
-        where: { orgId, status: 'live', id: { not: eventId } },
+    if (data.streamIsPublic === false) {
+      const org = await this.prisma.organization.findUnique({
+        where: { id: orgId },
+        select: { streamPreviewKey: true },
       });
-      if (liveEvent) throw new ConflictException('Another event is already live');
+      if (!org?.streamPreviewKey) {
+        updateData.streamPreviewKey = randomBytes(32).toString('hex');
+      }
+    } else if (data.streamIsPublic === true) {
+      updateData.streamPreviewKey = null;
     }
 
-    const updateData: any = { ...data };
-    if (data.status === 'live') updateData.startedAt = new Date();
-    if (data.status === 'ended') updateData.endedAt = new Date();
-    if (data.isPublic === false && !event.previewKey) {
-      updateData.previewKey = randomBytes(32).toString('hex');
-    }
-
-    return this.prisma.event.update({
-      where: { id: eventId },
+    return this.prisma.organization.update({
+      where: { id: orgId },
       data: updateData,
-      select: { id: true, title: true, status: true, isPublic: true, previewKey: true, startedAt: true, endedAt: true },
+      select: {
+        id: true, streamTitle: true, streamDescription: true,
+        streamIsPublic: true, streamPreviewKey: true, autoStream: true, isLive: true,
+      },
     });
   }
 
-  async listEvents(orgId: string) {
-    return this.prisma.event.findMany({
-      where: { orgId },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, title: true, status: true, isPublic: true, previewKey: true, startedAt: true, endedAt: true, createdAt: true },
+  async startStream(orgId: string) {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { id: true, streamTitle: true, streamDescription: true, isLive: true },
+    });
+    if (!org) throw new NotFoundException('Organization not found');
+    if (org.isLive) return { alreadyLive: true };
+
+    const broadcast = await this.prisma.broadcast.create({
+      data: {
+        orgId,
+        title: org.streamTitle || 'Трансляция',
+        description: org.streamDescription ?? undefined,
+        startedAt: new Date(),
+      },
+    });
+
+    await this.prisma.organization.update({
+      where: { id: orgId },
+      data: { isLive: true, currentBroadcastId: broadcast.id },
+    });
+
+    return { ok: true, broadcastId: broadcast.id };
+  }
+
+  async endStream(orgId: string) {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { id: true, slug: true, isLive: true, currentBroadcastId: true },
+    });
+    if (!org || !org.isLive || !org.currentBroadcastId) return { alreadyOff: true };
+
+    const broadcastId = org.currentBroadcastId;
+
+    await this.prisma.broadcast.update({
+      where: { id: broadcastId },
+      data: { endedAt: new Date() },
+    });
+
+    await this.prisma.organization.update({
+      where: { id: orgId },
+      data: { isLive: false, currentBroadcastId: null },
+    });
+
+    this.recording.onStreamEnded(broadcastId, org.slug).catch(() => {});
+
+    return { ok: true };
+  }
+
+  async handleWebhook(orgSlug: string, action: 'publish' | 'unpublish') {
+    const org = await this.prisma.organization.findUnique({
+      where: { slug: orgSlug },
+      select: { id: true },
+    });
+    if (!org) return;
+    if (action === 'publish') await this.startStream(org.id);
+    else if (action === 'unpublish') await this.endStream(org.id);
+  }
+
+  async listBroadcasts(orgId: string) {
+    return this.prisma.broadcast.findMany({
+      where: { orgId, endedAt: { not: null } },
+      orderBy: { startedAt: 'desc' },
+      select: {
+        id: true, title: true, description: true,
+        startedAt: true, endedAt: true, createdAt: true,
+        recording: {
+          select: { id: true, status: true, fileSize: true, duration: true },
+        },
+      },
     });
   }
 
-  async deleteEvent(orgId: string, eventId: string) {
-    const event = await this.prisma.event.findFirst({ where: { id: eventId, orgId } });
-    if (!event) throw new NotFoundException('Event not found');
-    await this.prisma.event.delete({ where: { id: eventId } });
+  async updateBroadcast(
+    orgId: string,
+    broadcastId: string,
+    data: { title?: string; description?: string },
+  ) {
+    const broadcast = await this.prisma.broadcast.findFirst({ where: { id: broadcastId, orgId } });
+    if (!broadcast) throw new NotFoundException('Broadcast not found');
+    return this.prisma.broadcast.update({
+      where: { id: broadcastId },
+      data,
+      select: { id: true, title: true, description: true },
+    });
+  }
+
+  async deleteBroadcast(orgId: string, broadcastId: string) {
+    const broadcast = await this.prisma.broadcast.findFirst({ where: { id: broadcastId, orgId } });
+    if (!broadcast) throw new NotFoundException('Broadcast not found');
+    await this.recording.deleteRecordingByBroadcastId(broadcastId);
+    await this.prisma.broadcast.delete({ where: { id: broadcastId } });
     return { ok: true };
   }
 }

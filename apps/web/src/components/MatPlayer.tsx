@@ -7,10 +7,16 @@ interface Props {
   streamUrl: string;
   viewMode: ViewMode;
   volume?: number;
+  isArchive?: boolean;
+  onMutedFallback?: () => void;
+  onTimeUpdate?: (current: number, duration: number, isLive: boolean) => void;
 }
 
 export interface MatPlayerHandle {
   enterIOSFullscreen: () => void;
+  seekTo: (time: number) => void;
+  seekToLive: () => void;
+  getVideoElement: () => HTMLVideoElement | null;
 }
 
 const QUAD: Record<string, [number, number]> = {
@@ -35,10 +41,11 @@ function drawContain(
   ctx.drawImage(video, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
-const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, volume = 1 }, ref) => {
+const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, volume = 1, isArchive = false, onMutedFallback, onTimeUpdate }, ref) => {
   const videoRef  = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const modeRef   = useRef(viewMode);
+  const hlsRef    = useRef<Hls | null>(null);
   modeRef.current = viewMode;
 
   useImperativeHandle(ref, () => ({
@@ -61,20 +68,49 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
         })
         .catch(() => document.body.removeChild(tmp));
     },
+    seekTo(time: number) {
+      const video = videoRef.current;
+      if (video) video.currentTime = time;
+    },
+    seekToLive() {
+      const video = videoRef.current;
+      if (!video) return;
+      if (hlsRef.current) {
+        video.currentTime = hlsRef.current.liveSyncPosition ?? video.duration;
+      } else {
+        video.currentTime = video.duration;
+      }
+    },
+    getVideoElement() {
+      return videoRef.current;
+    },
   }), []);
 
-  // HLS setup
+  // Media setup — HLS for live, direct src for archive
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     let hls: Hls | null = null;
-    if (Hls.isSupported()) {
-      hls = new Hls();
+
+    if (isArchive) {
+      video.src = streamUrl;
+      video.play().catch(() => {
+        video.muted = true;
+        onMutedFallback?.();
+        video.play().catch(() => {});
+      });
+    } else if (Hls.isSupported()) {
+      hls = new Hls({
+        liveDurationInfinity: true,
+        liveBackBufferLength: Infinity,
+      });
+      hlsRef.current = hls;
       hls.loadSource(streamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.play().catch(() => {
           video.muted = true;
+          onMutedFallback?.();
           video.play().catch(() => {});
         });
       });
@@ -82,11 +118,28 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
       video.src = streamUrl;
       video.play().catch(() => {
         video.muted = true;
+        onMutedFallback?.();
         video.play().catch(() => {});
       });
     }
-    return () => { hls?.destroy(); };
-  }, [streamUrl]);
+    return () => { hls?.destroy(); hlsRef.current = null; };
+  }, [streamUrl, isArchive]);
+
+  // Time update callback for seekbar
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !onTimeUpdate) return;
+
+    const handler = () => {
+      const hls = hlsRef.current;
+      const isLive = !isArchive && !!hls && hls.latency !== undefined;
+      const duration = isArchive ? video.duration : (hls?.liveSyncPosition ?? video.duration);
+      onTimeUpdate(video.currentTime, duration, isLive);
+    };
+
+    video.addEventListener('timeupdate', handler);
+    return () => video.removeEventListener('timeupdate', handler);
+  }, [onTimeUpdate, isArchive]);
 
   // Sync volume prop to video element
   useEffect(() => {
@@ -140,7 +193,6 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#000' }}>
-      {/* opacity:0 + absolute keeps video in render tree so iOS can decode it for canvas */}
       <video
         ref={videoRef}
         autoPlay playsInline

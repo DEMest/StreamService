@@ -22,30 +22,31 @@ export class OrgController {
     return this.org.rotateKey(user.orgId!, user.orgSlug!);
   }
 
-  @Post('events')
-  createEvent(
+  @Patch('stream')
+  updateStreamSettings(
     @CurrentUser() user: JwtPayload,
-    @Body() body: { title: string; description?: string; isPublic?: boolean },
+    @Body() body: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean },
   ) {
-    return this.org.createEvent(user.orgId!, body);
+    return this.org.updateStreamSettings(user.orgId!, body);
   }
 
-  @Patch('events/:id')
-  updateEvent(
+
+  @Get('broadcasts')
+  listBroadcasts(@CurrentUser() user: JwtPayload) {
+    return this.org.listBroadcasts(user.orgId!);
+  }
+
+  @Patch('broadcasts/:id')
+  updateBroadcast(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
-    @Body() body: { title?: string; description?: string; isPublic?: boolean; status?: string },
+    @Body() body: { title?: string; description?: string },
   ) {
-    return this.org.updateEvent(user.orgId!, id, body);
+    return this.org.updateBroadcast(user.orgId!, id, body);
   }
 
-  @Get('events')
-  listEvents(@CurrentUser() user: JwtPayload) {
-    return this.org.listEvents(user.orgId!);
-  }
-
-  @Delete('events/:id')
-  deleteEvent(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.org.deleteEvent(user.orgId!, id);
+  @Delete('broadcasts/:id')
+  deleteBroadcast(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.org.deleteBroadcast(user.orgId!, id);
   }
 }

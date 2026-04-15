@@ -16,7 +16,12 @@ export class PublicController {
   }
 
   @Get('orgs/:orgSlug/stream')
-  getStreamUrl(@Param('orgSlug') orgSlug: string) {
-    return this.pub.getStreamUrl(orgSlug);
+  getStreamUrl(@Param('orgSlug') orgSlug: string, @Query('key') key?: string) {
+    return this.pub.getStreamUrl(orgSlug, key);
+  }
+
+  @Get('orgs/:orgSlug/broadcasts')
+  getOrgBroadcasts(@Param('orgSlug') orgSlug: string, @Query('key') key?: string) {
+    return this.pub.getOrgBroadcasts(orgSlug, key);
   }
 }

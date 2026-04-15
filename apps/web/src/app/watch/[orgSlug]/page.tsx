@@ -12,7 +12,11 @@ interface OrgWatch {
   slug: string;
   name: string;
   description?: string;
-  events: { id: string; title: string; description?: string; isPublic: boolean; startedAt: string }[];
+  isLive: boolean;
+  streamTitle: string;
+  streamDescription?: string;
+  streamIsPublic: boolean;
+  accessDenied?: boolean;
 }
 interface StreamInfo { hlsUrl: string }
 
@@ -62,10 +66,13 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   const [isFullscreen, setIsFullscreen]     = useState(false);
   const [viewerCount, setViewerCount]       = useState<number | null>(null);
   const [volume, setVolume]                 = useState(1);
+  const [currentTime, setCurrentTime]       = useState(0);
+  const [duration, setDuration]             = useState(0);
+  const [isAtLive, setIsAtLive]             = useState(true);
 
-  const uiTimerRef        = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const matRef            = useRef<MatPlayerHandle>(null);
-  const videoColumnRef    = useRef<HTMLDivElement>(null);
+  const uiTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const matRef             = useRef<MatPlayerHandle>(null);
+  const videoColumnRef     = useRef<HTMLDivElement>(null);
   const mobileContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -115,12 +122,11 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   });
 
   const { data: stream } = useQuery({
-    queryKey: ['stream', orgSlug],
-    queryFn: () => api.get<StreamInfo>(`/v1/public/orgs/${orgSlug}/stream`),
-    enabled: (org?.events.length ?? 0) > 0,
+    queryKey: ['stream', orgSlug, previewKey],
+    queryFn: () => api.get<StreamInfo>(`/v1/public/orgs/${orgSlug}/stream${previewKey ? `?key=${previewKey}` : ''}`),
+    enabled: org?.isLive === true,
+    retry: false,
   });
-
-  const event = org?.events[0];
 
   function handleVideoClick(e: React.MouseEvent<HTMLDivElement>) {
     setMobileViewOpen(false);
@@ -134,30 +140,68 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
     else                           setViewMode('cam4');
   }
 
+  function handleTimeUpdate(current: number, dur: number, live: boolean) {
+    setCurrentTime(current);
+    setDuration(dur);
+    if (live) setIsAtLive(dur - current < 10);
+  }
+
+  function handleSeek(e: React.ChangeEvent<HTMLInputElement>) {
+    const time = parseFloat(e.target.value);
+    matRef.current?.seekTo(time);
+    setIsAtLive(false);
+  }
+
+  function goToLive() {
+    matRef.current?.seekToLive();
+    setIsAtLive(true);
+  }
+
+  function formatTime(seconds: number): string {
+    if (!isFinite(seconds)) return '0:00';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
   function VolumeIcon() {
     if (volume === 0) return <SpeakerMuteIcon />;
     if (volume <= 0.5) return <SpeakerLowIcon />;
     return <SpeakerHighIcon />;
   }
 
-  const fsBtn: React.CSSProperties = {
-    position: 'absolute', right: 12, bottom: 12, zIndex: 20,
-    background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff',
+  const [desktopControlsVisible, setDesktopControlsVisible] = useState(true);
+  const desktopControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function resetDesktopControlsTimer() {
+    setDesktopControlsVisible(true);
+    if (desktopControlsTimerRef.current) clearTimeout(desktopControlsTimerRef.current);
+    if (isFullscreen) {
+      desktopControlsTimerRef.current = setTimeout(() => setDesktopControlsVisible(false), 1000);
+    }
+  }
+
+  useEffect(() => {
+    if (isFullscreen) {
+      resetDesktopControlsTimer();
+    } else {
+      setDesktopControlsVisible(true);
+      if (desktopControlsTimerRef.current) clearTimeout(desktopControlsTimerRef.current);
+    }
+    return () => { if (desktopControlsTimerRef.current) clearTimeout(desktopControlsTimerRef.current); };
+  }, [isFullscreen]);
+
+  const iconBtn: React.CSSProperties = {
+    background: 'none', border: 'none', color: '#fff',
     width: 36, height: 36, borderRadius: 4, cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   };
-  const volControl: React.CSSProperties = {
-    position: 'absolute', right: 56, bottom: 12, zIndex: 20,
-    display: 'flex', alignItems: 'center', gap: 6,
-  };
-  const volBtn: React.CSSProperties = {
-    background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff',
-    width: 36, height: 36, borderRadius: 4, cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-  };
-  const volSlider: React.CSSProperties = {
-    width: 80, accentColor: '#e53',
-  };
+
+  const archiveLink = previewKey
+    ? `/watch/${orgSlug}/archive?key=${previewKey}`
+    : `/watch/${orgSlug}/archive`;
 
   // ── Mobile layout ──────────────────────────────────────────────────────────
   if (isMobile) {
@@ -165,45 +209,43 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
       <div ref={mobileContainerRef} style={{ position: 'fixed', inset: 0, background: '#000' }} onClick={resetUiTimer}>
         <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }} onClick={handleVideoClick}>
           {stream
-            ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} />
+            ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} />
             : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#555' }}>
-                {event ? 'Трансляция скоро начнётся...' : 'Нет активной трансляции'}
+                Нет активной трансляции
               </div>
           }
           {stream && (
-            <div style={volControl} onClick={(e) => e.stopPropagation()}>
-              <input
-                type="range" min={0} max={1} step={0.01}
-                value={volume}
-                onChange={(e) => setVolume(parseFloat(e.target.value))}
-                style={volSlider}
-              />
-              <button style={volBtn}><VolumeIcon /></button>
+            <div
+              style={{ position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 20, padding: '8px 12px', background: 'linear-gradient(transparent, rgba(0,0,0,0.8))', display: 'flex', alignItems: 'center', gap: 6 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {!isAtLive && (
+                <button onClick={goToLive} style={{ background: '#e53', border: 'none', color: '#fff', padding: '2px 6px', borderRadius: 4, cursor: 'pointer', fontSize: '0.65rem', fontWeight: 700, flexShrink: 0 }}>LIVE</button>
+              )}
+              <span style={{ color: '#aaa', fontSize: '0.65rem', flexShrink: 0 }}>{formatTime(currentTime)}</span>
+              <input type="range" min={0} max={duration || 0} step={0.1} value={currentTime} onChange={handleSeek} style={{ flex: 1, accentColor: '#e53' }} />
+              <span style={{ color: '#aaa', fontSize: '0.65rem', flexShrink: 0 }}>{formatTime(duration)}</span>
+              <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} style={{ width: 50, accentColor: '#e53', flexShrink: 0 }} />
+              <button style={iconBtn}><VolumeIcon /></button>
+              <button onClick={toggleFullscreen} style={iconBtn}>
+                {isFullscreen ? <CompressIcon /> : <ExpandIcon />}
+              </button>
             </div>
-          )}
-          {stream && (
-            <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }} style={fsBtn}>
-              {isFullscreen ? <CompressIcon /> : <ExpandIcon />}
-            </button>
           )}
         </div>
 
         {uiVisible && (
-          <>
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '0.75rem 1rem', background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', pointerEvents: 'none' }}>
-              <span style={{ fontWeight: 700, color: '#fff' }}>{org?.name}</span>
-              {event && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span style={{ color: '#e53', fontSize: '0.75rem', fontWeight: 600 }}>● LIVE</span>
-                  {viewerCount !== null && <span style={{ color: '#888', fontSize: '0.75rem' }}>👁 {viewerCount}</span>}
-                </div>
-              )}
-            </div>
-
-          </>
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '0.75rem 1rem', background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', pointerEvents: 'none' }}>
+            <span style={{ fontWeight: 700, color: '#fff' }}>{org?.name}</span>
+            {org?.isLive && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ color: '#e53', fontSize: '0.75rem', fontWeight: 600 }}>● LIVE</span>
+                {viewerCount !== null && <span style={{ color: '#888', fontSize: '0.75rem' }}>👁 {viewerCount}</span>}
+              </div>
+            )}
+          </div>
         )}
 
-        {/* Left touch zone — full height, always present */}
         <div
           onClick={(e) => { e.stopPropagation(); setMobileViewOpen((v) => !v); setMobileChatOpen(false); resetUiTimer(); }}
           style={{ position: 'absolute', left: mobileViewOpen ? 180 : 0, top: 0, bottom: 0, width: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', transition: 'left 0.2s', zIndex: 6 }}>
@@ -212,27 +254,22 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
           </span>
         </div>
 
-        {/* Right touch zone — full height, always present */}
-        {event && (
-          <div
-            onClick={(e) => { e.stopPropagation(); setMobileChatOpen((v) => !v); setMobileViewOpen(false); resetUiTimer(); }}
-            style={{ position: 'absolute', right: mobileChatOpen ? 240 : 0, top: 0, bottom: 0, width: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', transition: 'right 0.2s', zIndex: 6 }}>
-            <span style={{ color: '#fff', fontSize: '1.25rem', opacity: uiVisible ? 1 : 0, transition: 'opacity 0.3s', background: 'rgba(0,0,0,0.45)', borderRadius: '4px 0 0 4px', padding: '0.6rem 0.35rem', lineHeight: 1 }}>
-              {mobileChatOpen ? '›' : '‹'}
-            </span>
-          </div>
-        )}
-
-        {/* Sliding ViewSwitcher panel */}
-        <div style={{ position: 'absolute', left: mobileViewOpen ? 0 : -180, top: 0, bottom: 0, width: 180, background: 'rgba(17,17,17,0.95)', padding: '1rem', transition: 'left 0.2s', display: 'flex', flexDirection: 'column', justifyContent: 'center', zIndex: 5 }}>
-          <ViewSwitcher mode={viewMode} onChange={(m) => { setViewMode(m); setMobileViewOpen(false); }} />
+        <div
+          onClick={(e) => { e.stopPropagation(); setMobileChatOpen((v) => !v); setMobileViewOpen(false); resetUiTimer(); }}
+          style={{ position: 'absolute', right: mobileChatOpen ? 240 : 0, top: 0, bottom: 0, width: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', transition: 'right 0.2s', zIndex: 6 }}>
+          <span style={{ color: '#fff', fontSize: '1.25rem', opacity: uiVisible ? 1 : 0, transition: 'opacity 0.3s', background: 'rgba(0,0,0,0.45)', borderRadius: '4px 0 0 4px', padding: '0.6rem 0.35rem', lineHeight: 1 }}>
+            {mobileChatOpen ? '›' : '‹'}
+          </span>
         </div>
 
-        {event && (
-          <div style={{ position: 'absolute', right: mobileChatOpen ? 0 : -240, top: 0, bottom: 0, width: 240, background: 'rgba(17,17,17,0.95)', transition: 'right 0.2s', zIndex: 5 }}>
-            <Chat eventId={event.id} onViewersChange={setViewerCount} />
-          </div>
-        )}
+        <div style={{ position: 'absolute', left: mobileViewOpen ? 0 : -180, top: 0, bottom: 0, width: 180, background: 'rgba(17,17,17,0.95)', padding: '1rem', transition: 'left 0.2s', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '1.5rem', zIndex: 5 }}>
+          <ViewSwitcher mode={viewMode} onChange={(m) => { setViewMode(m); setMobileViewOpen(false); }} />
+          <Link href={archiveLink} style={{ color: '#888', fontSize: '0.8rem', textDecoration: 'none' }}>Архив →</Link>
+        </div>
+
+        <div style={{ position: 'absolute', right: mobileChatOpen ? 0 : -240, top: 0, bottom: 0, width: 240, background: 'rgba(17,17,17,0.95)', transition: 'right 0.2s', zIndex: 5 }}>
+          {org && <Chat orgSlug={orgSlug} onViewersChange={setViewerCount} />}
+        </div>
       </div>
     );
   }
@@ -245,9 +282,10 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <Link href="/" style={{ color: '#888', textDecoration: 'none', fontSize: '0.875rem' }}>← Главная</Link>
             <span style={{ fontWeight: 700 }}>{org?.name}</span>
-            {event && <span style={{ color: '#888', fontSize: '0.875rem' }}>{event.title}</span>}
+            {org?.streamTitle && <span style={{ color: '#888', fontSize: '0.875rem' }}>{org.streamTitle}</span>}
+            <Link href={archiveLink} style={{ color: '#555', textDecoration: 'none', fontSize: '0.8rem' }}>Архив</Link>
           </div>
-          {event && (
+          {org?.isLive && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <span style={{ color: '#e53', fontSize: '0.75rem', fontWeight: 600 }}>● LIVE</span>
               {viewerCount !== null && <span style={{ color: '#888', fontSize: '0.75rem' }}>👁 {viewerCount}</span>}
@@ -257,20 +295,19 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
       )}
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* Video column — fullscreened as a whole so ViewSwitcher stays visible */}
         <div
           ref={videoColumnRef}
           style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#000', cursor: 'pointer' }}
           onClick={handleVideoClick}
+          onMouseMove={isFullscreen ? resetDesktopControlsTimer : undefined}
         >
           {stream
-            ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} />
+            ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} />
             : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#555' }}>
-                {event ? 'Трансляция скоро начнётся...' : 'Нет активной трансляции'}
+                Нет активной трансляции
               </div>
           }
 
-          {/* ViewSwitcher toggle — only outside fullscreen */}
           {!isFullscreen && (
             <>
               <button
@@ -288,42 +325,38 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
             </>
           )}
 
-          {/* Volume control */}
           {stream && (
-            <div style={volControl} onClick={(e) => e.stopPropagation()}>
-              <input
-                type="range" min={0} max={1} step={0.01}
-                value={volume}
-                onChange={(e) => setVolume(parseFloat(e.target.value))}
-                style={volSlider}
-              />
-              <button style={volBtn}><VolumeIcon /></button>
+            <div
+              style={{ position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 20, padding: '8px 12px', background: 'linear-gradient(transparent, rgba(0,0,0,0.8))', display: 'flex', alignItems: 'center', gap: 8, transition: 'opacity 0.3s', opacity: desktopControlsVisible ? 1 : 0, pointerEvents: desktopControlsVisible ? 'auto' : 'none' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {!isAtLive && (
+                <button onClick={goToLive} style={{ background: '#e53', border: 'none', color: '#fff', padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.7rem', fontWeight: 700, flexShrink: 0 }}>LIVE</button>
+              )}
+              <span style={{ color: '#aaa', fontSize: '0.7rem', flexShrink: 0 }}>{formatTime(currentTime)}</span>
+              <input type="range" min={0} max={duration || 0} step={0.1} value={currentTime} onChange={handleSeek} style={{ flex: 1, accentColor: '#e53' }} />
+              <span style={{ color: '#aaa', fontSize: '0.7rem', flexShrink: 0 }}>{formatTime(duration)}</span>
+              <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} style={{ width: 80, accentColor: '#e53', flexShrink: 0 }} />
+              <button style={iconBtn}><VolumeIcon /></button>
+              <button onClick={toggleFullscreen} style={iconBtn}>
+                {isFullscreen ? <CompressIcon /> : <ExpandIcon />}
+              </button>
             </div>
-          )}
-
-          {/* Fullscreen button */}
-          {stream && (
-            <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }} style={fsBtn}>
-              {isFullscreen ? <CompressIcon /> : <ExpandIcon />}
-            </button>
           )}
         </div>
 
-        {/* Chat panel */}
-        {event && (
-          <>
-            <button
-              onClick={(e) => { e.stopPropagation(); setChatOpen((v) => !v); }}
-              style={{ position: 'absolute', right: chatOpen ? 280 : 0, top: '50%', transform: 'translateY(-50%)', zIndex: 10, background: '#222', border: 'none', color: '#fff', padding: '0.5rem 0.4rem', cursor: 'pointer', borderRadius: '4px 0 0 4px', transition: 'right 0.2s' }}>
-              {chatOpen ? '›' : '‹'}
-            </button>
-            <div style={{ width: chatOpen ? 280 : 0, overflow: 'hidden', borderLeft: chatOpen ? '1px solid #222' : 'none', transition: 'width 0.2s', flexShrink: 0 }}>
-              <div style={{ width: 280, height: '100%' }}>
-                <Chat eventId={event.id} onViewersChange={setViewerCount} />
-              </div>
+        <>
+          <button
+            onClick={(e) => { e.stopPropagation(); setChatOpen((v) => !v); }}
+            style={{ position: 'absolute', right: chatOpen ? 280 : 0, top: '50%', transform: 'translateY(-50%)', zIndex: 10, background: '#222', border: 'none', color: '#fff', padding: '0.5rem 0.4rem', cursor: 'pointer', borderRadius: '4px 0 0 4px', transition: 'right 0.2s' }}>
+            {chatOpen ? '›' : '‹'}
+          </button>
+          <div style={{ width: chatOpen ? 280 : 0, overflow: 'hidden', borderLeft: chatOpen ? '1px solid #222' : 'none', transition: 'width 0.2s', flexShrink: 0 }}>
+            <div style={{ width: 280, height: '100%' }}>
+              {org && <Chat orgSlug={orgSlug} onViewersChange={setViewerCount} />}
             </div>
-          </>
-        )}
+          </div>
+        </>
       </div>
     </div>
   );
