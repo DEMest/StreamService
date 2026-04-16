@@ -28,7 +28,14 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
 
   useEffect(() => {
     const socket = getSocket();
-    socket.emit('join', { orgSlug });
+
+    function join() {
+      socket.emit('join', { orgSlug });
+    }
+
+    join();
+    socket.on('connect', join);
+
     const onHistory = (msgs: Message[]) => setMessages(msgs);
     const onMessage = (msg: Message) => setMessages((prev) => [...prev, msg]);
     const onViewers = (count: number) => onViewersRef.current?.(count);
@@ -36,6 +43,7 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
     socket.on('message', onMessage);
     socket.on('viewers', onViewers);
     return () => {
+      socket.off('connect', join);
       socket.off('history', onHistory);
       socket.off('message', onMessage);
       socket.off('viewers', onViewers);
