@@ -5,13 +5,18 @@ import { NicknameModal } from './NicknameModal';
 
 interface Message { id: string; nickname: string; content: string; createdAt: string }
 
-interface Props { eventId: string }
+interface Props {
+  orgSlug: string;
+  onViewersChange?: (count: number) => void;
+}
 
-export function Chat({ eventId }: Props) {
+export function Chat({ orgSlug, onViewersChange }: Props) {
   const [nickname, setNickname] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
+  const onViewersRef = useRef(onViewersChange);
+  useEffect(() => { onViewersRef.current = onViewersChange; });
 
   useEffect(() => {
     const saved = localStorage.getItem('chat_nickname');
@@ -20,16 +25,19 @@ export function Chat({ eventId }: Props) {
 
   useEffect(() => {
     const socket = getSocket();
-    socket.emit('join', { eventId });
+    socket.emit('join', { orgSlug });
     const onHistory = (msgs: Message[]) => setMessages(msgs);
     const onMessage = (msg: Message) => setMessages((prev) => [...prev, msg]);
+    const onViewers = (count: number) => onViewersRef.current?.(count);
     socket.on('history', onHistory);
     socket.on('message', onMessage);
+    socket.on('viewers', onViewers);
     return () => {
       socket.off('history', onHistory);
       socket.off('message', onMessage);
+      socket.off('viewers', onViewers);
     };
-  }, [eventId]);
+  }, [orgSlug]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
@@ -41,7 +49,7 @@ export function Chat({ eventId }: Props) {
   function handleSend(e: React.FormEvent) {
     e.preventDefault();
     if (!input.trim() || !nickname) return;
-    getSocket().emit('message', { eventId, nickname, content: input.trim() });
+    getSocket().emit('message', { orgSlug, nickname, content: input.trim() });
     setInput('');
   }
 
