@@ -8,9 +8,11 @@ interface Message { id: string; nickname: string; content: string; createdAt: st
 interface Props {
   orgSlug: string;
   onViewersChange?: (count: number) => void;
+  authorName?: string;
+  authLoading?: boolean;
 }
 
-export function Chat({ orgSlug, onViewersChange }: Props) {
+export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Props) {
   const [nickname, setNickname] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -19,9 +21,10 @@ export function Chat({ orgSlug, onViewersChange }: Props) {
   useEffect(() => { onViewersRef.current = onViewersChange; });
 
   useEffect(() => {
+    if (authorName) { setNickname(authorName); return; }
     const saved = localStorage.getItem('chat_nickname');
     if (saved) setNickname(saved);
-  }, []);
+  }, [authorName]);
 
   useEffect(() => {
     const socket = getSocket();
@@ -55,7 +58,7 @@ export function Chat({ orgSlug, onViewersChange }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#111' }}>
-      {!nickname && <NicknameModal onConfirm={handleNicknameConfirm} />}
+      {!nickname && !authorName && !authLoading && <NicknameModal onConfirm={handleNicknameConfirm} />}
       <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
         {messages.map((m) => (
           <div key={m.id}>
