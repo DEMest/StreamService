@@ -48,6 +48,7 @@ services:
     container_name: streamservice-api
     volumes:
       - recordings_data:/recordings
+      - uploads_data:/app/uploads
     environment:
       NODE_ENV: production
       API_PORT: 3001
@@ -88,3 +89,4 @@ services:
 volumes:
   postgres_data:
   recordings_data:
+  uploads_data:
