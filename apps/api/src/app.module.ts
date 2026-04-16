@@ -9,6 +9,7 @@ import { OrgModule } from './org/org.module';
 import { PublicModule } from './public/public.module';
 import { ChatModule } from './chat/chat.module';
 import { RecordingModule } from './recording/recording.module';
+import { ThumbnailModule } from './thumbnail/thumbnail.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { RecordingModule } from './recording/recording.module';
     PublicModule,
     ChatModule,
     RecordingModule,
+    ThumbnailModule,
   ],
   controllers: [HealthController],
 })

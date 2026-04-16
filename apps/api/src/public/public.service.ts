@@ -1,21 +1,56 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ThumbnailService } from '../thumbnail/thumbnail.service';
+import { promises as fs } from 'fs';
+import { join } from 'path';
 
 @Injectable()
 export class PublicService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private thumbnail: ThumbnailService,
+  ) {}
 
   async getCatalog() {
-    return this.prisma.organization.findMany({
+    const orgs = await this.prisma.organization.findMany({
       where: { isActive: true },
       select: {
         slug: true,
         name: true,
         isLive: true,
         streamTitle: true,
+        previewMode: true,
+        previewImagePath: true,
       },
       orderBy: { createdAt: 'desc' },
     });
+    return orgs.map(({ previewImagePath, ...rest }) => ({
+      ...rest,
+      hasCustomPreview: !!previewImagePath,
+    }));
+  }
+
+  async getThumbnail(orgSlug: string): Promise<{ buffer: Buffer; maxAge: number }> {
+    const org = await this.prisma.organization.findUnique({
+      where: { slug: orgSlug, isActive: true },
+      select: { isLive: true, previewMode: true, previewImagePath: true },
+    });
+    if (!org) throw new NotFoundException('Organization not found');
+
+    if (org.isLive) {
+      const buf = await this.thumbnail.getSnapshot(orgSlug, org.previewMode);
+      if (!buf) throw new NotFoundException('Snapshot not available');
+      return { buffer: buf, maxAge: 30 };
+    }
+
+    if (org.previewImagePath) {
+      const filePath = join(process.cwd(), 'uploads', org.previewImagePath);
+      const buf = await fs.readFile(filePath).catch(() => null);
+      if (!buf) throw new NotFoundException('Preview image not found');
+      return { buffer: buf, maxAge: 300 };
+    }
+
+    throw new NotFoundException('No preview available');
   }
 
   async getOrgWatch(orgSlug: string, key?: string) {
