@@ -11,11 +11,8 @@ export class PublicService {
       select: {
         slug: true,
         name: true,
-        events: {
-          where: { status: 'live', isPublic: true },
-          take: 1,
-          select: { id: true, title: true, startedAt: true },
-        },
+        isLive: true,
+        streamTitle: true,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -28,32 +25,64 @@ export class PublicService {
         slug: true,
         name: true,
         description: true,
-        events: {
-          where: {
-            status: 'live',
-            OR: [
-              { isPublic: true },
-              ...(key ? [{ isPublic: false, previewKey: key }] : []),
-            ],
-          },
-          take: 1,
-          select: { id: true, title: true, description: true, isPublic: true, startedAt: true },
-        },
+        isLive: true,
+        streamTitle: true,
+        streamDescription: true,
+        streamIsPublic: true,
+        streamPreviewKey: true,
       },
     });
     if (!org) throw new NotFoundException('Organization not found');
-    return org;
+
+    if (!org.streamIsPublic && org.streamPreviewKey !== key) {
+      return {
+        slug: org.slug,
+        name: org.name,
+        isLive: false,
+        streamTitle: '',
+        streamDescription: null,
+        streamIsPublic: false,
+        accessDenied: true,
+      };
+    }
+
+    const { streamPreviewKey: _, ...safe } = org;
+    return safe;
   }
 
-  async getStreamUrl(orgSlug: string) {
+  async getStreamUrl(orgSlug: string, key?: string) {
     const org = await this.prisma.organization.findUnique({
       where: { slug: orgSlug, isActive: true },
+      select: { slug: true, isLive: true, streamIsPublic: true, streamPreviewKey: true },
+    });
+    if (!org || !org.isLive) throw new NotFoundException('No live stream');
+    if (!org.streamIsPublic && org.streamPreviewKey !== key) {
+      throw new NotFoundException('No live stream');
+    }
+    return { hlsUrl: `/hls/live/${orgSlug}/index.m3u8` };
+  }
+
+  async getOrgBroadcasts(orgSlug: string, key?: string) {
+    const org = await this.prisma.organization.findUnique({
+      where: { slug: orgSlug, isActive: true },
+      select: { id: true, streamIsPublic: true, streamPreviewKey: true },
+    });
+    if (!org) throw new NotFoundException('Organization not found');
+    if (!org.streamIsPublic && org.streamPreviewKey !== key) return [];
+
+    return this.prisma.broadcast.findMany({
+      where: { orgId: org.id, endedAt: { not: null } },
+      orderBy: { startedAt: 'desc' },
       select: {
-        slug: true,
-        events: { where: { status: 'live' }, take: 1, select: { id: true } },
+        id: true,
+        title: true,
+        description: true,
+        startedAt: true,
+        endedAt: true,
+        recording: {
+          select: { id: true, status: true, fileSize: true, duration: true },
+        },
       },
     });
-    if (!org || org.events.length === 0) throw new NotFoundException('No live stream');
-    return { hlsUrl: `/hls/live/${orgSlug}/index.m3u8` };
   }
 }
