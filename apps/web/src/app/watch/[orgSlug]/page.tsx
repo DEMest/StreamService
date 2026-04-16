@@ -1,12 +1,14 @@
 'use client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import MatPlayer, { type MatPlayerHandle } from '@/components/MatPlayer';
 import ViewSwitcher, { type ViewMode } from '@/components/ViewSwitcher';
 import { Chat } from '@/components/Chat';
+
+interface Me { sub: string; role: string; orgSlug?: string }
 
 interface OrgWatch {
   slug: string;
@@ -55,6 +57,21 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   const { orgSlug } = params;
   const searchParams = useSearchParams();
   const previewKey = searchParams.get('key') ?? undefined;
+  const qc = useQueryClient();
+  const router = useRouter();
+
+  const { data: me, isLoading: meLoading } = useQuery({
+    queryKey: ['me'],
+    queryFn: () => api.get<Me>('/v1/auth/me'),
+    retry: false,
+  });
+  const isOwner = me?.orgSlug === orgSlug;
+
+  async function handleLogout() {
+    await api.post('/v1/auth/logout', {});
+    qc.clear();
+    router.push('/login');
+  }
 
   const [viewMode, setViewMode]             = useState<ViewMode>('multicam');
   const [chatOpen, setChatOpen]             = useState(true);
@@ -206,7 +223,7 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   // ── Mobile layout ──────────────────────────────────────────────────────────
   if (isMobile) {
     return (
-      <div ref={mobileContainerRef} style={{ position: 'fixed', inset: 0, background: '#000' }} onClick={resetUiTimer}>
+      <div ref={mobileContainerRef} style={{ position: 'fixed', inset: 0, background: '#000', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }} onClick={resetUiTimer}>
         <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }} onClick={handleVideoClick}>
           {stream
             ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} />
@@ -237,18 +254,30 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
         {uiVisible && (
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '0.75rem 1rem', background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', pointerEvents: 'none' }}>
             <span style={{ fontWeight: 700, color: '#fff' }}>{org?.name}</span>
-            {org?.isLive && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ color: '#e53', fontSize: '0.75rem', fontWeight: 600 }}>● LIVE</span>
-                {viewerCount !== null && <span style={{ color: '#888', fontSize: '0.75rem' }}>👁 {viewerCount}</span>}
-              </div>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', pointerEvents: 'auto' }}>
+              {org?.isLive && (
+                <>
+                  <span style={{ color: '#e53', fontSize: '0.75rem', fontWeight: 600 }}>● LIVE</span>
+                  {viewerCount !== null && <span style={{ color: '#888', fontSize: '0.75rem' }}>👁 {viewerCount}</span>}
+                </>
+              )}
+              {isOwner && (
+                <>
+                  <Link href="/dashboard" style={{ color: '#fff', textDecoration: 'none', background: '#2563eb', padding: '0.25rem 0.625rem', borderRadius: '4px', fontSize: '0.75rem' }}>
+                    Студия
+                  </Link>
+                  <button onClick={handleLogout} style={{ color: '#888', background: 'none', border: '1px solid #444', padding: '0.25rem 0.625rem', borderRadius: '4px', fontSize: '0.75rem', cursor: 'pointer' }}>
+                    Выйти
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         )}
 
         <div
           onClick={(e) => { e.stopPropagation(); setMobileViewOpen((v) => !v); setMobileChatOpen(false); resetUiTimer(); }}
-          style={{ position: 'absolute', left: mobileViewOpen ? 180 : 0, top: 0, bottom: 0, width: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', transition: 'left 0.2s', zIndex: 6 }}>
+          style={{ position: 'absolute', left: mobileViewOpen ? 180 : 0, top: 0, bottom: 50, width: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', transition: 'left 0.2s', zIndex: 26 }}>
           <span style={{ color: '#fff', fontSize: '1.25rem', opacity: uiVisible ? 1 : 0, transition: 'opacity 0.3s', background: 'rgba(0,0,0,0.45)', borderRadius: '0 4px 4px 0', padding: '0.6rem 0.35rem', lineHeight: 1 }}>
             {mobileViewOpen ? '‹' : '›'}
           </span>
@@ -256,19 +285,19 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
 
         <div
           onClick={(e) => { e.stopPropagation(); setMobileChatOpen((v) => !v); setMobileViewOpen(false); resetUiTimer(); }}
-          style={{ position: 'absolute', right: mobileChatOpen ? 240 : 0, top: 0, bottom: 0, width: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', transition: 'right 0.2s', zIndex: 6 }}>
+          style={{ position: 'absolute', right: mobileChatOpen ? 240 : 0, top: 0, bottom: 50, width: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', transition: 'right 0.2s', zIndex: 26 }}>
           <span style={{ color: '#fff', fontSize: '1.25rem', opacity: uiVisible ? 1 : 0, transition: 'opacity 0.3s', background: 'rgba(0,0,0,0.45)', borderRadius: '4px 0 0 4px', padding: '0.6rem 0.35rem', lineHeight: 1 }}>
             {mobileChatOpen ? '›' : '‹'}
           </span>
         </div>
 
-        <div style={{ position: 'absolute', left: mobileViewOpen ? 0 : -180, top: 0, bottom: 0, width: 180, background: 'rgba(17,17,17,0.95)', padding: '1rem', transition: 'left 0.2s', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '1.5rem', zIndex: 5 }}>
+        <div style={{ position: 'absolute', left: mobileViewOpen ? 0 : -180, top: 0, bottom: 50, width: 180, background: 'rgba(17,17,17,0.95)', padding: '1rem', transition: 'left 0.2s', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '1.5rem', zIndex: 25 }}>
           <ViewSwitcher mode={viewMode} onChange={(m) => { setViewMode(m); setMobileViewOpen(false); }} />
           <Link href={archiveLink} style={{ color: '#888', fontSize: '0.8rem', textDecoration: 'none' }}>Архив →</Link>
         </div>
 
-        <div style={{ position: 'absolute', right: mobileChatOpen ? 0 : -240, top: 0, bottom: 0, width: 240, background: 'rgba(17,17,17,0.95)', transition: 'right 0.2s', zIndex: 5 }}>
-          {org && <Chat orgSlug={orgSlug} onViewersChange={setViewerCount} />}
+        <div style={{ position: 'absolute', right: mobileChatOpen ? 0 : -240, top: 0, bottom: 50, width: 240, background: 'rgba(17,17,17,0.95)', transition: 'right 0.2s', zIndex: 25 }}>
+          {org && <Chat orgSlug={orgSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
         </div>
       </div>
     );
@@ -285,12 +314,24 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
             {org?.streamTitle && <span style={{ color: '#888', fontSize: '0.875rem' }}>{org.streamTitle}</span>}
             <Link href={archiveLink} style={{ color: '#555', textDecoration: 'none', fontSize: '0.8rem' }}>Архив</Link>
           </div>
-          {org?.isLive && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ color: '#e53', fontSize: '0.75rem', fontWeight: 600 }}>● LIVE</span>
-              {viewerCount !== null && <span style={{ color: '#888', fontSize: '0.75rem' }}>👁 {viewerCount}</span>}
-            </div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            {org?.isLive && (
+              <>
+                <span style={{ color: '#e53', fontSize: '0.75rem', fontWeight: 600 }}>● LIVE</span>
+                {viewerCount !== null && <span style={{ color: '#888', fontSize: '0.75rem' }}>👁 {viewerCount}</span>}
+              </>
+            )}
+            {isOwner && (
+              <>
+                <Link href="/dashboard" style={{ color: '#fff', textDecoration: 'none', background: '#2563eb', padding: '0.375rem 0.875rem', borderRadius: '4px', fontSize: '0.875rem' }}>
+                  Студия
+                </Link>
+                <button onClick={handleLogout} style={{ color: '#888', background: 'none', border: '1px solid #333', padding: '0.375rem 0.875rem', borderRadius: '4px', fontSize: '0.875rem', cursor: 'pointer' }}>
+                  Выйти
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -353,7 +394,7 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
           </button>
           <div style={{ width: chatOpen ? 280 : 0, overflow: 'hidden', borderLeft: chatOpen ? '1px solid #222' : 'none', transition: 'width 0.2s', flexShrink: 0 }}>
             <div style={{ width: 280, height: '100%' }}>
-              {org && <Chat orgSlug={orgSlug} onViewersChange={setViewerCount} />}
+              {org && <Chat orgSlug={orgSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
             </div>
           </div>
         </>
