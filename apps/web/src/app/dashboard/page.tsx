@@ -16,6 +16,8 @@ interface OrgProfile {
   streamDescription?: string;
   streamIsPublic: boolean;
   streamPreviewKey?: string;
+  previewMode: string;
+  previewImagePath?: string;
 }
 interface Broadcast {
   id: string;
@@ -57,6 +59,25 @@ export default function DashboardPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['org-profile'] }),
   });
 
+  const uploadPreviewMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/org/preview`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      return res.json();
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-profile'] }),
+  });
+
+  const deletePreviewMutation = useMutation({
+    mutationFn: () => api.delete('/v1/org/preview'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-profile'] }),
+  });
 
   const updateBroadcastMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: { title: string; description?: string } }) =>
@@ -238,6 +259,59 @@ export default function DashboardPage() {
                 ? <span style={{ color: '#e53', fontSize: '0.875rem', fontWeight: 600 }}>● LIVE — идёт трансляция</span>
                 : <span style={{ color: '#555', fontSize: '0.875rem' }}>Ожидание SRT-потока...</span>
               }
+            </div>
+          </div>
+        </section>
+
+        {/* Preview settings */}
+        <section style={{ background: '#1a1a1a', borderRadius: '8px', padding: '1.5rem', marginBottom: '1.5rem' }}>
+          <h2 style={{ fontSize: '1rem', marginBottom: '1.25rem', color: '#ccc' }}>Превью на главной</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+            <div>
+              <label style={{ display: 'block', color: '#666', fontSize: '0.8rem', marginBottom: '0.4rem' }}>Камера для превью (во время стрима)</label>
+              <select
+                value={profile?.previewMode ?? 'multicam'}
+                onChange={(e) => updateStreamMutation.mutate({ previewMode: e.target.value })}
+                style={{ ...inputStyle, cursor: 'pointer' }}
+              >
+                <option value="multicam">Мультикам (все камеры)</option>
+                <option value="cam1">Камера 1 (верхний левый)</option>
+                <option value="cam2">Камера 2 (верхний правый)</option>
+                <option value="cam3">Камера 3 (нижний левый)</option>
+                <option value="cam4">Камера 4 (нижний правый)</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', color: '#666', fontSize: '0.8rem', marginBottom: '0.4rem' }}>Статичное превью (когда стрим не идёт)</label>
+              {profile?.previewImagePath ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <img
+                    src={`${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/public/orgs/${profile.slug}/thumbnail?t=${Date.now()}`}
+                    alt="Текущее превью"
+                    style={{ width: '160px', height: '90px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #333' }}
+                  />
+                  <button
+                    onClick={() => { if (confirm('Удалить превью?')) deletePreviewMutation.mutate(); }}
+                    style={{ padding: '0.4rem 0.75rem', background: '#7f1d1d', border: 'none', color: '#fff', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>
+                    Удалить
+                  </button>
+                </div>
+              ) : (
+                <p style={{ color: '#555', fontSize: '0.8rem', margin: '0 0 0.5rem' }}>Не установлено</p>
+              )}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) uploadPreviewMutation.mutate(file);
+                  e.target.value = '';
+                }}
+                style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#888' }}
+              />
+              {uploadPreviewMutation.isPending && <p style={{ color: '#888', fontSize: '0.8rem', marginTop: '0.25rem' }}>Загрузка...</p>}
             </div>
           </div>
         </section>
