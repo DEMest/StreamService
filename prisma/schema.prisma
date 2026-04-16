@@ -32,6 +32,8 @@ model Organization {
   streamPreviewKey   String?       @unique
   isLive             Boolean       @default(false)
   autoStream         Boolean       @default(true)
+  previewMode        String        @default("multicam")
+  previewImagePath   String?
   currentBroadcastId String?       @unique
   // Relations
   broadcasts         Broadcast[]
