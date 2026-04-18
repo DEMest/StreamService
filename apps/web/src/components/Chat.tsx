@@ -53,6 +53,15 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
+  // Auto-prune messages older than 5 minutes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const cutoff = Date.now() - 5 * 60 * 1000;
+      setMessages((prev) => prev.filter((m) => new Date(m.createdAt).getTime() > cutoff));
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
   function handleNicknameConfirm(name: string) {
     localStorage.setItem('chat_nickname', name);
     setNickname(name);

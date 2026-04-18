@@ -55,6 +55,7 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
   const [isBuffering, setIsBuffering] = useState(false);
   const [qualityLevel, setQualityLevel] = useState(-1); // -1 = auto
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
+  const [activeQuality, setActiveQuality] = useState(-1); // actual level chosen by ABR
 
   const matRef = useRef<MatPlayerHandle>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
@@ -159,6 +160,7 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
                 onMutedFallback={() => setVolume(0)}
                 onTimeUpdate={handleTimeUpdate}
                 onBuffering={setIsBuffering}
+                onQualityChange={setActiveQuality}
               />
             </div>
 
@@ -208,7 +210,9 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
                 >
                   <GearSix size={16} />
                   <span className="text-zinc-400">
-                    {qualityLevel === -1 ? 'Авто' : (matRef.current?.getQualityLevels()?.[qualityLevel]?.name ?? 'HD')}
+                    {qualityLevel === -1
+                      ? `Авто${activeQuality >= 0 ? ` (${matRef.current?.getQualityLevels()?.[activeQuality]?.name ?? ''})` : ''}`
+                      : (matRef.current?.getQualityLevels()?.[qualityLevel]?.name ?? 'HD')}
                   </span>
                 </button>
                 {qualityMenuOpen && (
@@ -238,7 +242,7 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
 
             {/* Close button */}
             <button
-              onClick={() => { setSelectedId(null); setCurrentTime(0); setDuration(0); setIsBuffering(false); setQualityLevel(-1); setQualityMenuOpen(false); }}
+              onClick={() => { setSelectedId(null); setCurrentTime(0); setDuration(0); setIsBuffering(false); setQualityLevel(-1); setQualityMenuOpen(false); setActiveQuality(-1); }}
               className="absolute top-3 right-3 bg-black/70 hover:bg-black text-white p-2 rounded-lg z-20 transition-all cursor-pointer border-none flex items-center gap-1.5 text-xs"
             >
               <X size={14} /> Закрыть

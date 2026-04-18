@@ -11,6 +11,7 @@ interface Props {
   onMutedFallback?: () => void;
   onTimeUpdate?: (current: number, duration: number, isLive: boolean) => void;
   onBuffering?: (isBuffering: boolean) => void;
+  onQualityChange?: (levelIndex: number) => void;
 }
 
 export interface MatPlayerHandle {
@@ -45,7 +46,7 @@ function drawContain(
   ctx.drawImage(video, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
-const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, volume = 1, isArchive = false, onMutedFallback, onTimeUpdate, onBuffering }, ref) => {
+const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, volume = 1, isArchive = false, onMutedFallback, onTimeUpdate, onBuffering, onQualityChange }, ref) => {
   const videoRef  = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const modeRef   = useRef(viewMode);
@@ -125,6 +126,9 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
             onMutedFallback?.();
             video.play().catch(() => {});
           });
+        });
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+          onQualityChange?.(data.level);
         });
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         // Safari native HLS
