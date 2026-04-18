@@ -11,7 +11,7 @@ import {
   ArrowLeft, Broadcast, Eye, CornersOut, CornersIn,
   SpeakerHigh, SpeakerLow, SpeakerSlash,
   CaretLeft, CaretRight, ChatCircle, Archive,
-  SignOut, TelevisionSimple,
+  SignOut, TelevisionSimple, GearSix,
 } from '@phosphor-icons/react';
 
 interface Me { sub: string; role: string; orgSlug?: string }
@@ -61,6 +61,10 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   const [currentTime, setCurrentTime]       = useState(0);
   const [duration, setDuration]             = useState(0);
   const [isAtLive, setIsAtLive]             = useState(true);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [qualityLevel, setQualityLevel] = useState(-1);
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
+  const [activeQuality, setActiveQuality] = useState(-1);
 
   const uiTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
   const matRef             = useRef<MatPlayerHandle>(null);
@@ -121,6 +125,7 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   });
 
   function handleVideoClick(e: React.MouseEvent<HTMLDivElement>) {
+    setQualityMenuOpen(false);
     setMobileViewOpen(false);
     if (viewMode !== 'multicam') { setViewMode('multicam'); return; }
     const rect = e.currentTarget.getBoundingClientRect();
@@ -164,6 +169,16 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
     return <SpeakerHigh size={18} />;
   }
 
+  function qualityLabel(): string {
+    if (qualityLevel === -1) {
+      const activeName = activeQuality >= 0
+        ? matRef.current?.getQualityLevels()?.[activeQuality]?.name
+        : undefined;
+      return activeName ? `Авто (${activeName})` : 'Авто';
+    }
+    return matRef.current?.getQualityLevels()?.[qualityLevel]?.name ?? 'HD';
+  }
+
   const [desktopControlsVisible, setDesktopControlsVisible] = useState(true);
   const desktopControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -195,7 +210,7 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
       <div ref={mobileContainerRef} className="fixed inset-0 bg-black" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }} onClick={resetUiTimer}>
         <div className="absolute inset-0 overflow-hidden" onClick={handleVideoClick}>
           {stream
-            ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} />
+            ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} onBuffering={setIsBuffering} onQualityChange={setActiveQuality} />
             : <div className="flex items-center justify-center h-full">
                 <TelevisionSimple size={48} className="text-zinc-700" weight="thin" />
               </div>
@@ -214,9 +229,43 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
               <span className="text-zinc-500 text-[0.65rem] font-mono tabular-nums shrink-0">{formatTime(duration)}</span>
               <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-[50px] shrink-0" />
               <button className="text-white bg-transparent border-none w-8 h-8 flex items-center justify-center cursor-pointer shrink-0"><VolumeIcon /></button>
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setQualityMenuOpen((v) => !v)}
+                  className="text-white bg-transparent border-none h-8 px-1.5 rounded flex items-center gap-0.5 cursor-pointer hover:bg-white/10 transition-colors text-[0.65rem] font-medium"
+                >
+                  <GearSix size={14} />
+                  <span className="text-zinc-400">{qualityLabel()}</span>
+                </button>
+                {qualityMenuOpen && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 border border-zinc-700/50 rounded-lg overflow-hidden min-w-[110px] backdrop-blur-sm">
+                    <button
+                      onClick={() => { setQualityLevel(-1); matRef.current?.setQualityLevel(-1); setQualityMenuOpen(false); }}
+                      className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === -1 ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
+                    >
+                      Авто
+                    </button>
+                    {(matRef.current?.getQualityLevels() ?? []).map((q) => (
+                      <button
+                        key={q.index}
+                        onClick={() => { setQualityLevel(q.index); matRef.current?.setQualityLevel(q.index); setQualityMenuOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === q.index ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
+                      >
+                        {q.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <button onClick={toggleFullscreen} className="text-white bg-transparent border-none w-8 h-8 flex items-center justify-center cursor-pointer shrink-0">
                 {isFullscreen ? <CornersIn size={18} /> : <CornersOut size={18} />}
               </button>
+            </div>
+          )}
+          {/* Buffering spinner */}
+          {isBuffering && (
+            <div className="absolute inset-0 flex items-center justify-center z-[11] pointer-events-none">
+              <div className="w-12 h-12 border-3 border-zinc-600 border-t-white rounded-full animate-spin" />
             </div>
           )}
         </div>
@@ -337,12 +386,19 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
           onMouseMove={isFullscreen ? resetDesktopControlsTimer : undefined}
         >
           {stream
-            ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} />
+            ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} onBuffering={setIsBuffering} onQualityChange={setActiveQuality} />
             : <div className="flex flex-col items-center justify-center h-full gap-2">
                 <TelevisionSimple size={48} className="text-zinc-700" weight="thin" />
                 <span className="text-zinc-600 text-sm">Нет активной трансляции</span>
               </div>
           }
+
+          {/* Buffering spinner */}
+          {isBuffering && (
+            <div className="absolute inset-0 flex items-center justify-center z-[11] pointer-events-none">
+              <div className="w-12 h-12 border-3 border-zinc-600 border-t-white rounded-full animate-spin" />
+            </div>
+          )}
 
           {!isFullscreen && (
             <>
@@ -377,6 +433,35 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
               <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(duration)}</span>
               <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-20 shrink-0" />
               <button className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors"><VolumeIcon /></button>
+              {/* Quality selector */}
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setQualityMenuOpen((v) => !v)}
+                  className="text-white bg-transparent border-none h-9 px-2 rounded flex items-center gap-1 cursor-pointer hover:bg-white/10 transition-colors text-xs font-medium"
+                >
+                  <GearSix size={16} />
+                  <span className="text-zinc-400">{qualityLabel()}</span>
+                </button>
+                {qualityMenuOpen && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 border border-zinc-700/50 rounded-lg overflow-hidden min-w-[120px] backdrop-blur-sm">
+                    <button
+                      onClick={() => { setQualityLevel(-1); matRef.current?.setQualityLevel(-1); setQualityMenuOpen(false); }}
+                      className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === -1 ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
+                    >
+                      Авто
+                    </button>
+                    {(matRef.current?.getQualityLevels() ?? []).map((q) => (
+                      <button
+                        key={q.index}
+                        onClick={() => { setQualityLevel(q.index); matRef.current?.setQualityLevel(q.index); setQualityMenuOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === q.index ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
+                      >
+                        {q.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <button onClick={toggleFullscreen} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors">
                 {isFullscreen ? <CornersIn size={18} /> : <CornersOut size={18} />}
               </button>
