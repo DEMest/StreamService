@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { Broadcast, SignIn, SignOut, Monitor } from '@phosphor-icons/react';
 
 interface Me { sub: string; role: string; orgSlug?: string }
 
@@ -22,34 +23,48 @@ export function Header() {
   }
 
   return (
-    <header style={{ height: '56px', background: '#111', borderBottom: '1px solid #222', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 1.5rem', flexShrink: 0 }}>
-      <Link href="/" style={{ color: '#fff', textDecoration: 'none', fontWeight: 700, fontSize: '1.1rem' }}>
+    <header className="h-14 bg-surface-elevated border-b border-zinc-800/60 flex items-center justify-between px-6 shrink-0">
+      <Link href="/" className="text-zinc-50 no-underline font-semibold text-lg tracking-tight hover:text-white transition-colors">
         StreamService
       </Link>
-      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+
+      <nav className="flex gap-2 items-center">
         {me ? (
           <>
             {me.orgSlug && (
-              <Link href={`/watch/${me.orgSlug}`} style={{ color: '#888', textDecoration: 'none', fontSize: '0.875rem' }}>
+              <Link
+                href={`/watch/${me.orgSlug}`}
+                className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 no-underline text-sm transition-colors px-2 py-1.5 rounded-lg hover:bg-zinc-800/50"
+              >
+                <Monitor size={16} />
                 Моя страница
               </Link>
             )}
-            <Link href="/dashboard" style={{ color: '#fff', textDecoration: 'none', background: '#2563eb', padding: '0.375rem 0.875rem', borderRadius: '4px', fontSize: '0.875rem' }}>
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-1.5 bg-brand hover:bg-brand-hover text-white no-underline text-sm font-medium px-3 py-1.5 rounded-lg transition-all duration-200 active:scale-[0.98]"
+            >
+              <Broadcast size={16} weight="fill" />
               Студия
             </Link>
             <button
               onClick={handleLogout}
-              style={{ color: '#888', background: 'none', border: '1px solid #333', padding: '0.375rem 0.875rem', borderRadius: '4px', fontSize: '0.875rem', cursor: 'pointer' }}
+              className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 bg-transparent border border-zinc-800 px-3 py-1.5 rounded-lg text-sm transition-all duration-200 hover:border-zinc-700 hover:bg-zinc-800/50 active:scale-[0.98] cursor-pointer"
             >
+              <SignOut size={16} />
               Выйти
             </button>
           </>
         ) : (
-          <Link href="/login" style={{ color: '#fff', textDecoration: 'none', background: '#2d2d2d', padding: '0.375rem 0.875rem', borderRadius: '4px', fontSize: '0.875rem' }}>
+          <Link
+            href="/login"
+            className="flex items-center gap-1.5 text-zinc-300 hover:text-white no-underline bg-zinc-800 hover:bg-zinc-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 active:scale-[0.98]"
+          >
+            <SignIn size={16} />
             Войти
           </Link>
         )}
-      </div>
+      </nav>
     </header>
   );
 }

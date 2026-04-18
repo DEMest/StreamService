@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getSocket } from '@/lib/socket';
 import { NicknameModal } from './NicknameModal';
+import { PaperPlaneRight, ChatCircle } from '@phosphor-icons/react';
 
 interface Message { id: string; nickname: string; content: string; createdAt: string }
 
@@ -65,26 +66,38 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#111' }}>
+    <div className="flex flex-col h-full bg-surface-elevated">
       {!nickname && !authorName && !authLoading && <NicknameModal onConfirm={handleNicknameConfirm} />}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+
+      <div className="flex-1 overflow-y-auto p-3 space-y-1 scrollbar-thin">
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full gap-2 opacity-40">
+            <ChatCircle size={28} className="text-zinc-600" />
+            <span className="text-xs text-zinc-600">Чат пуст</span>
+          </div>
+        )}
         {messages.map((m) => (
-          <div key={m.id}>
-            <span style={{ color: '#2563eb', fontWeight: 600, fontSize: '0.8rem' }}>{m.nickname}: </span>
-            <span style={{ color: '#ddd', fontSize: '0.875rem' }}>{m.content}</span>
+          <div key={m.id} className="leading-snug">
+            <span className="text-brand font-semibold text-xs">{m.nickname}: </span>
+            <span className="text-zinc-300 text-sm">{m.content}</span>
           </div>
         ))}
         <div ref={bottomRef} />
       </div>
-      <form onSubmit={handleSend} style={{ display: 'flex', borderTop: '1px solid #222', padding: '0.5rem' }}>
+
+      <form onSubmit={handleSend} className="border-t border-zinc-800/60 p-2 flex gap-1.5">
         <input
-          value={input} onChange={(e) => setInput(e.target.value)}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
           placeholder="Сообщение..."
           maxLength={500}
-          style={{ flex: 1, padding: '0.5rem', background: '#0a0a0a', border: 'none', color: '#fff', borderRadius: '4px 0 0 4px' }}
+          className="flex-1 px-3 py-2 bg-surface-primary border-none rounded-lg text-sm text-zinc-200 placeholder:text-zinc-600 focus:ring-1 focus:ring-brand/30 outline-none transition-colors"
         />
-        <button type="submit" style={{ padding: '0.5rem 1rem', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '0 4px 4px 0', cursor: 'pointer' }}>
-          →
+        <button
+          type="submit"
+          className="p-2 bg-brand hover:bg-brand-hover text-white rounded-lg transition-all duration-200 active:scale-95"
+        >
+          <PaperPlaneRight size={16} weight="fill" />
         </button>
       </form>
     </div>

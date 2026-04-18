@@ -192,7 +192,7 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#000' }}>
+    <div className="relative w-full h-full bg-black">
       <video
         ref={videoRef}
         autoPlay playsInline

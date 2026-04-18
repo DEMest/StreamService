@@ -7,6 +7,12 @@ import { api } from '@/lib/api';
 import MatPlayer, { type MatPlayerHandle } from '@/components/MatPlayer';
 import ViewSwitcher, { type ViewMode } from '@/components/ViewSwitcher';
 import { Chat } from '@/components/Chat';
+import {
+  ArrowLeft, Broadcast, Eye, CornersOut, CornersIn,
+  SpeakerHigh, SpeakerLow, SpeakerSlash,
+  CaretLeft, CaretRight, ChatCircle, Archive,
+  SignOut, TelevisionSimple,
+} from '@phosphor-icons/react';
 
 interface Me { sub: string; role: string; orgSlug?: string }
 
@@ -21,37 +27,6 @@ interface OrgWatch {
   accessDenied?: boolean;
 }
 interface StreamInfo { hlsUrl: string }
-
-const ExpandIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-  </svg>
-);
-const CompressIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
-  </svg>
-);
-const SpeakerHighIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M11 5L6 9H2v6h4l5 4V5z"/>
-    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-  </svg>
-);
-const SpeakerLowIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M11 5L6 9H2v6h4l5 4V5z"/>
-    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-  </svg>
-);
-const SpeakerMuteIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M11 5L6 9H2v6h4l5 4V5z"/>
-    <line x1="23" y1="9" x2="17" y2="15"/>
-    <line x1="17" y1="9" x2="23" y2="15"/>
-  </svg>
-);
 
 export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   const { orgSlug } = params;
@@ -184,9 +159,9 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   }
 
   function VolumeIcon() {
-    if (volume === 0) return <SpeakerMuteIcon />;
-    if (volume <= 0.5) return <SpeakerLowIcon />;
-    return <SpeakerHighIcon />;
+    if (volume === 0) return <SpeakerSlash size={18} />;
+    if (volume <= 0.5) return <SpeakerLow size={18} />;
+    return <SpeakerHigh size={18} />;
   }
 
   const [desktopControlsVisible, setDesktopControlsVisible] = useState(true);
@@ -210,12 +185,6 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
     return () => { if (desktopControlsTimerRef.current) clearTimeout(desktopControlsTimerRef.current); };
   }, [isFullscreen]);
 
-  const iconBtn: React.CSSProperties = {
-    background: 'none', border: 'none', color: '#fff',
-    width: 36, height: 36, borderRadius: 4, cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  };
-
   const archiveLink = previewKey
     ? `/watch/${orgSlug}/archive?key=${previewKey}`
     : `/watch/${orgSlug}/archive`;
@@ -223,50 +192,57 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   // ── Mobile layout ──────────────────────────────────────────────────────────
   if (isMobile) {
     return (
-      <div ref={mobileContainerRef} style={{ position: 'fixed', inset: 0, background: '#000', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }} onClick={resetUiTimer}>
-        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }} onClick={handleVideoClick}>
+      <div ref={mobileContainerRef} className="fixed inset-0 bg-black" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }} onClick={resetUiTimer}>
+        <div className="absolute inset-0 overflow-hidden" onClick={handleVideoClick}>
           {stream
             ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} />
-            : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#555' }}>
-                Нет активной трансляции
+            : <div className="flex items-center justify-center h-full">
+                <TelevisionSimple size={48} className="text-zinc-700" weight="thin" />
               </div>
           }
           {stream && (
             <div
-              style={{ position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 20, padding: '8px 12px', background: 'linear-gradient(transparent, rgba(0,0,0,0.8))', display: 'flex', alignItems: 'center', gap: 6 }}
+              className="absolute inset-x-0 bottom-0 z-20 px-3 py-2 flex items-center gap-1.5"
+              style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.85))' }}
               onClick={(e) => e.stopPropagation()}
             >
               {!isAtLive && (
-                <button onClick={goToLive} style={{ background: '#e53', border: 'none', color: '#fff', padding: '2px 6px', borderRadius: 4, cursor: 'pointer', fontSize: '0.65rem', fontWeight: 700, flexShrink: 0 }}>LIVE</button>
+                <button onClick={goToLive} className="bg-brand text-white text-[0.6rem] font-bold px-1.5 py-0.5 rounded shrink-0 cursor-pointer border-none">LIVE</button>
               )}
-              <span style={{ color: '#aaa', fontSize: '0.65rem', flexShrink: 0 }}>{formatTime(currentTime)}</span>
-              <input type="range" min={0} max={duration || 0} step={0.1} value={currentTime} onChange={handleSeek} style={{ flex: 1, accentColor: '#e53' }} />
-              <span style={{ color: '#aaa', fontSize: '0.65rem', flexShrink: 0 }}>{formatTime(duration)}</span>
-              <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} style={{ width: 50, accentColor: '#e53', flexShrink: 0 }} />
-              <button style={iconBtn}><VolumeIcon /></button>
-              <button onClick={toggleFullscreen} style={iconBtn}>
-                {isFullscreen ? <CompressIcon /> : <ExpandIcon />}
+              <span className="text-zinc-500 text-[0.65rem] font-mono tabular-nums shrink-0">{formatTime(currentTime)}</span>
+              <input type="range" min={0} max={duration || 0} step={0.1} value={currentTime} onChange={handleSeek} className="flex-1" />
+              <span className="text-zinc-500 text-[0.65rem] font-mono tabular-nums shrink-0">{formatTime(duration)}</span>
+              <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-[50px] shrink-0" />
+              <button className="text-white bg-transparent border-none w-8 h-8 flex items-center justify-center cursor-pointer shrink-0"><VolumeIcon /></button>
+              <button onClick={toggleFullscreen} className="text-white bg-transparent border-none w-8 h-8 flex items-center justify-center cursor-pointer shrink-0">
+                {isFullscreen ? <CornersIn size={18} /> : <CornersOut size={18} />}
               </button>
             </div>
           )}
         </div>
 
         {uiVisible && (
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '0.75rem 1rem', background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', pointerEvents: 'none' }}>
-            <span style={{ fontWeight: 700, color: '#fff' }}>{org?.name}</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', pointerEvents: 'auto' }}>
+          <div className="absolute top-0 inset-x-0 px-4 py-3 flex justify-between items-center pointer-events-none" style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)' }}>
+            <span className="font-semibold text-white text-sm">{org?.name}</span>
+            <div className="flex items-center gap-2 pointer-events-auto">
               {org?.isLive && (
                 <>
-                  <span style={{ color: '#e53', fontSize: '0.75rem', fontWeight: 600 }}>● LIVE</span>
-                  {viewerCount !== null && <span style={{ color: '#888', fontSize: '0.75rem' }}>👁 {viewerCount}</span>}
+                  <span className="flex items-center gap-1 text-brand text-xs font-semibold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse" /> LIVE
+                  </span>
+                  {viewerCount !== null && (
+                    <span className="flex items-center gap-1 text-zinc-500 text-xs">
+                      <Eye size={12} /> {viewerCount}
+                    </span>
+                  )}
                 </>
               )}
               {isOwner && (
                 <>
-                  <Link href="/dashboard" style={{ color: '#fff', textDecoration: 'none', background: '#2563eb', padding: '0.25rem 0.625rem', borderRadius: '4px', fontSize: '0.75rem' }}>
+                  <Link href="/dashboard" className="text-white no-underline bg-brand px-2.5 py-1 rounded-md text-xs font-medium">
                     Студия
                   </Link>
-                  <button onClick={handleLogout} style={{ color: '#888', background: 'none', border: '1px solid #444', padding: '0.25rem 0.625rem', borderRadius: '4px', fontSize: '0.75rem', cursor: 'pointer' }}>
+                  <button onClick={handleLogout} className="text-zinc-500 bg-transparent border border-zinc-700 px-2.5 py-1 rounded-md text-xs cursor-pointer">
                     Выйти
                   </button>
                 </>
@@ -277,26 +253,34 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
 
         <div
           onClick={(e) => { e.stopPropagation(); setMobileViewOpen((v) => !v); setMobileChatOpen(false); resetUiTimer(); }}
-          style={{ position: 'absolute', left: mobileViewOpen ? 180 : 0, top: 0, bottom: 50, width: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', transition: 'left 0.2s', zIndex: 26 }}>
-          <span style={{ color: '#fff', fontSize: '1.25rem', opacity: uiVisible ? 1 : 0, transition: 'opacity 0.3s', background: 'rgba(0,0,0,0.45)', borderRadius: '0 4px 4px 0', padding: '0.6rem 0.35rem', lineHeight: 1 }}>
-            {mobileViewOpen ? '‹' : '›'}
+          className="absolute top-0 z-[26] w-11 flex items-center justify-start cursor-pointer"
+          style={{ left: mobileViewOpen ? 180 : 0, bottom: 50, transition: 'left 0.2s' }}>
+          <span className="text-white rounded-r-md py-2.5 px-1.5 leading-none" style={{ background: 'rgba(0,0,0,0.5)', opacity: uiVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
+            {mobileViewOpen ? <CaretLeft size={16} /> : <CaretRight size={16} />}
           </span>
         </div>
 
         <div
           onClick={(e) => { e.stopPropagation(); setMobileChatOpen((v) => !v); setMobileViewOpen(false); resetUiTimer(); }}
-          style={{ position: 'absolute', right: mobileChatOpen ? 240 : 0, top: 0, bottom: 50, width: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', transition: 'right 0.2s', zIndex: 26 }}>
-          <span style={{ color: '#fff', fontSize: '1.25rem', opacity: uiVisible ? 1 : 0, transition: 'opacity 0.3s', background: 'rgba(0,0,0,0.45)', borderRadius: '4px 0 0 4px', padding: '0.6rem 0.35rem', lineHeight: 1 }}>
-            {mobileChatOpen ? '›' : '‹'}
+          className="absolute top-0 z-[26] w-11 flex items-center justify-end cursor-pointer"
+          style={{ right: mobileChatOpen ? 240 : 0, bottom: 50, transition: 'right 0.2s' }}>
+          <span className="text-white rounded-l-md py-2.5 px-1.5 leading-none" style={{ background: 'rgba(0,0,0,0.5)', opacity: uiVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
+            {mobileChatOpen ? <CaretRight size={16} /> : <ChatCircle size={16} />}
           </span>
         </div>
 
-        <div style={{ position: 'absolute', left: mobileViewOpen ? 0 : -180, top: 0, bottom: 50, width: 180, background: 'rgba(17,17,17,0.95)', padding: '1rem', transition: 'left 0.2s', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '1.5rem', zIndex: 25 }}>
+        <div
+          className="absolute top-0 z-[25] flex flex-col justify-center gap-6 p-4 backdrop-blur-sm"
+          style={{ left: mobileViewOpen ? 0 : -180, bottom: 50, width: 180, background: 'rgba(12,12,14,0.95)', transition: 'left 0.2s' }}>
           <ViewSwitcher mode={viewMode} onChange={(m) => { setViewMode(m); setMobileViewOpen(false); }} />
-          <Link href={archiveLink} style={{ color: '#888', fontSize: '0.8rem', textDecoration: 'none' }}>Архив →</Link>
+          <Link href={archiveLink} className="flex items-center gap-1.5 text-zinc-500 text-xs no-underline hover:text-zinc-300 transition-colors">
+            <Archive size={14} /> Архив
+          </Link>
         </div>
 
-        <div style={{ position: 'absolute', right: mobileChatOpen ? 0 : -240, top: 0, bottom: 50, width: 240, background: 'rgba(17,17,17,0.95)', transition: 'right 0.2s', zIndex: 25 }}>
+        <div
+          className="absolute top-0 z-[25] backdrop-blur-sm"
+          style={{ right: mobileChatOpen ? 0 : -240, bottom: 50, width: 240, background: 'rgba(12,12,14,0.95)', transition: 'right 0.2s' }}>
           {org && <Chat orgSlug={orgSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
         </div>
       </div>
@@ -305,29 +289,39 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
 
   // ── Desktop layout ─────────────────────────────────────────────────────────
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#0a0a0a', color: '#fff', flexDirection: 'column' }}>
+    <div className="flex h-screen bg-surface-primary text-zinc-200 flex-col">
       {!isFullscreen && (
-        <div style={{ padding: '0.75rem 1rem', background: '#111', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <Link href="/" style={{ color: '#888', textDecoration: 'none', fontSize: '0.875rem' }}>← Главная</Link>
-            <span style={{ fontWeight: 700 }}>{org?.name}</span>
-            {org?.streamTitle && <span style={{ color: '#888', fontSize: '0.875rem' }}>{org.streamTitle}</span>}
-            <Link href={archiveLink} style={{ color: '#555', textDecoration: 'none', fontSize: '0.8rem' }}>Архив</Link>
+        <div className="px-4 py-3 bg-surface-elevated border-b border-zinc-800/60 flex justify-between items-center shrink-0">
+          <div className="flex items-center gap-4">
+            <Link href="/" className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 no-underline text-sm transition-colors">
+              <ArrowLeft size={16} /> Главная
+            </Link>
+            <span className="font-semibold text-zinc-100">{org?.name}</span>
+            {org?.streamTitle && <span className="text-zinc-500 text-sm">{org.streamTitle}</span>}
+            <Link href={archiveLink} className="flex items-center gap-1 text-zinc-600 hover:text-zinc-400 no-underline text-xs transition-colors">
+              <Archive size={14} /> Архив
+            </Link>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div className="flex items-center gap-3">
             {org?.isLive && (
               <>
-                <span style={{ color: '#e53', fontSize: '0.75rem', fontWeight: 600 }}>● LIVE</span>
-                {viewerCount !== null && <span style={{ color: '#888', fontSize: '0.75rem' }}>👁 {viewerCount}</span>}
+                <span className="flex items-center gap-1.5 text-brand text-xs font-semibold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse" /> LIVE
+                </span>
+                {viewerCount !== null && (
+                  <span className="flex items-center gap-1 text-zinc-500 text-xs">
+                    <Eye size={14} /> {viewerCount}
+                  </span>
+                )}
               </>
             )}
             {isOwner && (
               <>
-                <Link href="/dashboard" style={{ color: '#fff', textDecoration: 'none', background: '#2563eb', padding: '0.375rem 0.875rem', borderRadius: '4px', fontSize: '0.875rem' }}>
-                  Студия
+                <Link href="/dashboard" className="flex items-center gap-1.5 bg-brand hover:bg-brand-hover text-white no-underline px-3 py-1.5 rounded-lg text-sm font-medium transition-all active:scale-[0.98]">
+                  <Broadcast size={14} weight="fill" /> Студия
                 </Link>
-                <button onClick={handleLogout} style={{ color: '#888', background: 'none', border: '1px solid #333', padding: '0.375rem 0.875rem', borderRadius: '4px', fontSize: '0.875rem', cursor: 'pointer' }}>
-                  Выйти
+                <button onClick={handleLogout} className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 bg-transparent border border-zinc-800 px-3 py-1.5 rounded-lg text-sm transition-all hover:border-zinc-700 active:scale-[0.98] cursor-pointer">
+                  <SignOut size={14} /> Выйти
                 </button>
               </>
             )}
@@ -335,17 +329,18 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
         </div>
       )}
 
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div className="flex-1 flex overflow-hidden">
         <div
           ref={videoColumnRef}
-          style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#000', cursor: 'pointer' }}
+          className="flex-1 relative overflow-hidden bg-black cursor-pointer"
           onClick={handleVideoClick}
           onMouseMove={isFullscreen ? resetDesktopControlsTimer : undefined}
         >
           {stream
             ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} />
-            : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#555' }}>
-                Нет активной трансляции
+            : <div className="flex flex-col items-center justify-center h-full gap-2">
+                <TelevisionSimple size={48} className="text-zinc-700" weight="thin" />
+                <span className="text-zinc-600 text-sm">Нет активной трансляции</span>
               </div>
           }
 
@@ -353,13 +348,15 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
             <>
               <button
                 onClick={(e) => { e.stopPropagation(); setViewPanelOpen((v) => !v); }}
-                style={{ position: 'absolute', left: viewPanelOpen ? 160 : 0, top: '50%', transform: 'translateY(-50%)', zIndex: 10, background: '#222', border: 'none', color: '#fff', padding: '0.5rem 0.4rem', cursor: 'pointer', borderRadius: '0 4px 4px 0', transition: 'left 0.2s' }}>
-                {viewPanelOpen ? '‹' : '›'}
+                className="absolute top-1/2 -translate-y-1/2 z-10 bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 p-1.5 cursor-pointer rounded-r-lg transition-all text-white"
+                style={{ left: viewPanelOpen ? 160 : 0 }}>
+                {viewPanelOpen ? <CaretLeft size={14} /> : <CaretRight size={14} />}
               </button>
               {viewPanelOpen && (
                 <div
                   onClick={(e) => e.stopPropagation()}
-                  style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 160, background: 'rgba(17,17,17,0.95)', padding: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', zIndex: 9 }}>
+                  className="absolute left-0 inset-y-0 w-40 backdrop-blur-sm p-4 flex flex-col justify-center z-[9]"
+                  style={{ background: 'rgba(12,12,14,0.95)' }}>
                   <ViewSwitcher mode={viewMode} onChange={setViewMode} />
                 </div>
               )}
@@ -368,19 +365,20 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
 
           {stream && (
             <div
-              style={{ position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 20, padding: '8px 12px', background: 'linear-gradient(transparent, rgba(0,0,0,0.8))', display: 'flex', alignItems: 'center', gap: 8, transition: 'opacity 0.3s', opacity: desktopControlsVisible ? 1 : 0, pointerEvents: desktopControlsVisible ? 'auto' : 'none' }}
+              className="absolute inset-x-0 bottom-0 z-20 px-3 py-2.5 flex items-center gap-2 transition-opacity duration-300"
+              style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.85))', opacity: desktopControlsVisible ? 1 : 0, pointerEvents: desktopControlsVisible ? 'auto' : 'none' }}
               onClick={(e) => e.stopPropagation()}
             >
               {!isAtLive && (
-                <button onClick={goToLive} style={{ background: '#e53', border: 'none', color: '#fff', padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.7rem', fontWeight: 700, flexShrink: 0 }}>LIVE</button>
+                <button onClick={goToLive} className="bg-brand text-white text-[0.65rem] font-bold px-2 py-0.5 rounded-md shrink-0 cursor-pointer border-none">LIVE</button>
               )}
-              <span style={{ color: '#aaa', fontSize: '0.7rem', flexShrink: 0 }}>{formatTime(currentTime)}</span>
-              <input type="range" min={0} max={duration || 0} step={0.1} value={currentTime} onChange={handleSeek} style={{ flex: 1, accentColor: '#e53' }} />
-              <span style={{ color: '#aaa', fontSize: '0.7rem', flexShrink: 0 }}>{formatTime(duration)}</span>
-              <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} style={{ width: 80, accentColor: '#e53', flexShrink: 0 }} />
-              <button style={iconBtn}><VolumeIcon /></button>
-              <button onClick={toggleFullscreen} style={iconBtn}>
-                {isFullscreen ? <CompressIcon /> : <ExpandIcon />}
+              <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(currentTime)}</span>
+              <input type="range" min={0} max={duration || 0} step={0.1} value={currentTime} onChange={handleSeek} className="flex-1" />
+              <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(duration)}</span>
+              <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-20 shrink-0" />
+              <button className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors"><VolumeIcon /></button>
+              <button onClick={toggleFullscreen} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors">
+                {isFullscreen ? <CornersIn size={18} /> : <CornersOut size={18} />}
               </button>
             </div>
           )}
@@ -389,11 +387,12 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
         <>
           <button
             onClick={(e) => { e.stopPropagation(); setChatOpen((v) => !v); }}
-            style={{ position: 'absolute', right: chatOpen ? 280 : 0, top: '50%', transform: 'translateY(-50%)', zIndex: 10, background: '#222', border: 'none', color: '#fff', padding: '0.5rem 0.4rem', cursor: 'pointer', borderRadius: '4px 0 0 4px', transition: 'right 0.2s' }}>
-            {chatOpen ? '›' : '‹'}
+            className="absolute top-1/2 -translate-y-1/2 z-10 bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 p-1.5 cursor-pointer rounded-l-lg transition-all text-white"
+            style={{ right: chatOpen ? 300 : 0 }}>
+            {chatOpen ? <CaretRight size={14} /> : <ChatCircle size={14} />}
           </button>
-          <div style={{ width: chatOpen ? 280 : 0, overflow: 'hidden', borderLeft: chatOpen ? '1px solid #222' : 'none', transition: 'width 0.2s', flexShrink: 0 }}>
-            <div style={{ width: 280, height: '100%' }}>
+          <div className="overflow-hidden shrink-0 transition-[width] duration-200" style={{ width: chatOpen ? 300 : 0, borderLeft: chatOpen ? '1px solid rgba(39,39,42,0.6)' : 'none' }}>
+            <div className="h-full" style={{ width: 300 }}>
               {org && <Chat orgSlug={orgSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
             </div>
           </div>

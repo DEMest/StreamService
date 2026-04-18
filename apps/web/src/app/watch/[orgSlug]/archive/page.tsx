@@ -6,8 +6,13 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import MatPlayer, { type MatPlayerHandle } from '@/components/MatPlayer';
 import ViewSwitcher, { type ViewMode } from '@/components/ViewSwitcher';
+import {
+  ArrowLeft, Broadcast, Play, X, Monitor,
+  CornersOut, CornersIn, SpeakerHigh, SpeakerLow, SpeakerSlash,
+  CaretLeft, CaretRight, VideoCamera,
+} from '@phosphor-icons/react';
 
-interface Broadcast {
+interface BroadcastItem {
   id: string;
   title: string;
   description?: string;
@@ -36,42 +41,6 @@ function formatDate(iso: string): string {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '/api';
 
-const ExpandIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-  </svg>
-);
-const CompressIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
-  </svg>
-);
-const SpeakerHighIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M11 5L6 9H2v6h4l5 4V5z"/>
-    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-  </svg>
-);
-const SpeakerLowIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M11 5L6 9H2v6h4l5 4V5z"/>
-    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-  </svg>
-);
-const SpeakerMuteIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M11 5L6 9H2v6h4l5 4V5z"/>
-    <line x1="23" y1="9" x2="17" y2="15"/>
-    <line x1="17" y1="9" x2="23" y2="15"/>
-  </svg>
-);
-const PlayIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M8 5v14l11-7z"/>
-  </svg>
-);
-
 export default function ArchivePage({ params }: { params: { orgSlug: string } }) {
   const { orgSlug } = params;
   const searchParams = useSearchParams();
@@ -93,7 +62,7 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
 
   const { data: broadcasts, isLoading } = useQuery({
     queryKey: ['broadcasts', orgSlug, previewKey],
-    queryFn: () => api.get<Broadcast[]>(url),
+    queryFn: () => api.get<BroadcastItem[]>(url),
   });
 
   const selected = broadcasts?.find(b => b.id === selectedId);
@@ -141,206 +110,165 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
   }
 
   function VolumeIcon() {
-    if (volume === 0) return <SpeakerMuteIcon />;
-    if (volume <= 0.5) return <SpeakerLowIcon />;
-    return <SpeakerHighIcon />;
+    if (volume === 0) return <SpeakerSlash size={18} />;
+    if (volume <= 0.5) return <SpeakerLow size={18} />;
+    return <SpeakerHigh size={18} />;
   }
-
-  const iconBtn: React.CSSProperties = {
-    background: 'none', border: 'none', color: '#fff',
-    width: 36, height: 36, borderRadius: 4, cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  };
 
   const readyBroadcasts = broadcasts?.filter(b => b.recording?.status === 'ready') ?? [];
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#fff' }}>
+    <div className="min-h-[100dvh] bg-surface-primary text-zinc-200">
       {/* Header */}
       {!isFullscreen && (
-        <div style={{ padding: '0.75rem 1rem', background: '#111', borderBottom: '1px solid #222', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <Link href="/" style={{ color: '#888', textDecoration: 'none', fontSize: '0.875rem' }}>← Главная</Link>
-          <Link href={watchLink} style={{ color: '#888', textDecoration: 'none', fontSize: '0.875rem' }}>Смотреть LIVE</Link>
-          <span style={{ fontWeight: 700 }}>Архив трансляций</span>
+        <div className="px-4 py-3 bg-surface-elevated border-b border-zinc-800/60 flex items-center gap-4">
+          <Link href="/" className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 no-underline text-sm transition-colors">
+            <ArrowLeft size={16} /> Главная
+          </Link>
+          <Link href={watchLink} className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 no-underline text-sm transition-colors">
+            <Broadcast size={14} /> Смотреть LIVE
+          </Link>
+          <span className="font-semibold text-zinc-100">Архив трансляций</span>
         </div>
       )}
 
-      {/* Player — centered */}
+      {/* Player */}
       {selectedId && recordingUrl && (
-        <div style={{ display: 'flex', justifyContent: 'center', background: '#000' }}>
-        <div
-          ref={playerContainerRef}
-          style={{
-            position: 'relative',
-            background: '#000',
-            width: '100%',
-            maxWidth: isFullscreen ? undefined : '1100px',
-            aspectRatio: isFullscreen ? undefined : '16/9',
-            maxHeight: isFullscreen ? '100vh' : '70vh',
-            height: isFullscreen ? '100vh' : undefined,
-          }}
-        >
+        <div className="flex justify-center bg-black">
           <div
-            style={{ position: 'absolute', inset: 0, cursor: 'pointer' }}
-            onClick={handleVideoClick}
-          >
-            <MatPlayer
-              ref={matRef}
-              streamUrl={recordingUrl}
-              viewMode={viewMode}
-              volume={volume}
-              isArchive={true}
-              onMutedFallback={() => setVolume(0)}
-              onTimeUpdate={handleTimeUpdate}
-            />
-          </div>
-
-          {/* View panel toggle */}
-          {!isFullscreen && (
-            <>
-              <button
-                onClick={(e) => { e.stopPropagation(); setViewPanelOpen((v) => !v); }}
-                style={{ position: 'absolute', left: viewPanelOpen ? 160 : 0, top: '50%', transform: 'translateY(-50%)', zIndex: 10, background: '#222', border: 'none', color: '#fff', padding: '0.5rem 0.4rem', cursor: 'pointer', borderRadius: '0 4px 4px 0', transition: 'left 0.2s' }}>
-                {viewPanelOpen ? '\u2039' : '\u203A'}
-              </button>
-              {viewPanelOpen && (
-                <div
-                  onClick={(e) => e.stopPropagation()}
-                  style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 160, background: 'rgba(17,17,17,0.95)', padding: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', zIndex: 9 }}>
-                  <ViewSwitcher mode={viewMode} onChange={setViewMode} />
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Control bar */}
-          <div
+            ref={playerContainerRef}
+            className="relative bg-black w-full"
             style={{
-              position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 20,
-              padding: '8px 12px',
-              background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
-              display: 'flex', alignItems: 'center', gap: 8,
+              maxWidth: isFullscreen ? undefined : '1100px',
+              aspectRatio: isFullscreen ? undefined : '16/9',
+              maxHeight: isFullscreen ? '100vh' : '70vh',
+              height: isFullscreen ? '100vh' : undefined,
             }}
-            onClick={(e) => e.stopPropagation()}
           >
-            <span style={{ color: '#aaa', fontSize: '0.7rem', flexShrink: 0 }}>{formatTime(currentTime)}</span>
-            <input
-              type="range"
-              min={0}
-              max={duration || 0}
-              step={0.1}
-              value={currentTime}
-              onChange={handleSeek}
-              style={{ flex: 1, accentColor: '#7c3aed' }}
-            />
-            <span style={{ color: '#aaa', fontSize: '0.7rem', flexShrink: 0 }}>{formatTime(duration)}</span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={volume}
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
-              style={{ width: 80, accentColor: '#7c3aed', flexShrink: 0 }}
-            />
-            <button onClick={() => setVolume(v => v === 0 ? 1 : 0)} style={iconBtn}><VolumeIcon /></button>
-            <button onClick={toggleFullscreen} style={iconBtn}>
-              {isFullscreen ? <CompressIcon /> : <ExpandIcon />}
-            </button>
-          </div>
-
-          {/* Close button */}
-          <button
-            onClick={() => { setSelectedId(null); setCurrentTime(0); setDuration(0); }}
-            style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(0,0,0,0.7)', border: 'none', color: '#fff', padding: '0.4rem 0.8rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', zIndex: 20 }}
-          >
-            ✕ Закрыть
-          </button>
-
-          {/* Title overlay */}
-          {selected && !isFullscreen && (
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '0.75rem 1rem', background: 'linear-gradient(rgba(0,0,0,0.7), transparent)', zIndex: 15 }}>
-              <div style={{ fontWeight: 600 }}>{selected.title}</div>
-              <div style={{ color: '#888', fontSize: '0.8rem' }}>{formatDate(selected.startedAt)}</div>
+            <div className="absolute inset-0 cursor-pointer" onClick={handleVideoClick}>
+              <MatPlayer
+                ref={matRef}
+                streamUrl={recordingUrl}
+                viewMode={viewMode}
+                volume={volume}
+                isArchive={true}
+                onMutedFallback={() => setVolume(0)}
+                onTimeUpdate={handleTimeUpdate}
+              />
             </div>
-          )}
-        </div>
+
+            {/* View panel toggle */}
+            {!isFullscreen && (
+              <>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setViewPanelOpen((v) => !v); }}
+                  className="absolute top-1/2 -translate-y-1/2 z-10 bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 p-1.5 cursor-pointer rounded-r-lg transition-all text-white"
+                  style={{ left: viewPanelOpen ? 160 : 0 }}>
+                  {viewPanelOpen ? <CaretLeft size={14} /> : <CaretRight size={14} />}
+                </button>
+                {viewPanelOpen && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute left-0 inset-y-0 w-40 backdrop-blur-sm p-4 flex flex-col justify-center z-[9]"
+                    style={{ background: 'rgba(12,12,14,0.95)' }}>
+                    <ViewSwitcher mode={viewMode} onChange={setViewMode} />
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Control bar */}
+            <div
+              className="absolute inset-x-0 bottom-0 z-20 px-3 py-2.5 flex items-center gap-2"
+              style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.85))' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(currentTime)}</span>
+              <input type="range" min={0} max={duration || 0} step={0.1} value={currentTime} onChange={handleSeek} className="flex-1" />
+              <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(duration)}</span>
+              <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-20 shrink-0" />
+              <button onClick={() => setVolume(v => v === 0 ? 1 : 0)} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors"><VolumeIcon /></button>
+              <button onClick={toggleFullscreen} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors">
+                {isFullscreen ? <CornersIn size={18} /> : <CornersOut size={18} />}
+              </button>
+            </div>
+
+            {/* Close button */}
+            <button
+              onClick={() => { setSelectedId(null); setCurrentTime(0); setDuration(0); }}
+              className="absolute top-3 right-3 bg-black/70 hover:bg-black text-white p-2 rounded-lg z-20 transition-all cursor-pointer border-none flex items-center gap-1.5 text-xs"
+            >
+              <X size={14} /> Закрыть
+            </button>
+
+            {/* Title overlay */}
+            {selected && !isFullscreen && (
+              <div className="absolute top-0 inset-x-0 px-4 py-3 z-[15]" style={{ background: 'linear-gradient(rgba(0,0,0,0.7), transparent)' }}>
+                <div className="font-semibold text-sm text-zinc-100">{selected.title}</div>
+                <div className="text-zinc-500 text-xs mt-0.5">{formatDate(selected.startedAt)}</div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* Broadcast list */}
-      <div style={{ padding: '1.5rem', maxWidth: 900, margin: '0 auto' }}>
-        {isLoading && <p style={{ color: '#888' }}>Загрузка...</p>}
-
-        {!isLoading && readyBroadcasts.length === 0 && (
-          <p style={{ color: '#555' }}>Записей пока нет.</p>
+      <div className="max-w-[920px] mx-auto px-6 py-6">
+        {isLoading && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-xl overflow-hidden bg-surface-elevated border border-zinc-800/50 animate-pulse">
+                <div className="aspect-video bg-zinc-800" />
+                <div className="p-4 space-y-2">
+                  <div className="h-4 bg-zinc-800 rounded w-3/4" />
+                  <div className="h-3 bg-zinc-800/60 rounded w-1/2" />
+                </div>
+              </div>
+            ))}
+          </div>
         )}
 
-        <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+        {!isLoading && readyBroadcasts.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-24 gap-3 opacity-50">
+            <VideoCamera size={48} className="text-zinc-600" weight="thin" />
+            <p className="text-zinc-500 text-sm">Записей пока нет</p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           {readyBroadcasts.map((b) => (
-            <div
+            <article
               key={b.id}
               onClick={() => setSelectedId(selectedId === b.id ? null : b.id)}
-              style={{
-                background: selectedId === b.id ? '#1a1a2e' : '#1a1a1a',
-                border: `1px solid ${selectedId === b.id ? '#7c3aed' : '#2d2d2d'}`,
-                borderRadius: 8,
-                cursor: 'pointer',
-                overflow: 'hidden',
-                transition: 'border-color 0.2s',
-              }}
+              className={`group rounded-xl overflow-hidden border cursor-pointer transition-all duration-200 active:scale-[0.99] ${
+                selectedId === b.id
+                  ? 'bg-brand/5 border-brand/40'
+                  : 'bg-surface-elevated border-zinc-800/50 hover:border-zinc-700 hover:shadow-lg hover:shadow-black/20'
+              }`}
             >
               {/* Thumbnail */}
-              <div style={{
-                position: 'relative',
-                width: '100%',
-                paddingTop: '56.25%',
-                background: '#0d0d0d',
-              }}>
+              <div className="relative aspect-video bg-zinc-900 overflow-hidden">
                 <ThumbnailImage src={thumbUrl} />
-                {/* Duration badge */}
                 {b.recording?.duration && (
-                  <span style={{
-                    position: 'absolute',
-                    bottom: 6,
-                    right: 6,
-                    background: 'rgba(0,0,0,0.8)',
-                    color: '#fff',
-                    fontSize: '0.7rem',
-                    padding: '2px 6px',
-                    borderRadius: 3,
-                    fontFamily: 'monospace',
-                  }}>
+                  <span className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-black/80 text-zinc-300 text-[0.65rem] font-mono rounded">
                     {formatTime(b.recording.duration)}
                   </span>
                 )}
-                {/* Play overlay */}
-                <div style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: selectedId === b.id ? 0 : 0,
-                  transition: 'opacity 0.2s',
-                }}>
-                  <div style={{
-                    width: 48, height: 48, borderRadius: '50%',
-                    background: 'rgba(0,0,0,0.6)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>
-                    <PlayIcon />
+                {/* Play overlay on hover */}
+                <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
+                    <Play size={24} weight="fill" className="text-white" />
                   </div>
                 </div>
               </div>
 
               {/* Info */}
-              <div style={{ padding: '0.75rem 1rem' }}>
-                <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: '0.2rem' }}>{b.title}</div>
-                <div style={{ color: '#888', fontSize: '0.75rem' }}>{formatDate(b.startedAt)}</div>
-                {b.description && <div style={{ color: '#666', fontSize: '0.75rem', marginTop: '0.2rem' }}>{b.description}</div>}
+              <div className="p-4">
+                <div className="font-semibold text-sm text-zinc-100 group-hover:text-white transition-colors">{b.title}</div>
+                <div className="text-zinc-500 text-xs mt-0.5">{formatDate(b.startedAt)}</div>
+                {b.description && <div className="text-zinc-600 text-xs mt-1 line-clamp-2">{b.description}</div>}
               </div>
-            </div>
+            </article>
           ))}
         </div>
       </div>
@@ -351,25 +279,15 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
 function ThumbnailImage({ src }: { src: string }) {
   const [error, setError] = useState(false);
   return error ? (
-    <div style={{
-      position: 'absolute', inset: 0,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      color: '#333', fontSize: '2rem',
-    }}>
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <rect x="2" y="3" width="20" height="14" rx="2" />
-        <path d="M8 21h8M12 17v4" />
-      </svg>
+    <div className="absolute inset-0 flex items-center justify-center">
+      <Monitor size={48} className="text-zinc-800" weight="thin" />
     </div>
   ) : (
     <img
       src={src}
       alt=""
       onError={() => setError(true)}
-      style={{
-        position: 'absolute', top: 0, left: 0,
-        width: '100%', height: '100%', objectFit: 'cover',
-      }}
+      className="absolute inset-0 w-full h-full object-cover"
     />
   );
 }
