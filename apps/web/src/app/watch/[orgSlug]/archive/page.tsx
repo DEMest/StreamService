@@ -9,7 +9,7 @@ import ViewSwitcher, { type ViewMode } from '@/components/ViewSwitcher';
 import {
   ArrowLeft, Broadcast, Play, X, Monitor,
   CornersOut, CornersIn, SpeakerHigh, SpeakerLow, SpeakerSlash,
-  CaretLeft, CaretRight, VideoCamera,
+  CaretLeft, CaretRight, VideoCamera, GearSix,
 } from '@phosphor-icons/react';
 
 interface BroadcastItem {
@@ -52,6 +52,9 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
   const [duration, setDuration] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [viewPanelOpen, setViewPanelOpen] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [qualityLevel, setQualityLevel] = useState(-1); // -1 = auto
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
 
   const matRef = useRef<MatPlayerHandle>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
@@ -67,7 +70,7 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
 
   const selected = broadcasts?.find(b => b.id === selectedId);
   const recordingUrl = selectedId
-    ? `/api/v1/public/orgs/${orgSlug}/broadcasts/${selectedId}/recording/stream`
+    ? `/api/v1/public/orgs/${orgSlug}/broadcasts/${selectedId}/recording/hls/master.m3u8`
     : null;
 
   const watchLink = previewKey ? `/watch/${orgSlug}?key=${previewKey}` : `/watch/${orgSlug}`;
@@ -99,6 +102,7 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
   }
 
   function handleVideoClick(e: React.MouseEvent<HTMLDivElement>) {
+    setQualityMenuOpen(false);
     if (viewMode !== 'multicam') { setViewMode('multicam'); return; }
     const rect = e.currentTarget.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
@@ -154,8 +158,16 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
                 isArchive={true}
                 onMutedFallback={() => setVolume(0)}
                 onTimeUpdate={handleTimeUpdate}
+                onBuffering={setIsBuffering}
               />
             </div>
+
+            {/* Buffering spinner */}
+            {isBuffering && (
+              <div className="absolute inset-0 flex items-center justify-center z-[11] pointer-events-none">
+                <div className="w-12 h-12 border-3 border-zinc-600 border-t-white rounded-full animate-spin" />
+              </div>
+            )}
 
             {/* View panel toggle */}
             {!isFullscreen && (
@@ -188,6 +200,37 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
               <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(duration)}</span>
               <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-20 shrink-0" />
               <button onClick={() => setVolume(v => v === 0 ? 1 : 0)} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors"><VolumeIcon /></button>
+              {/* Quality selector */}
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setQualityMenuOpen((v) => !v)}
+                  className="text-white bg-transparent border-none h-9 px-2 rounded flex items-center gap-1 cursor-pointer hover:bg-white/10 transition-colors text-xs font-medium"
+                >
+                  <GearSix size={16} />
+                  <span className="text-zinc-400">
+                    {qualityLevel === -1 ? 'Авто' : (matRef.current?.getQualityLevels()?.[qualityLevel]?.name ?? 'HD')}
+                  </span>
+                </button>
+                {qualityMenuOpen && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 border border-zinc-700/50 rounded-lg overflow-hidden min-w-[120px] backdrop-blur-sm">
+                    <button
+                      onClick={() => { setQualityLevel(-1); matRef.current?.setQualityLevel(-1); setQualityMenuOpen(false); }}
+                      className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === -1 ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
+                    >
+                      Авто
+                    </button>
+                    {(matRef.current?.getQualityLevels() ?? []).map((q) => (
+                      <button
+                        key={q.index}
+                        onClick={() => { setQualityLevel(q.index); matRef.current?.setQualityLevel(q.index); setQualityMenuOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === q.index ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
+                      >
+                        {q.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <button onClick={toggleFullscreen} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors">
                 {isFullscreen ? <CornersIn size={18} /> : <CornersOut size={18} />}
               </button>
@@ -195,7 +238,7 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
 
             {/* Close button */}
             <button
-              onClick={() => { setSelectedId(null); setCurrentTime(0); setDuration(0); }}
+              onClick={() => { setSelectedId(null); setCurrentTime(0); setDuration(0); setIsBuffering(false); setQualityLevel(-1); setQualityMenuOpen(false); }}
               className="absolute top-3 right-3 bg-black/70 hover:bg-black text-white p-2 rounded-lg z-20 transition-all cursor-pointer border-none flex items-center gap-1.5 text-xs"
             >
               <X size={14} /> Закрыть
