@@ -165,15 +165,18 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
         </div>
       )}
 
-      {/* Player */}
+      {/* Player — centered */}
       {selectedId && recordingUrl && (
+        <div style={{ display: 'flex', justifyContent: 'center', background: '#000' }}>
         <div
           ref={playerContainerRef}
           style={{
             position: 'relative',
             background: '#000',
+            width: '100%',
+            maxWidth: isFullscreen ? undefined : '1100px',
             aspectRatio: isFullscreen ? undefined : '16/9',
-            maxHeight: isFullscreen ? '100vh' : '60vh',
+            maxHeight: isFullscreen ? '100vh' : '70vh',
             height: isFullscreen ? '100vh' : undefined,
           }}
         >
@@ -261,6 +264,7 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
               <div style={{ color: '#888', fontSize: '0.8rem' }}>{formatDate(selected.startedAt)}</div>
             </div>
           )}
+        </div>
         </div>
       )}
 
