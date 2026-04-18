@@ -53,13 +53,15 @@ export class RecordingService {
     segmentsDir: string,
   ): Promise<void> {
     const archiveDir = path.join(ARCHIVE_ROOT, orgSlug);
-    fs.mkdirSync(archiveDir, { recursive: true });
+    const outputDir = path.join(archiveDir, broadcastId);
+    fs.mkdirSync(outputDir, { recursive: true });
 
-    const outputPath = path.join(archiveDir, `${broadcastId}.mp4`);
+    const tempMp4 = path.join(archiveDir, `${broadcastId}_temp.mp4`);
 
     try {
+      // Step 1: Concatenate segments into single MP4
       if (files.length === 1) {
-        fs.copyFileSync(path.join(segmentsDir, files[0]), outputPath);
+        fs.copyFileSync(path.join(segmentsDir, files[0]), tempMp4);
       } else {
         const listFile = path.join(segmentsDir, `concat_${broadcastId}.txt`);
         const listContent = files.map(f => `file '${path.join(segmentsDir, f)}'`).join('\n');
@@ -70,42 +72,113 @@ export class RecordingService {
           '-i', listFile,
           '-c', 'copy',
           '-movflags', '+faststart',
-          outputPath,
+          tempMp4,
         ], { timeout: 30 * 60 * 1000 });
 
         fs.unlinkSync(listFile);
       }
 
-      const stat = fs.statSync(outputPath);
+      // Step 2: Move to original.mp4 for download
+      const originalMp4 = path.join(outputDir, 'original.mp4');
+      fs.renameSync(tempMp4, originalMp4);
 
+      // Step 3: Create HD variant (codec copy, just segment into .ts)
+      const hdDir = path.join(outputDir, 'hd');
+      fs.mkdirSync(hdDir, { recursive: true });
+
+      await execFileAsync('ffmpeg', [
+        '-i', originalMp4,
+        '-c:v', 'copy', '-c:a', 'copy',
+        '-hls_time', '6',
+        '-hls_segment_type', 'mpegts',
+        '-hls_playlist_type', 'vod',
+        '-hls_segment_filename', path.join(hdDir, 'seg%03d.ts'),
+        path.join(hdDir, 'index.m3u8'),
+      ], { timeout: 30 * 60 * 1000 });
+
+      // Step 4: Create LQ variant (480p transcode)
+      const lqDir = path.join(outputDir, 'lq');
+      fs.mkdirSync(lqDir, { recursive: true });
+
+      await execFileAsync('ffmpeg', [
+        '-i', originalMp4,
+        '-vf', 'scale=-2:480',
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '28',
+        '-c:a', 'aac', '-b:a', '96k',
+        '-hls_time', '6',
+        '-hls_segment_type', 'mpegts',
+        '-hls_playlist_type', 'vod',
+        '-hls_segment_filename', path.join(lqDir, 'seg%03d.ts'),
+        path.join(lqDir, 'index.m3u8'),
+      ], { timeout: 60 * 60 * 1000 });
+
+      // Step 5: Read HD playlist to get resolution & bandwidth for master playlist
+      let hdBandwidth = 5000000;
+      let hdResolution = '1920x1080';
+      try {
+        const { stdout } = await execFileAsync('ffprobe', [
+          '-v', 'quiet',
+          '-show_entries', 'stream=width,height,bit_rate',
+          '-select_streams', 'v:0',
+          '-of', 'json',
+          originalMp4,
+        ]);
+        const probe = JSON.parse(stdout);
+        const stream = probe.streams?.[0];
+        if (stream) {
+          hdResolution = `${stream.width}x${stream.height}`;
+          if (stream.bit_rate) hdBandwidth = parseInt(stream.bit_rate, 10);
+        }
+      } catch { /* use defaults */ }
+
+      // Step 6: Write master.m3u8
+      const masterContent = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '',
+        `#EXT-X-STREAM-INF:BANDWIDTH=${hdBandwidth},RESOLUTION=${hdResolution},NAME="HD"`,
+        'hd/index.m3u8',
+        '',
+        '#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480,NAME="480p"',
+        'lq/index.m3u8',
+      ].join('\n');
+      fs.writeFileSync(path.join(outputDir, 'master.m3u8'), masterContent);
+
+      // Step 7: Get duration and total file size
       let duration: number | null = null;
       try {
         const { stdout } = await execFileAsync('ffprobe', [
           '-v', 'quiet',
           '-show_entries', 'format=duration',
           '-of', 'default=noprint_wrappers=1:nokey=1',
-          outputPath,
+          originalMp4,
         ]);
         duration = Math.round(parseFloat(stdout.trim()));
       } catch { /* duration remains null */ }
+
+      const totalSize = this.getDirSize(outputDir);
 
       await this.prisma.recording.update({
         where: { id: recordingId },
         data: {
           status: 'ready',
-          filePath: outputPath,
-          fileSize: stat.size,
+          filePath: path.join(outputDir, 'master.m3u8'),
+          fileSize: totalSize,
           duration,
         },
       });
 
+      // Cleanup source segments
       for (const f of files) {
         try { fs.unlinkSync(path.join(segmentsDir, f)); } catch { /* ignore */ }
       }
 
-      this.logger.log(`Recording ${recordingId} ready: ${outputPath} (${stat.size} bytes)`);
+      this.logger.log(`Recording ${recordingId} ready (HLS): ${outputDir}`);
     } catch (err: any) {
-      this.logger.error(`ffmpeg conversion failed: ${err.message}`);
+      this.logger.error(`HLS conversion failed: ${err.message}`);
+      // Cleanup partial output
+      try { fs.rmSync(outputDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      try { fs.unlinkSync(tempMp4); } catch { /* ignore */ }
       await this.prisma.recording.update({
         where: { id: recordingId },
         data: { status: 'failed' },
@@ -113,21 +186,37 @@ export class RecordingService {
     }
   }
 
-  async getRecordingFilePath(broadcastId: string): Promise<string> {
+  private getDirSize(dirPath: string): number {
+    let total = 0;
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        total += this.getDirSize(fullPath);
+      } else {
+        total += fs.statSync(fullPath).size;
+      }
+    }
+    return total;
+  }
+
+  async getRecordingDir(broadcastId: string): Promise<string> {
     const recording = await this.prisma.recording.findUnique({ where: { broadcastId } });
     if (!recording || recording.status !== 'ready' || !recording.filePath) {
       throw new NotFoundException('Recording not found or not ready');
     }
-    if (!fs.existsSync(recording.filePath)) {
-      throw new NotFoundException('Recording file missing from disk');
+    const dir = path.dirname(recording.filePath);
+    if (!fs.existsSync(dir)) {
+      throw new NotFoundException('Recording directory missing from disk');
     }
-    return recording.filePath;
+    return dir;
   }
 
   async deleteRecordingByBroadcastId(broadcastId: string): Promise<void> {
     const recording = await this.prisma.recording.findUnique({ where: { broadcastId } });
     if (recording?.filePath) {
-      try { fs.unlinkSync(recording.filePath); } catch { /* ignore */ }
+      const dir = path.dirname(recording.filePath);
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
     }
   }
 
@@ -138,8 +227,9 @@ export class RecordingService {
     });
 
     for (const rec of expired) {
-      if (rec.filePath && fs.existsSync(rec.filePath)) {
-        try { fs.unlinkSync(rec.filePath); } catch { /* ignore */ }
+      if (rec.filePath) {
+        const dir = path.dirname(rec.filePath);
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
       }
       await this.prisma.recording.delete({ where: { id: rec.id } });
       this.logger.log(`Deleted expired recording ${rec.id}`);
@@ -184,17 +274,19 @@ export class RecordingService {
       const dirPath = path.join(ARCHIVE_ROOT, orgDir);
       if (!fs.statSync(dirPath).isDirectory()) continue;
 
-      const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.mp4'));
-      for (const file of files) {
-        const broadcastId = file.replace('.mp4', '');
+      const entries = fs.readdirSync(dirPath);
+      for (const entry of entries) {
+        const entryPath = path.join(dirPath, entry);
+        if (!fs.statSync(entryPath).isDirectory()) continue;
+
+        const broadcastId = entry;
         const recording = await this.prisma.recording.findFirst({
           where: { broadcastId, status: 'ready' },
         });
         if (!recording) {
-          const filePath = path.join(dirPath, file);
           try {
-            fs.unlinkSync(filePath);
-            this.logger.log(`Removed orphaned file: ${filePath}`);
+            fs.rmSync(entryPath, { recursive: true, force: true });
+            this.logger.log(`Removed orphaned directory: ${entryPath}`);
           } catch { /* ignore */ }
         }
       }
