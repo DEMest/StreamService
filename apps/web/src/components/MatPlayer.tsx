@@ -10,6 +10,7 @@ interface Props {
   isArchive?: boolean;
   onMutedFallback?: () => void;
   onTimeUpdate?: (current: number, duration: number, isLive: boolean) => void;
+  onBuffering?: (isBuffering: boolean) => void;
 }
 
 export interface MatPlayerHandle {
@@ -17,6 +18,9 @@ export interface MatPlayerHandle {
   seekTo: (time: number) => void;
   seekToLive: () => void;
   getVideoElement: () => HTMLVideoElement | null;
+  getQualityLevels: () => { index: number; height: number; name: string }[];
+  setQualityLevel: (index: number) => void;
+  getCurrentQuality: () => number;
 }
 
 const QUAD: Record<string, [number, number]> = {
@@ -41,7 +45,7 @@ function drawContain(
   ctx.drawImage(video, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
-const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, volume = 1, isArchive = false, onMutedFallback, onTimeUpdate }, ref) => {
+const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, volume = 1, isArchive = false, onMutedFallback, onTimeUpdate, onBuffering }, ref) => {
   const videoRef  = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const modeRef   = useRef(viewMode);
@@ -84,6 +88,23 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
     getVideoElement() {
       return videoRef.current;
     },
+    getQualityLevels() {
+      const hls = hlsRef.current;
+      if (!hls) return [];
+      return hls.levels.map((level, index) => ({
+        index,
+        height: level.height,
+        name: level.height >= 720 ? 'HD' : `${level.height}p`,
+      }));
+    },
+    setQualityLevel(index: number) {
+      const hls = hlsRef.current;
+      if (hls) hls.currentLevel = index;
+    },
+    getCurrentQuality() {
+      const hls = hlsRef.current;
+      return hls ? hls.currentLevel : -1;
+    },
   }), []);
 
   // Media setup — HLS for live, direct src for archive
@@ -93,12 +114,27 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
     let hls: Hls | null = null;
 
     if (isArchive) {
-      video.src = streamUrl;
-      video.play().catch(() => {
-        video.muted = true;
-        onMutedFallback?.();
-        video.play().catch(() => {});
-      });
+      if (Hls.isSupported()) {
+        hls = new Hls();
+        hlsRef.current = hls;
+        hls.loadSource(streamUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(() => {
+            video.muted = true;
+            onMutedFallback?.();
+            video.play().catch(() => {});
+          });
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari native HLS
+        video.src = streamUrl;
+        video.play().catch(() => {
+          video.muted = true;
+          onMutedFallback?.();
+          video.play().catch(() => {});
+        });
+      }
     } else if (Hls.isSupported()) {
       hls = new Hls({
         liveDurationInfinity: true,
@@ -148,6 +184,26 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
     video.volume = volume;
     video.muted = volume === 0;
   }, [volume]);
+
+  // Buffering detection
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !onBuffering) return;
+
+    const onWaiting = () => onBuffering(true);
+    const onPlaying = () => onBuffering(false);
+    const onCanPlay = () => onBuffering(false);
+
+    video.addEventListener('waiting', onWaiting);
+    video.addEventListener('playing', onPlaying);
+    video.addEventListener('canplay', onCanPlay);
+
+    return () => {
+      video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('playing', onPlaying);
+      video.removeEventListener('canplay', onCanPlay);
+    };
+  }, [onBuffering]);
 
   // Keep canvas pixel size synced with CSS size
   useEffect(() => {
