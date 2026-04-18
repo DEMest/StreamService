@@ -94,7 +94,7 @@ export class PublicService {
     if (!org.streamIsPublic && org.streamPreviewKey !== key) {
       throw new NotFoundException('No live stream');
     }
-    return { hlsUrl: `/hls/live/${orgSlug}/index.m3u8` };
+    return { hlsUrl: `/api/v1/public/orgs/${orgSlug}/live/hls/master.m3u8` };
   }
 
   async getOrgBroadcasts(orgSlug: string, key?: string) {
