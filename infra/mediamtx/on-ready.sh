@@ -25,9 +25,18 @@ curl -sf -X POST http://api:3001/v1/internal/mediamtx/webhook \
   -d "{\"action\":\"publish\",\"path\":\"$MTX_PATH\"}" &
 
 # Launch FFmpeg (foreground - MediaMTX kills this process on stream end)
-exec ffmpeg -i "rtsp://localhost:8554/$MTX_PATH" \
+# -fflags nobuffer: don't buffer input (lower latency)
+# -flags low_delay: decode with minimal delay
+# -rtsp_transport tcp: more reliable than UDP inside Docker
+# -hls_time 2: short segments for faster initial load
+# -hls_init_time 1: first segment can be as short as 1s
+# -hls_list_size 10: keep 10 segments in playlist (~20s window)
+exec ffmpeg \
+  -fflags nobuffer -flags low_delay \
+  -rtsp_transport tcp \
+  -i "rtsp://localhost:8554/$MTX_PATH" \
   -map 0:v -map 0:a -c:v copy -c:a aac \
-    -f hls -hls_time 6 -hls_list_size 10 \
+    -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 10 \
     -hls_flags delete_segments+temp_file \
     -hls_segment_filename "$HLS_DIR/hd/seg%05d.ts" \
     "$HLS_DIR/hd/index.m3u8" \
@@ -35,7 +44,7 @@ exec ffmpeg -i "rtsp://localhost:8554/$MTX_PATH" \
     -vf "scale=ceil(iw/4)*2:ceil(ih/4)*2" \
     -c:v libx264 -preset fast -crf 28 \
     -c:a aac -b:a 96k \
-    -f hls -hls_time 6 -hls_list_size 10 \
+    -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 10 \
     -hls_flags delete_segments+temp_file \
     -hls_segment_filename "$HLS_DIR/lq/seg%05d.ts" \
     "$HLS_DIR/lq/index.m3u8"

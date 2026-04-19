@@ -143,6 +143,8 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
       hls = new Hls({
         liveDurationInfinity: true,
         liveBackBufferLength: Infinity,
+        lowLatencyMode: true,
+        backBufferLength: 30,
       });
       hlsRef.current = hls;
       hls.loadSource(streamUrl);
@@ -153,6 +155,9 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
           onMutedFallback?.();
           video.play().catch(() => {});
         });
+      });
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+        onQualityChange?.(data.level);
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = streamUrl;
