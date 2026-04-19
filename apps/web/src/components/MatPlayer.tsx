@@ -92,11 +92,20 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
     getQualityLevels() {
       const hls = hlsRef.current;
       if (!hls) return [];
-      return hls.levels.map((level, index) => ({
-        index,
-        height: level.height,
-        name: level.height >= 720 ? 'HD' : `${level.height}p`,
-      }));
+      return hls.levels.map((level, index) => {
+        let name: string;
+        if ((level as any).name) {
+          name = (level as any).name;
+        } else if (level.height > 0) {
+          name = `${level.height}p`;
+        } else if (level.bitrate > 0) {
+          const mbps = level.bitrate / 1_000_000;
+          name = mbps >= 1 ? `${mbps.toFixed(1)} Mbps` : `${Math.round(level.bitrate / 1000)} kbps`;
+        } else {
+          name = `Поток ${index + 1}`;
+        }
+        return { index, height: level.height, name };
+      });
     },
     setQualityLevel(index: number) {
       const hls = hlsRef.current;

@@ -139,17 +139,13 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
 
       {/* Player */}
       {selectedId && recordingUrl && (
-        <div className="flex justify-center bg-black">
+        <div className="bg-black">
           <div
             ref={playerContainerRef}
-            className="relative bg-black w-full"
-            style={{
-              maxWidth: isFullscreen ? undefined : '1100px',
-              aspectRatio: isFullscreen ? undefined : '16/9',
-              maxHeight: isFullscreen ? '100vh' : '70vh',
-              height: isFullscreen ? '100vh' : undefined,
-            }}
+            className={`relative bg-black mx-auto w-full ${isFullscreen ? 'h-screen' : ''}`}
+            style={isFullscreen ? undefined : { maxWidth: '1100px', maxHeight: '70vh' }}
           >
+            {!isFullscreen && <div className="w-full" style={{ paddingTop: '56.25%' }} />}
             <div className="absolute inset-0 cursor-pointer" onClick={handleVideoClick}>
               <MatPlayer
                 ref={matRef}

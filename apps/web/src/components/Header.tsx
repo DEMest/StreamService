@@ -29,6 +29,13 @@ export function Header() {
       </Link>
 
       <nav className="flex gap-2 items-center">
+        <Link
+          href="/streams"
+          className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 no-underline text-sm transition-colors px-2 py-1.5 rounded-lg hover:bg-zinc-800/50"
+        >
+          <Broadcast size={16} />
+          Трансляции
+        </Link>
         {me ? (
           <>
             {me.orgSlug && (
