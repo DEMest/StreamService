@@ -38,7 +38,16 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
     socket.on('connect', join);
 
     const onHistory = (msgs: Message[]) => setMessages(msgs);
-    const onMessage = (msg: Message) => setMessages((prev) => [...prev, msg]);
+    const onMessage = (msg: Message) => setMessages((prev) => {
+      // Replace optimistic temp message with real one from server
+      const tempIdx = prev.findIndex((m) => m.id.startsWith('_tmp_') && m.nickname === msg.nickname && m.content === msg.content);
+      if (tempIdx !== -1) {
+        const next = [...prev];
+        next[tempIdx] = msg;
+        return next;
+      }
+      return [...prev, msg];
+    });
     const onViewers = (count: number) => onViewersRef.current?.(count);
     socket.on('history', onHistory);
     socket.on('message', onMessage);
@@ -70,7 +79,11 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
   function handleSend(e: React.FormEvent) {
     e.preventDefault();
     if (!input.trim() || !nickname) return;
-    getSocket().emit('message', { orgSlug, nickname, content: input.trim() });
+    const content = input.trim();
+    // Optimistic: show message instantly with temp id
+    const tempId = `_tmp_${Date.now()}`;
+    setMessages((prev) => [...prev, { id: tempId, nickname, content, createdAt: new Date().toISOString() }]);
+    getSocket().emit('message', { orgSlug, nickname, content });
     setInput('');
   }
 
