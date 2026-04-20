@@ -7,11 +7,12 @@ import { api } from '@/lib/api';
 import MatPlayer, { type MatPlayerHandle } from '@/components/MatPlayer';
 import ViewSwitcher, { type ViewMode } from '@/components/ViewSwitcher';
 import { Chat } from '@/components/Chat';
+import { Header } from '@/components/Header';
 import {
-  ArrowLeft, Broadcast, Eye, CornersOut, CornersIn,
+  Broadcast, Eye, CornersOut, CornersIn,
   SpeakerHigh, SpeakerLow, SpeakerSlash,
   CaretLeft, CaretRight, ChatCircle, Archive,
-  SignOut, TelevisionSimple, GearSix,
+  TelevisionSimple, GearSix,
 } from '@phosphor-icons/react';
 
 interface Me { sub: string; role: string; orgSlug?: string }
@@ -339,44 +340,7 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   // ── Desktop layout ─────────────────────────────────────────────────────────
   return (
     <div className="flex h-screen bg-surface-primary text-zinc-200 flex-col">
-      {!isFullscreen && (
-        <div className="px-4 py-3 bg-surface-elevated border-b border-zinc-800/60 flex justify-between items-center shrink-0">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 no-underline text-sm transition-colors">
-              <ArrowLeft size={16} /> Главная
-            </Link>
-            <span className="font-semibold text-zinc-100">{org?.name}</span>
-            {org?.streamTitle && <span className="text-zinc-500 text-sm">{org.streamTitle}</span>}
-            <Link href={archiveLink} className="flex items-center gap-1 text-zinc-600 hover:text-zinc-400 no-underline text-xs transition-colors">
-              <Archive size={14} /> Архив
-            </Link>
-          </div>
-          <div className="flex items-center gap-3">
-            {org?.isLive && (
-              <>
-                <span className="flex items-center gap-1.5 text-brand text-xs font-semibold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse" /> LIVE
-                </span>
-                {viewerCount !== null && (
-                  <span className="flex items-center gap-1 text-zinc-500 text-xs">
-                    <Eye size={14} /> {viewerCount}
-                  </span>
-                )}
-              </>
-            )}
-            {isOwner && (
-              <>
-                <Link href="/dashboard" className="flex items-center gap-1.5 bg-brand hover:bg-brand-hover text-white no-underline px-3 py-1.5 rounded-lg text-sm font-medium transition-all active:scale-[0.98]">
-                  <Broadcast size={14} weight="fill" /> Студия
-                </Link>
-                <button onClick={handleLogout} className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 bg-transparent border border-zinc-800 px-3 py-1.5 rounded-lg text-sm transition-all hover:border-zinc-700 active:scale-[0.98] cursor-pointer">
-                  <SignOut size={14} /> Выйти
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      {!isFullscreen && <Header />}
 
       <div className="flex-1 flex overflow-hidden">
         <div

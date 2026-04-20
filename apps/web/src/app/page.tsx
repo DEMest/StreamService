@@ -81,7 +81,7 @@ export default function HomePage() {
               variants={fadeUp}
               className="text-base md:text-lg text-zinc-400 leading-relaxed mb-10 max-w-lg"
             >
-              StreamService — профессиональная платформа для организаций.
+              Liga Live — профессиональная платформа для организаций.
               Мультикамерный стриминг, управление событиями и полный архив записей.
             </motion.p>
 
@@ -179,7 +179,7 @@ export default function HomePage() {
       {/* ── Footer ────────────────────────────────────────── */}
       <footer className="border-t border-zinc-800/40 py-8">
         <div className="max-w-[1400px] mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <span className="text-xs text-zinc-600">&copy; {new Date().getFullYear()} StreamService. Все права защищены.</span>
+          <span className="text-xs text-zinc-600">&copy; {new Date().getFullYear()} Liga Live. Все права защищены.</span>
           <div className="flex items-center gap-4">
             <Link href="/streams" className="text-xs text-zinc-600 hover:text-zinc-400 no-underline transition-colors">Трансляции</Link>
             <Link href="/login" className="text-xs text-zinc-600 hover:text-zinc-400 no-underline transition-colors">Вход для организаций</Link>

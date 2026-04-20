@@ -6,8 +6,9 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import MatPlayer, { type MatPlayerHandle } from '@/components/MatPlayer';
 import ViewSwitcher, { type ViewMode } from '@/components/ViewSwitcher';
+import { Header } from '@/components/Header';
 import {
-  ArrowLeft, Broadcast, Play, X, Monitor,
+  Play, X, Monitor,
   CornersOut, CornersIn, SpeakerHigh, SpeakerLow, SpeakerSlash,
   CaretLeft, CaretRight, VideoCamera, GearSix,
 } from '@phosphor-icons/react';
@@ -86,8 +87,10 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
   function toggleFullscreen() {
     if (isFullscreen) {
       document.exitFullscreen();
-    } else if (playerContainerRef.current) {
+    } else if (document.fullscreenEnabled && playerContainerRef.current) {
       playerContainerRef.current.requestFullscreen();
+    } else {
+      matRef.current?.enterIOSFullscreen();
     }
   }
 
@@ -124,26 +127,14 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
 
   return (
     <div className="min-h-[100dvh] bg-surface-primary text-zinc-200">
-      {/* Header */}
-      {!isFullscreen && (
-        <div className="px-4 py-3 bg-surface-elevated border-b border-zinc-800/60 flex items-center gap-4">
-          <Link href="/" className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 no-underline text-sm transition-colors">
-            <ArrowLeft size={16} /> Главная
-          </Link>
-          <Link href={watchLink} className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 no-underline text-sm transition-colors">
-            <Broadcast size={14} /> Смотреть LIVE
-          </Link>
-          <span className="font-semibold text-zinc-100">Архив трансляций</span>
-        </div>
-      )}
+      {!isFullscreen && <Header />}
 
       {/* Player */}
       {selectedId && recordingUrl && (
         <div className="bg-black">
           <div
             ref={playerContainerRef}
-            className={`relative bg-black mx-auto w-full ${isFullscreen ? 'h-screen' : ''}`}
-            style={isFullscreen ? undefined : { maxWidth: '1100px', maxHeight: '70vh' }}
+            className={`relative bg-black mx-auto w-full ${isFullscreen ? 'h-screen' : 'max-w-[1100px] md:max-h-[70vh]'}`}
           >
             {!isFullscreen && <div className="w-full" style={{ paddingTop: '56.25%' }} />}
             <div className="absolute inset-0 cursor-pointer" onClick={handleVideoClick}>

@@ -5,7 +5,7 @@ import './globals.css';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
-  title: 'StreamService',
+  title: 'Liga Live',
   description: 'Multi-tenant sports streaming platform',
 };
 

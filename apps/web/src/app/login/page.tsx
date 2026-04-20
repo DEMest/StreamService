@@ -37,7 +37,7 @@ export default function LoginPage() {
 
         <div className="relative z-10 flex flex-col justify-between p-12 w-full max-w-lg mx-auto">
           <Link href="/" className="text-zinc-50 no-underline font-semibold text-xl tracking-tight">
-            StreamService
+            Liga Live
           </Link>
 
           <div className="space-y-8">
@@ -68,7 +68,7 @@ export default function LoginPage() {
           </div>
 
           <p className="text-xs text-zinc-700">
-            &copy; {new Date().getFullYear()} StreamService
+            &copy; {new Date().getFullYear()} Liga Live
           </p>
         </div>
       </div>
@@ -78,7 +78,7 @@ export default function LoginPage() {
         {/* Mobile header */}
         <div className="lg:hidden flex items-center justify-between p-4 border-b border-zinc-800/40">
           <Link href="/" className="text-zinc-50 no-underline font-semibold text-lg tracking-tight">
-            StreamService
+            Liga Live
           </Link>
         </div>
 
