@@ -39,7 +39,7 @@ export function Header() {
   }
 
   return (
-    <header className="bg-surface-elevated border-b border-zinc-800/60 shrink-0 relative z-40">
+    <header className="bg-surface-elevated border-b border-zinc-800/60 shrink-0 relative z-40" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
       <div className="max-w-[1400px] mx-auto px-4 sm:px-6 h-14 flex items-center">
         {/* Logo — left */}
         <Link href="/" className="text-zinc-50 no-underline font-bold text-lg tracking-tight hover:text-white transition-colors shrink-0">
@@ -113,7 +113,7 @@ export function Header() {
 
       {/* Mobile menu */}
       {menuOpen && (
-        <div className="md:hidden border-t border-zinc-800/60 bg-surface-elevated absolute inset-x-0 top-14 z-50 shadow-xl shadow-black/30">
+        <div className="md:hidden border-t border-zinc-800/60 bg-surface-elevated absolute inset-x-0 z-50 shadow-xl shadow-black/30" style={{ top: 'calc(3.5rem + env(safe-area-inset-top))' }}>
           <nav className="flex flex-col p-3 gap-0.5">
             {NAV_LINKS.map((link) => (
               <Link

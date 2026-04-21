@@ -41,13 +41,16 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     @MessageBody() data: { orgSlug: string },
   ) {
     if (!data?.orgSlug) return;
-    client.join(`org:${data.orgSlug}`);
-    this.socketRoom.set(client.id, data.orgSlug);
-    const messages = await this.chat.getRecentMessages(data.orgSlug);
-    client.emit('history', messages);
     const room = `org:${data.orgSlug}`;
+    client.join(room);
+    this.socketRoom.set(client.id, data.orgSlug);
+
+    // Emit viewer count immediately (before async DB call)
     const count = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
     this.server.to(room).emit('viewers', count);
+
+    const messages = await this.chat.getRecentMessages(data.orgSlug);
+    client.emit('history', messages);
   }
 
   @SubscribeMessage('message')

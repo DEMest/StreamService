@@ -18,6 +18,8 @@ export interface MatPlayerHandle {
   enterIOSFullscreen: () => void;
   seekTo: (time: number) => void;
   seekToLive: () => void;
+  pause: () => void;
+  play: () => void;
   getVideoElement: () => HTMLVideoElement | null;
   getQualityLevels: () => { index: number; height: number; name: string }[];
   setQualityLevel: (index: number) => void;
@@ -85,6 +87,12 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
       } else {
         video.currentTime = video.duration;
       }
+    },
+    pause() {
+      videoRef.current?.pause();
+    },
+    play() {
+      videoRef.current?.play().catch(() => {});
     },
     getVideoElement() {
       return videoRef.current;

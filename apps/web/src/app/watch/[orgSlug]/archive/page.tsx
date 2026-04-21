@@ -8,7 +8,7 @@ import MatPlayer, { type MatPlayerHandle } from '@/components/MatPlayer';
 import ViewSwitcher, { type ViewMode } from '@/components/ViewSwitcher';
 import { Header } from '@/components/Header';
 import {
-  Play, X, Monitor,
+  Play, Pause, X, Monitor,
   CornersOut, CornersIn, SpeakerHigh, SpeakerLow, SpeakerSlash,
   CaretLeft, CaretRight, VideoCamera, GearSix,
 } from '@phosphor-icons/react';
@@ -57,6 +57,9 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
   const [qualityLevel, setQualityLevel] = useState(-1); // -1 = auto
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const [activeQuality, setActiveQuality] = useState(-1); // actual level chosen by ABR
+
+  const [isPaused, setIsPaused] = useState(false);
+  const prevVolumeRef = useRef(1);
 
   const matRef = useRef<MatPlayerHandle>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
@@ -123,6 +126,25 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
     return <SpeakerHigh size={18} />;
   }
 
+  function toggleMute() {
+    if (volume === 0) {
+      setVolume(prevVolumeRef.current || 1);
+    } else {
+      prevVolumeRef.current = volume;
+      setVolume(0);
+    }
+  }
+
+  function togglePause() {
+    if (isPaused) {
+      matRef.current?.play();
+      setIsPaused(false);
+    } else {
+      matRef.current?.pause();
+      setIsPaused(true);
+    }
+  }
+
   const readyBroadcasts = broadcasts?.filter(b => b.recording?.status === 'ready') ?? [];
 
   return (
@@ -184,11 +206,14 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
               style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.85))' }}
               onClick={(e) => e.stopPropagation()}
             >
+              <button onClick={togglePause} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors">
+                {isPaused ? <Play size={18} weight="fill" /> : <Pause size={18} weight="fill" />}
+              </button>
               <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(currentTime)}</span>
               <input type="range" min={0} max={duration || 0} step={0.1} value={currentTime} onChange={handleSeek} className="flex-1" />
               <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(duration)}</span>
               <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-20 shrink-0" />
-              <button onClick={() => setVolume(v => v === 0 ? 1 : 0)} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors"><VolumeIcon /></button>
+              <button onClick={toggleMute} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors"><VolumeIcon /></button>
               {/* Quality selector */}
               <div className="relative shrink-0">
                 <button
@@ -229,7 +254,7 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
 
             {/* Close button */}
             <button
-              onClick={() => { setSelectedId(null); setCurrentTime(0); setDuration(0); setIsBuffering(false); setQualityLevel(-1); setQualityMenuOpen(false); setActiveQuality(-1); }}
+              onClick={() => { setSelectedId(null); setCurrentTime(0); setDuration(0); setIsBuffering(false); setQualityLevel(-1); setQualityMenuOpen(false); setActiveQuality(-1); setIsPaused(false); }}
               className="absolute top-3 right-3 bg-black/70 hover:bg-black text-white p-2 rounded-lg z-20 transition-all cursor-pointer border-none flex items-center gap-1.5 text-xs"
             >
               <X size={14} /> Закрыть

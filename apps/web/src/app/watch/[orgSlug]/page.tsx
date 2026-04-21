@@ -12,7 +12,7 @@ import {
   Broadcast, Eye, CornersOut, CornersIn,
   SpeakerHigh, SpeakerLow, SpeakerSlash,
   CaretLeft, CaretRight, ChatCircle, Archive,
-  TelevisionSimple, GearSix,
+  TelevisionSimple, GearSix, Play, Pause,
 } from '@phosphor-icons/react';
 
 interface Me { sub: string; role: string; orgSlug?: string }
@@ -53,12 +53,15 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   const [chatOpen, setChatOpen]             = useState(true);
   const [viewPanelOpen, setViewPanelOpen]   = useState(false);
   const [isMobile, setIsMobile]             = useState(false);
-  const [uiVisible, setUiVisible]           = useState(true);
+  const [uiVisible, setUiVisible]           = useState(false);
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [mobileViewOpen, setMobileViewOpen] = useState(false);
   const [isFullscreen, setIsFullscreen]     = useState(false);
+  const [isPortrait, setIsPortrait]         = useState(true);
   const [viewerCount, setViewerCount]       = useState<number | null>(null);
   const [volume, setVolume]                 = useState(1);
+  const [isPaused, setIsPaused]             = useState(false);
+  const prevVolumeRef                       = useRef(1);
   const [currentTime, setCurrentTime]       = useState(0);
   const [duration, setDuration]             = useState(0);
   const [isAtLive, setIsAtLive]             = useState(true);
@@ -73,7 +76,10 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   const mobileContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
+    const check = () => {
+      setIsMobile(window.innerWidth < 768);
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    };
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
@@ -85,9 +91,13 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
     uiTimerRef.current = setTimeout(() => setUiVisible(false), 3000);
   }
 
+  function toggleMobileUi() {
+    if (uiTimerRef.current) clearTimeout(uiTimerRef.current);
+    setUiVisible(v => !v);
+  }
+
   useEffect(() => {
     if (!isMobile) return;
-    resetUiTimer();
     return () => { if (uiTimerRef.current) clearTimeout(uiTimerRef.current); };
   }, [isMobile]);
 
@@ -170,6 +180,44 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
     return <SpeakerHigh size={18} />;
   }
 
+  function toggleMute() {
+    if (volume === 0) {
+      setVolume(prevVolumeRef.current || 1);
+    } else {
+      prevVolumeRef.current = volume;
+      setVolume(0);
+    }
+  }
+
+  function togglePause() {
+    if (isPaused) {
+      matRef.current?.play();
+      setIsPaused(false);
+    } else {
+      matRef.current?.pause();
+      setIsPaused(true);
+    }
+  }
+
+  const VIEW_CYCLE: ViewMode[] = ['multicam', 'cam1', 'cam2', 'cam3', 'cam4'];
+
+  function cycleViewMode() {
+    setViewMode(prev => {
+      const idx = VIEW_CYCLE.indexOf(prev);
+      return VIEW_CYCLE[(idx + 1) % VIEW_CYCLE.length];
+    });
+  }
+
+  function handlePortraitTap(e: React.MouseEvent<HTMLDivElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    if (x > 0.5) {
+      cycleViewMode();
+    } else {
+      toggleMobileUi();
+    }
+  }
+
   function qualityLabel(): string {
     if (qualityLevel === -1) {
       const activeName = activeQuality >= 0
@@ -207,132 +255,237 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
 
   // ── Mobile layout ──────────────────────────────────────────────────────────
   if (isMobile) {
-    return (
-      <div ref={mobileContainerRef} className="fixed inset-0 bg-black" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }} onClick={resetUiTimer}>
-        <div className="absolute inset-0 overflow-hidden" onClick={handleVideoClick}>
-          {stream
-            ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} onBuffering={setIsBuffering} onQualityChange={setActiveQuality} />
-            : <div className="flex items-center justify-center h-full">
-                <TelevisionSimple size={48} className="text-zinc-700" weight="thin" />
-              </div>
-          }
-          {stream && (
-            <div
-              className="absolute inset-x-0 bottom-0 z-20 px-3 py-2 flex items-center gap-1.5"
-              style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.85))' }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {!isAtLive && (
-                <button onClick={goToLive} className="bg-brand text-white text-[0.6rem] font-bold px-1.5 py-0.5 rounded shrink-0 cursor-pointer border-none">LIVE</button>
-              )}
-              <span className="text-zinc-500 text-[0.65rem] font-mono tabular-nums shrink-0">{formatTime(currentTime)}</span>
-              <input type="range" min={0} max={duration || 0} step={0.1} value={currentTime} onChange={handleSeek} className="flex-1" />
-              <span className="text-zinc-500 text-[0.65rem] font-mono tabular-nums shrink-0">{formatTime(duration)}</span>
-              <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-[50px] shrink-0" />
-              <button className="text-white bg-transparent border-none w-8 h-8 flex items-center justify-center cursor-pointer shrink-0"><VolumeIcon /></button>
-              <div className="relative shrink-0">
-                <button
-                  onClick={() => setQualityMenuOpen((v) => !v)}
-                  className="text-white bg-transparent border-none h-8 px-1.5 rounded flex items-center gap-0.5 cursor-pointer hover:bg-white/10 transition-colors text-[0.65rem] font-medium"
-                >
-                  <GearSix size={14} />
-                  <span className="text-zinc-400">{qualityLabel()}</span>
-                </button>
-                {qualityMenuOpen && (
-                  <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 border border-zinc-700/50 rounded-lg overflow-hidden min-w-[110px] backdrop-blur-sm">
-                    <button
-                      onClick={() => { setQualityLevel(-1); matRef.current?.setQualityLevel(-1); setQualityMenuOpen(false); }}
-                      className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === -1 ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
-                    >
-                      Авто
-                    </button>
-                    {(matRef.current?.getQualityLevels() ?? []).map((q) => (
-                      <button
-                        key={q.index}
-                        onClick={() => { setQualityLevel(q.index); matRef.current?.setQualityLevel(q.index); setQualityMenuOpen(false); }}
-                        className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === q.index ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
-                      >
-                        {q.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <button onClick={toggleFullscreen} className="text-white bg-transparent border-none w-8 h-8 flex items-center justify-center cursor-pointer shrink-0">
-                {isFullscreen ? <CornersIn size={18} /> : <CornersOut size={18} />}
-              </button>
-            </div>
-          )}
-          {/* Buffering spinner */}
-          {isBuffering && (
-            <div className="absolute inset-0 flex items-center justify-center z-[11] pointer-events-none">
-              <div className="w-12 h-12 border-3 border-zinc-600 border-t-white rounded-full animate-spin" />
-            </div>
-          )}
-        </div>
+    const showImmersive = isFullscreen || !isPortrait;
 
-        {uiVisible && (
-          <div className="absolute top-0 inset-x-0 px-4 py-3 flex justify-between items-center pointer-events-none" style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)' }}>
-            <span className="font-semibold text-white text-sm">{org?.name}</span>
-            <div className="flex items-center gap-2 pointer-events-auto">
-              {org?.isLive && (
-                <>
-                  <span className="flex items-center gap-1 text-brand text-xs font-semibold">
-                    <span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse" /> LIVE
-                  </span>
-                  {viewerCount !== null && (
-                    <span className="flex items-center gap-1 text-zinc-500 text-xs">
-                      <Eye size={12} /> {viewerCount}
+    return (
+      <div
+        ref={mobileContainerRef}
+        className={showImmersive ? 'fixed inset-0 bg-black' : 'flex flex-col bg-surface-primary'}
+        style={showImmersive
+          ? { paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }
+          : { height: '100dvh', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }
+        }
+        onClick={showImmersive ? resetUiTimer : undefined}
+      >
+        {showImmersive ? (
+          /* ── Immersive (landscape OR fullscreen from portrait) ───────────── */
+          <>
+            <div className="absolute inset-0 overflow-hidden" onClick={handleVideoClick}>
+              {stream
+                ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} onBuffering={setIsBuffering} onQualityChange={setActiveQuality} />
+                : <div className="flex items-center justify-center h-full">
+                    <TelevisionSimple size={48} className="text-zinc-700" weight="thin" />
+                  </div>
+              }
+
+              {stream && (
+                <div
+                  className="absolute inset-x-0 bottom-0 z-20 px-3 py-2 flex items-center gap-1.5"
+                  style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.85))' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button onClick={togglePause} className="text-white bg-transparent border-none w-8 h-8 flex items-center justify-center cursor-pointer shrink-0">
+                    {isPaused ? <Play size={16} weight="fill" /> : <Pause size={16} weight="fill" />}
+                  </button>
+                  {!isAtLive && (
+                    <button onClick={goToLive} className="bg-brand text-white text-[0.6rem] font-bold px-1.5 py-0.5 rounded shrink-0 cursor-pointer border-none">LIVE</button>
+                  )}
+                  <span className="text-zinc-500 text-[0.65rem] font-mono tabular-nums shrink-0">{formatTime(currentTime)}</span>
+                  <input type="range" min={0} max={duration || 0} step={0.1} value={currentTime} onChange={handleSeek} className="flex-1" />
+                  <span className="text-zinc-500 text-[0.65rem] font-mono tabular-nums shrink-0">{formatTime(duration)}</span>
+                  <button onClick={toggleMute} className="text-white bg-transparent border-none w-8 h-8 flex items-center justify-center cursor-pointer shrink-0">
+                    <VolumeIcon />
+                  </button>
+                  <div className="relative shrink-0">
+                    <button
+                      onClick={() => setQualityMenuOpen((v) => !v)}
+                      className="text-white bg-transparent border-none h-8 px-1.5 rounded flex items-center gap-0.5 cursor-pointer hover:bg-white/10 transition-colors text-[0.65rem] font-medium"
+                    >
+                      <GearSix size={14} />
+                      <span className="text-zinc-400">{qualityLabel()}</span>
+                    </button>
+                    {qualityMenuOpen && (
+                      <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 border border-zinc-700/50 rounded-lg overflow-hidden min-w-[110px] backdrop-blur-sm">
+                        <button
+                          onClick={() => { setQualityLevel(-1); matRef.current?.setQualityLevel(-1); setQualityMenuOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === -1 ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
+                        >Авто</button>
+                        {(matRef.current?.getQualityLevels() ?? []).map((q) => (
+                          <button key={q.index}
+                            onClick={() => { setQualityLevel(q.index); matRef.current?.setQualityLevel(q.index); setQualityMenuOpen(false); }}
+                            className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === q.index ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
+                          >{q.name}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={toggleFullscreen} className="text-white bg-transparent border-none w-8 h-8 flex items-center justify-center cursor-pointer shrink-0">
+                    {isFullscreen ? <CornersIn size={18} /> : <CornersOut size={18} />}
+                  </button>
+                </div>
+              )}
+
+              {isBuffering && (
+                <div className="absolute inset-0 flex items-center justify-center z-[11] pointer-events-none">
+                  <div className="w-12 h-12 border-3 border-zinc-600 border-t-white rounded-full animate-spin" />
+                </div>
+              )}
+            </div>
+
+            {uiVisible && (
+              <div className="absolute top-0 inset-x-0 px-4 py-3 flex justify-between items-center pointer-events-none" style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)' }}>
+                <span className="font-semibold text-white text-sm">{org?.name}</span>
+                <div className="flex items-center gap-2 pointer-events-auto">
+                  {org?.isLive && (
+                    <>
+                      <span className="flex items-center gap-1 text-brand text-xs font-semibold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse" /> LIVE
+                      </span>
+                      {viewerCount !== null && (
+                        <span className="flex items-center gap-1 text-zinc-500 text-xs">
+                          <Eye size={12} /> {viewerCount}
+                        </span>
+                      )}
+                    </>
+                  )}
+                  {isOwner && (
+                    <>
+                      <Link href="/dashboard" className="text-white no-underline bg-brand px-2.5 py-1 rounded-md text-xs font-medium">Студия</Link>
+                      <button onClick={handleLogout} className="text-zinc-500 bg-transparent border border-zinc-700 px-2.5 py-1 rounded-md text-xs cursor-pointer">Выйти</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div
+              onClick={(e) => { e.stopPropagation(); setMobileViewOpen((v) => !v); setMobileChatOpen(false); resetUiTimer(); }}
+              className="absolute top-0 z-[26] w-11 flex items-center justify-start cursor-pointer"
+              style={{ left: mobileViewOpen ? 180 : 0, bottom: 50, transition: 'left 0.2s' }}
+            >
+              <span className="text-white rounded-r-md py-2.5 px-1.5 leading-none" style={{ background: 'rgba(0,0,0,0.5)', opacity: uiVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
+                {mobileViewOpen ? <CaretLeft size={16} /> : <CaretRight size={16} />}
+              </span>
+            </div>
+
+            <div
+              onClick={(e) => { e.stopPropagation(); setMobileChatOpen((v) => !v); setMobileViewOpen(false); resetUiTimer(); }}
+              className="absolute top-0 z-[26] w-11 flex items-center justify-end cursor-pointer"
+              style={{ right: mobileChatOpen ? 240 : 0, bottom: 50, transition: 'right 0.2s' }}
+            >
+              <span className="text-white rounded-l-md py-2.5 px-1.5 leading-none" style={{ background: 'rgba(0,0,0,0.5)', opacity: uiVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
+                {mobileChatOpen ? <CaretRight size={16} /> : <ChatCircle size={16} />}
+              </span>
+            </div>
+
+            <div
+              className="absolute top-0 z-[25] flex flex-col justify-center gap-6 p-4 backdrop-blur-sm"
+              style={{ left: mobileViewOpen ? 0 : -180, bottom: 50, width: 180, background: 'rgba(12,12,14,0.95)', transition: 'left 0.2s' }}
+            >
+              <ViewSwitcher mode={viewMode} onChange={(m) => { setViewMode(m); setMobileViewOpen(false); }} />
+              <Link href={archiveLink} className="flex items-center gap-1.5 text-zinc-500 text-xs no-underline hover:text-zinc-300 transition-colors">
+                <Archive size={14} /> Архив
+              </Link>
+            </div>
+
+            <div
+              className="absolute top-0 z-[25] backdrop-blur-sm"
+              style={{ right: mobileChatOpen ? 0 : -240, bottom: 50, width: 240, background: 'rgba(12,12,14,0.95)', transition: 'right 0.2s' }}
+            >
+              {org && <Chat orgSlug={orgSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
+            </div>
+          </>
+        ) : (
+          /* ── Portrait ───────────────────────────────────────────────────── */
+          <>
+            {/* Video 16:9 — right half = cycle camera, left half = toggle controls */}
+            <div
+              className="relative w-full bg-black shrink-0"
+              style={{ aspectRatio: '16/9' }}
+              onClick={handlePortraitTap}
+            >
+              {stream
+                ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} onBuffering={setIsBuffering} onQualityChange={setActiveQuality} />
+                : <div className="flex items-center justify-center h-full">
+                    <TelevisionSimple size={40} className="text-zinc-700" weight="thin" />
+                  </div>
+              }
+
+              {isBuffering && (
+                <div className="absolute inset-0 flex items-center justify-center z-[11] pointer-events-none">
+                  <div className="w-10 h-10 border-2 border-zinc-600 border-t-white rounded-full animate-spin" />
+                </div>
+              )}
+
+              {/* Bottom bar */}
+              {stream && (
+                <div
+                  className="absolute bottom-0 inset-x-0 z-20"
+                  style={{ background: uiVisible ? 'linear-gradient(transparent, rgba(0,0,0,0.85))' : 'transparent' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {uiVisible && (
+                    <div className="flex items-center justify-between px-3 py-2.5">
+                      <button onClick={togglePause} className="text-white bg-transparent border-none w-11 h-11 flex items-center justify-center cursor-pointer active:scale-90 transition-transform">
+                        {isPaused ? <Play size={22} weight="fill" /> : <Pause size={22} weight="fill" />}
+                      </button>
+                      <div className="flex items-center gap-1">
+                        <button onClick={toggleMute} className="text-white bg-transparent border-none w-11 h-11 flex items-center justify-center cursor-pointer active:scale-90 transition-transform">
+                          <VolumeIcon />
+                        </button>
+                        <button onClick={toggleFullscreen} className="text-white bg-transparent border-none w-11 h-11 flex items-center justify-center cursor-pointer active:scale-90 transition-transform">
+                          <CornersOut size={20} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="relative" style={{ height: 16 }}>
+                    <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/20">
+                      <div className="h-full bg-brand" style={{ width: duration > 0 ? `${(currentTime / duration) * 100}%` : '0%' }} />
+                    </div>
+                    <input
+                      type="range" min={0} max={duration || 0} step={0.1} value={currentTime}
+                      onChange={handleSeek}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer m-0 p-0"
+                      style={{ WebkitAppearance: 'none', touchAction: 'none' }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Info bar */}
+            <div className="px-4 py-2.5 border-b border-zinc-800/60 shrink-0">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-zinc-100 font-semibold text-sm leading-snug truncate">
+                    {org?.streamTitle || org?.name || orgSlug}
+                  </p>
+                  {org?.streamTitle && org?.name && (
+                    <p className="text-zinc-500 text-xs mt-0.5 truncate">{org.name}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                  {org?.isLive && (
+                    <span className="flex items-center gap-1 text-brand text-xs font-semibold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse" /> LIVE
                     </span>
                   )}
-                </>
-              )}
-              {isOwner && (
-                <>
-                  <Link href="/dashboard" className="text-white no-underline bg-brand px-2.5 py-1 rounded-md text-xs font-medium">
-                    Студия
-                  </Link>
-                  <button onClick={handleLogout} className="text-zinc-500 bg-transparent border border-zinc-700 px-2.5 py-1 rounded-md text-xs cursor-pointer">
-                    Выйти
-                  </button>
-                </>
-              )}
+                  <span className="flex items-center gap-1 text-zinc-500 text-xs">
+                    <Eye size={12} />
+                    <span className="tabular-nums">{viewerCount !== null ? viewerCount : '—'}</span>
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
+
+            {/* Chat */}
+            <div className="flex-1 overflow-hidden">
+              {org && <Chat orgSlug={orgSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
+            </div>
+          </>
         )}
-
-        <div
-          onClick={(e) => { e.stopPropagation(); setMobileViewOpen((v) => !v); setMobileChatOpen(false); resetUiTimer(); }}
-          className="absolute top-0 z-[26] w-11 flex items-center justify-start cursor-pointer"
-          style={{ left: mobileViewOpen ? 180 : 0, bottom: 50, transition: 'left 0.2s' }}>
-          <span className="text-white rounded-r-md py-2.5 px-1.5 leading-none" style={{ background: 'rgba(0,0,0,0.5)', opacity: uiVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
-            {mobileViewOpen ? <CaretLeft size={16} /> : <CaretRight size={16} />}
-          </span>
-        </div>
-
-        <div
-          onClick={(e) => { e.stopPropagation(); setMobileChatOpen((v) => !v); setMobileViewOpen(false); resetUiTimer(); }}
-          className="absolute top-0 z-[26] w-11 flex items-center justify-end cursor-pointer"
-          style={{ right: mobileChatOpen ? 240 : 0, bottom: 50, transition: 'right 0.2s' }}>
-          <span className="text-white rounded-l-md py-2.5 px-1.5 leading-none" style={{ background: 'rgba(0,0,0,0.5)', opacity: uiVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
-            {mobileChatOpen ? <CaretRight size={16} /> : <ChatCircle size={16} />}
-          </span>
-        </div>
-
-        <div
-          className="absolute top-0 z-[25] flex flex-col justify-center gap-6 p-4 backdrop-blur-sm"
-          style={{ left: mobileViewOpen ? 0 : -180, bottom: 50, width: 180, background: 'rgba(12,12,14,0.95)', transition: 'left 0.2s' }}>
-          <ViewSwitcher mode={viewMode} onChange={(m) => { setViewMode(m); setMobileViewOpen(false); }} />
-          <Link href={archiveLink} className="flex items-center gap-1.5 text-zinc-500 text-xs no-underline hover:text-zinc-300 transition-colors">
-            <Archive size={14} /> Архив
-          </Link>
-        </div>
-
-        <div
-          className="absolute top-0 z-[25] backdrop-blur-sm"
-          style={{ right: mobileChatOpen ? 0 : -240, bottom: 50, width: 240, background: 'rgba(12,12,14,0.95)', transition: 'right 0.2s' }}>
-          {org && <Chat orgSlug={orgSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
-        </div>
       </div>
     );
   }
@@ -356,6 +509,14 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
                 <span className="text-zinc-600 text-sm">Нет активной трансляции</span>
               </div>
           }
+
+          {/* Viewer count overlay */}
+          {viewerCount !== null && (
+            <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm rounded-lg px-2.5 py-1.5 pointer-events-none">
+              <Eye size={14} className="text-zinc-400" />
+              <span className="text-zinc-300 text-xs font-medium tabular-nums">{viewerCount}</span>
+            </div>
+          )}
 
           {/* Buffering spinner */}
           {isBuffering && (
@@ -389,6 +550,9 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
               style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.85))', opacity: desktopControlsVisible ? 1 : 0, pointerEvents: desktopControlsVisible ? 'auto' : 'none' }}
               onClick={(e) => e.stopPropagation()}
             >
+              <button onClick={togglePause} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors">
+                {isPaused ? <Play size={18} weight="fill" /> : <Pause size={18} weight="fill" />}
+              </button>
               {!isAtLive && (
                 <button onClick={goToLive} className="bg-brand text-white text-[0.65rem] font-bold px-2 py-0.5 rounded-md shrink-0 cursor-pointer border-none">LIVE</button>
               )}
@@ -396,7 +560,7 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
               <input type="range" min={0} max={duration || 0} step={0.1} value={currentTime} onChange={handleSeek} className="flex-1" />
               <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(duration)}</span>
               <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-20 shrink-0" />
-              <button className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors"><VolumeIcon /></button>
+              <button onClick={toggleMute} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors"><VolumeIcon /></button>
               {/* Quality selector */}
               <div className="relative shrink-0">
                 <button
