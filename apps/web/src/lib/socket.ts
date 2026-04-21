@@ -4,9 +4,8 @@ let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    const url = process.env.NEXT_PUBLIC_SOCKET_URL;
-    socket = io(url ? `${url}/chat` : '/chat', {
-      transports: ['websocket'],
+    socket = io('/chat', {
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
