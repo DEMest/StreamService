@@ -172,13 +172,20 @@ export default function DashboardPage() {
                 <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
                   <span className="w-28 shrink-0 text-xs text-zinc-500">Сервер</span>
                   <span className="flex-1 font-mono text-sm text-zinc-300">
-                    {serverIp ? srtServer : <span className="text-zinc-600">Задайте NEXT_PUBLIC_SERVER_IP</span>}
+                    {serverIp || <span className="text-zinc-600">Задайте NEXT_PUBLIC_SERVER_IP</span>}
                   </span>
                   {serverIp && (
-                    <button onClick={() => copyText(srtServer)} className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer">
+                    <button onClick={() => copyText(serverIp)} className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer">
                       <Copy size={12} /> Копировать
                     </button>
                   )}
+                </div>
+                <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
+                  <span className="w-28 shrink-0 text-xs text-zinc-500">Порт</span>
+                  <span className="flex-1 font-mono text-sm text-zinc-300">8890</span>
+                  <button onClick={() => copyText('8890')} className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer">
+                    <Copy size={12} /> Копировать
+                  </button>
                 </div>
                 <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
                   <span className="w-28 shrink-0 text-xs text-zinc-500">Stream ID</span>
@@ -193,13 +200,20 @@ export default function DashboardPage() {
                 <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
                   <span className="w-28 shrink-0 text-xs text-zinc-500">Сервер</span>
                   <span className="flex-1 font-mono text-sm text-zinc-300">
-                    {serverIp ? rtmpServer : <span className="text-zinc-600">Задайте NEXT_PUBLIC_SERVER_IP</span>}
+                    {serverIp || <span className="text-zinc-600">Задайте NEXT_PUBLIC_SERVER_IP</span>}
                   </span>
                   {serverIp && (
-                    <button onClick={() => copyText(rtmpServer)} className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer">
+                    <button onClick={() => copyText(serverIp)} className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer">
                       <Copy size={12} /> Копировать
                     </button>
                   )}
+                </div>
+                <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
+                  <span className="w-28 shrink-0 text-xs text-zinc-500">Порт</span>
+                  <span className="flex-1 font-mono text-sm text-zinc-300">1935</span>
+                  <button onClick={() => copyText('1935')} className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer">
+                    <Copy size={12} /> Копировать
+                  </button>
                 </div>
                 <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
                   <span className="w-28 shrink-0 text-xs text-zinc-500">Ключ потока</span>
@@ -234,72 +248,155 @@ export default function DashboardPage() {
                 </button>
               </div>
             </div>
-
-            {/* Quick copy full URL */}
-            {keyVisible && serverIp && (
-              <div className="pt-3 border-t border-zinc-800/40">
-                <button
-                  onClick={() => copyText(protocol === 'srt' ? srtFullUrl : rtmpFullUrl)}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-brand/10 hover:bg-brand/20 text-brand text-xs font-medium rounded-lg transition-all active:scale-[0.99] cursor-pointer"
-                >
-                  <Copy size={14} />
-                  Скопировать полную ссылку для {protocol === 'srt' ? 'OBS / vMix' : 'OBS / vMix'}
-                </button>
-              </div>
-            )}
           </div>
 
           {/* Setup guides */}
-          <div className="mt-4 border-t border-zinc-800/40 pt-3 space-y-1">
-            <details className="group">
-              <summary className="flex items-center gap-2 cursor-pointer text-xs text-zinc-500 hover:text-zinc-300 transition-colors py-1.5 [&::-webkit-details-marker]:hidden list-none select-none">
-                <CaretDown size={12} className="transition-transform -rotate-90 group-open:rotate-0" />
-                Как настроить в OBS Studio
+          <div className="mt-5 pt-5 border-t border-zinc-800/40 space-y-3">
+            <details className="group bg-surface-primary rounded-xl border border-zinc-800/40 overflow-hidden">
+              <summary className="flex items-center gap-2.5 cursor-pointer text-sm font-medium text-zinc-300 hover:text-zinc-100 transition-colors px-4 py-3 [&::-webkit-details-marker]:hidden list-none select-none">
+                <CaretDown size={14} className="text-zinc-500 transition-transform -rotate-90 group-open:rotate-0" />
+                Настройка OBS Studio
               </summary>
-              <div className="pl-5 pb-2 text-xs text-zinc-500 leading-relaxed">
+              <div className="px-4 pb-4 space-y-3">
                 {protocol === 'srt' ? (
-                  <ol className="list-decimal pl-4 space-y-1">
-                    <li>Откройте <span className="text-zinc-300">Настройки → Вещание</span></li>
-                    <li>Сервис: <span className="text-zinc-300">Пользовательский</span></li>
-                    <li>В поле «Сервер» вставьте полную ссылку (кнопка выше)</li>
-                    <li>Поле «Ключ потока» оставьте <span className="text-zinc-300">пустым</span></li>
-                    <li>Нажмите «Запустить трансляцию»</li>
-                  </ol>
+                  <>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">1</span>
+                      <p className="text-sm text-zinc-400">Откройте <span className="text-zinc-200">Настройки → Трансляция</span>, служба: <span className="text-zinc-200">Настраиваемая</span></p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">2</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-zinc-400 mb-1.5">В поле <span className="text-zinc-200">«Сервер»</span> вставьте полную ссылку:</p>
+                        <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
+                          <code className="flex-1 text-sm text-zinc-200 font-mono break-all">{srtFullUrl || `srt://${serverIp || 'IP'}:8890?streamid=${streamId}&passphrase=\u2022\u2022\u2022`}</code>
+                          {srtFullUrl && (
+                            <button onClick={() => copyText(srtFullUrl)} className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer" title="Копировать">
+                              <Copy size={14} />
+                            </button>
+                          )}
+                        </div>
+                        {!keyVisible && <p className="text-xs text-zinc-600 mt-1">Покажите пароль, чтобы скопировать ссылку</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">3</span>
+                      <p className="text-sm text-zinc-400">Поле <span className="text-zinc-200">«Ключ потока»</span> оставьте пустым</p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">4</span>
+                      <p className="text-sm text-zinc-400">Нажмите <span className="text-zinc-200">«Начать трансляцию»</span></p>
+                    </div>
+                  </>
                 ) : (
-                  <ol className="list-decimal pl-4 space-y-1">
-                    <li>Откройте <span className="text-zinc-300">Настройки → Вещание</span></li>
-                    <li>Сервис: <span className="text-zinc-300">Пользовательский</span></li>
-                    <li>Сервер: <span className="text-zinc-300 font-mono">{rtmpServer || 'rtmp://сервер:1935/live'}</span></li>
-                    <li>Ключ потока: <span className="text-zinc-300 font-mono">{profile?.slug ?? 'slug'}?key=<span className="text-zinc-500">ваш_пароль</span></span></li>
-                    <li>Или скопируйте полную ссылку (кнопка выше) в поле «Сервер», ключ оставьте пустым</li>
-                    <li>Нажмите «Запустить трансляцию»</li>
-                  </ol>
+                  <>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">1</span>
+                      <p className="text-sm text-zinc-400">Откройте <span className="text-zinc-200">Настройки → Трансляция</span>, служба: <span className="text-zinc-200">Настраиваемая</span></p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">2</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-zinc-400 mb-1.5">В поле <span className="text-zinc-200">«Сервер»</span> вставьте:</p>
+                        <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
+                          <code className="flex-1 text-sm text-zinc-200 font-mono">{rtmpServer || `rtmp://${serverIp || 'IP'}:1935/live`}</code>
+                          {serverIp && (
+                            <button onClick={() => copyText(rtmpServer)} className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer" title="Копировать">
+                              <Copy size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">3</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-zinc-400 mb-1.5">В поле <span className="text-zinc-200">«Ключ потока»</span> вставьте:</p>
+                        <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
+                          <code className="flex-1 text-sm text-zinc-200 font-mono break-all">{profile?.slug ?? 'slug'}?key={keyVisible ? profile?.ingestKey : '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'}</code>
+                          {keyVisible && (
+                            <button onClick={() => copyText(`${profile?.slug}?key=${profile?.ingestKey}`)} className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer" title="Копировать">
+                              <Copy size={14} />
+                            </button>
+                          )}
+                        </div>
+                        {!keyVisible && <p className="text-xs text-zinc-600 mt-1">Покажите пароль, чтобы скопировать ключ</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">4</span>
+                      <p className="text-sm text-zinc-400">Нажмите <span className="text-zinc-200">«Начать трансляцию»</span></p>
+                    </div>
+                  </>
                 )}
               </div>
             </details>
 
-            <details className="group">
-              <summary className="flex items-center gap-2 cursor-pointer text-xs text-zinc-500 hover:text-zinc-300 transition-colors py-1.5 [&::-webkit-details-marker]:hidden list-none select-none">
-                <CaretDown size={12} className="transition-transform -rotate-90 group-open:rotate-0" />
-                Как настроить в vMix
+            <details className="group bg-surface-primary rounded-xl border border-zinc-800/40 overflow-hidden">
+              <summary className="flex items-center gap-2.5 cursor-pointer text-sm font-medium text-zinc-300 hover:text-zinc-100 transition-colors px-4 py-3 [&::-webkit-details-marker]:hidden list-none select-none">
+                <CaretDown size={14} className="text-zinc-500 transition-transform -rotate-90 group-open:rotate-0" />
+                Настройка vMix
               </summary>
-              <div className="pl-5 pb-2 text-xs text-zinc-500 leading-relaxed">
+              <div className="px-4 pb-4 space-y-3">
                 {protocol === 'srt' ? (
-                  <ol className="list-decimal pl-4 space-y-1">
-                    <li>Откройте <span className="text-zinc-300">Settings → Outputs</span></li>
-                    <li>Нажмите <span className="text-zinc-300">+ (Add)</span>, выберите <span className="text-zinc-300">SRT Caller</span></li>
-                    <li>Hostname: <span className="text-zinc-300 font-mono">{serverIp || 'IP сервера'}</span>, Port: <span className="text-zinc-300 font-mono">8890</span></li>
-                    <li>Stream ID: <span className="text-zinc-300 font-mono">{streamId}</span></li>
-                    <li>Passphrase: скопируйте из поля выше</li>
-                    <li>Latency: <span className="text-zinc-300">200</span> (по умолчанию)</li>
-                  </ol>
+                  <>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">1</span>
+                      <p className="text-sm text-zinc-400">Откройте <span className="text-zinc-200">Settings → Outputs</span>, нажмите <span className="text-zinc-200">+ (Add)</span></p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">2</span>
+                      <p className="text-sm text-zinc-400">Выберите тип: <span className="text-zinc-200">SRT Caller</span></p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">3</span>
+                      <div className="flex-1 min-w-0 text-sm text-zinc-400 space-y-1.5">
+                        <p>Заполните поля:</p>
+                        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                          <span className="text-zinc-500">Hostname:</span>
+                          <span className="text-zinc-200 font-mono">{serverIp || 'IP сервера'}</span>
+                          <span className="text-zinc-500">Port:</span>
+                          <span className="text-zinc-200 font-mono">8890</span>
+                          <span className="text-zinc-500">Stream ID:</span>
+                          <span className="text-zinc-200 font-mono break-all">{streamId}</span>
+                          <span className="text-zinc-500">Passphrase:</span>
+                          <span className="text-zinc-200 font-mono">{keyVisible ? profile?.ingestKey : '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'}</span>
+                          <span className="text-zinc-500">Latency:</span>
+                          <span className="text-zinc-200 font-mono">200</span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
                 ) : (
-                  <ol className="list-decimal pl-4 space-y-1">
-                    <li>Откройте <span className="text-zinc-300">Settings → Outputs</span></li>
-                    <li>Нажмите <span className="text-zinc-300">+ (Add)</span>, выберите <span className="text-zinc-300">RTMP</span></li>
-                    <li>URL: скопируйте полную ссылку (кнопка выше)</li>
-                    <li>Stream Key: оставьте пустым</li>
-                  </ol>
+                  <>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">1</span>
+                      <p className="text-sm text-zinc-400">Откройте <span className="text-zinc-200">Settings → Outputs</span>, нажмите <span className="text-zinc-200">+ (Add)</span></p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">2</span>
+                      <p className="text-sm text-zinc-400">Выберите тип: <span className="text-zinc-200">RTMP</span></p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">3</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-zinc-400 mb-1.5">В поле <span className="text-zinc-200">URL</span> вставьте полную ссылку:</p>
+                        <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
+                          <code className="flex-1 text-sm text-zinc-200 font-mono break-all">{rtmpFullUrl || `rtmp://${serverIp || 'IP'}:1935/live/${profile?.slug ?? 'slug'}?key=\u2022\u2022\u2022`}</code>
+                          {rtmpFullUrl && (
+                            <button onClick={() => copyText(rtmpFullUrl)} className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer" title="Копировать">
+                              <Copy size={14} />
+                            </button>
+                          )}
+                        </div>
+                        {!keyVisible && <p className="text-xs text-zinc-600 mt-1">Покажите пароль, чтобы скопировать ссылку</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">4</span>
+                      <p className="text-sm text-zinc-400">Поле <span className="text-zinc-200">Stream Key</span> оставьте пустым</p>
+                    </div>
+                  </>
                 )}
               </div>
             </details>
