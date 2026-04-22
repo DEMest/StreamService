@@ -74,6 +74,9 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   const matRef             = useRef<MatPlayerHandle>(null);
   const videoColumnRef     = useRef<HTMLDivElement>(null);
   const mobileContainerRef = useRef<HTMLDivElement>(null);
+  const touchStartYRef     = useRef(0);
+  const swipedRef          = useRef(false);
+  const [swipeOffset, setSwipeOffset] = useState(0);
 
   useEffect(() => {
     const check = () => {
@@ -209,6 +212,7 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
   }
 
   function handlePortraitTap(e: React.MouseEvent<HTMLDivElement>) {
+    if (swipedRef.current) { swipedRef.current = false; return; }
     const rect = e.currentTarget.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     if (x > 0.5) {
@@ -216,6 +220,28 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
     } else {
       toggleMobileUi();
     }
+  }
+
+  function handleSwipeStart(e: React.TouchEvent) {
+    touchStartYRef.current = e.touches[0].clientY;
+    swipedRef.current = false;
+  }
+
+  function handleSwipeMove(e: React.TouchEvent) {
+    const dy = e.touches[0].clientY - touchStartYRef.current;
+    if (dy > 0) {
+      setSwipeOffset(dy * 0.4);
+      if (dy > 15) swipedRef.current = true;
+    } else {
+      setSwipeOffset(0);
+    }
+  }
+
+  function handleSwipeEnd() {
+    if (swipeOffset > 80) {
+      router.back();
+    }
+    setSwipeOffset(0);
   }
 
   function qualityLabel(): string {
@@ -398,11 +424,21 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
         ) : (
           /* ── Portrait ───────────────────────────────────────────────────── */
           <>
-            {/* Video 16:9 — right half = cycle camera, left half = toggle controls */}
+            {/* Video 16:9 — swipe down to go back, right half = cycle camera, left half = toggle controls */}
             <div
               className="relative w-full bg-black shrink-0"
-              style={{ aspectRatio: '16/9' }}
+              style={{
+                aspectRatio: '16/9',
+                touchAction: 'none',
+                transform: swipeOffset > 0 ? `translateY(${swipeOffset}px) scale(${1 - swipeOffset / 400})` : undefined,
+                transition: swipeOffset === 0 ? 'transform 0.3s ease-out, opacity 0.3s ease-out' : 'none',
+                opacity: swipeOffset > 0 ? Math.max(0.3, 1 - swipeOffset / 200) : 1,
+                borderRadius: swipeOffset > 0 ? 12 : 0,
+              }}
               onClick={handlePortraitTap}
+              onTouchStart={handleSwipeStart}
+              onTouchMove={handleSwipeMove}
+              onTouchEnd={handleSwipeEnd}
             >
               {stream
                 ? <MatPlayer ref={matRef} streamUrl={stream.hlsUrl} viewMode={viewMode} volume={volume} isArchive={false} onMutedFallback={() => setVolume(0)} onTimeUpdate={handleTimeUpdate} onBuffering={setIsBuffering} onQualityChange={setActiveQuality} />
@@ -457,8 +493,14 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
 
             {/* Info bar */}
             <div className="px-4 py-2.5 border-b border-zinc-800/60 shrink-0">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  onClick={() => router.back()}
+                  className="text-zinc-400 bg-transparent border-none p-1.5 -ml-1.5 cursor-pointer shrink-0 active:scale-90 transition-transform"
+                >
+                  <CaretLeft size={20} weight="bold" />
+                </button>
+                <div className="min-w-0 flex-1">
                   <p className="text-zinc-100 font-semibold text-sm leading-snug truncate">
                     {org?.streamTitle || org?.name || orgSlug}
                   </p>

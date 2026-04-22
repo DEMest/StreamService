@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { execFile } from 'child_process';
+import { existsSync } from 'fs';
 
 const CROP_FILTERS: Record<string, string> = {
   cam1: 'crop=iw/2:ih/2:0:0',
@@ -17,15 +18,16 @@ interface CacheEntry {
 
 @Injectable()
 export class ThumbnailService {
+  private readonly logger = new Logger(ThumbnailService.name);
   private cache = new Map<string, CacheEntry>();
 
-  buildFfmpegArgs(hlsUrl: string, mode: string): string[] {
-    const args = ['-i', hlsUrl];
+  buildFfmpegArgs(hlsPath: string, mode: string): string[] {
+    const args = ['-y', '-i', hlsPath];
     const crop = CROP_FILTERS[mode];
     if (crop) {
       args.push('-vf', crop);
     }
-    args.push('-vframes', '1', '-f', 'image2', '-y', 'pipe:1');
+    args.push('-vframes', '1', '-q:v', '5', '-f', 'image2', 'pipe:1');
     return args;
   }
 
@@ -43,10 +45,10 @@ export class ThumbnailService {
     this.cache.set(slug, { buffer, timestamp: timestamp ?? Date.now() });
   }
 
-  async captureFrame(hlsUrl: string, mode: string): Promise<Buffer> {
-    const args = this.buildFfmpegArgs(hlsUrl, mode);
+  async captureFrame(hlsPath: string, mode: string): Promise<Buffer> {
+    const args = this.buildFfmpegArgs(hlsPath, mode);
     return new Promise((resolve, reject) => {
-      execFile('ffmpeg', args, { encoding: 'buffer', maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
+      execFile('ffmpeg', args, { encoding: 'buffer', maxBuffer: 5 * 1024 * 1024, timeout: 10_000 }, (err, stdout) => {
         if (err) return reject(err);
         resolve(stdout as unknown as Buffer);
       });
@@ -57,12 +59,18 @@ export class ThumbnailService {
     const cached = this.getCached(slug);
     if (cached) return cached;
 
-    const hlsUrl = `http://mediamtx:8888/hls/live/${slug}/index.m3u8`;
+    const hlsPath = `/hls/live/${slug}/hd/index.m3u8`;
+    if (!existsSync(hlsPath)) {
+      this.logger.warn(`HLS playlist not found: ${hlsPath}`);
+      return null;
+    }
+
     try {
-      const buf = await this.captureFrame(hlsUrl, mode);
+      const buf = await this.captureFrame(hlsPath, mode);
       this.setCache(slug, buf);
       return buf;
-    } catch {
+    } catch (err) {
+      this.logger.warn(`Frame capture failed for ${slug} (${mode}): ${err}`);
       return null;
     }
   }

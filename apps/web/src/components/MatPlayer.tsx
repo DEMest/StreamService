@@ -159,9 +159,13 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
     } else if (Hls.isSupported()) {
       hls = new Hls({
         liveDurationInfinity: true,
-        liveBackBufferLength: Infinity,
         lowLatencyMode: true,
-        backBufferLength: 30,
+        liveSyncDuration: 3,
+        liveMaxLatencyDuration: 10,
+        maxBufferLength: 10,
+        maxMaxBufferLength: 15,
+        backBufferLength: 10,
+        startLevel: -1,
       });
       hlsRef.current = hls;
       hls.loadSource(streamUrl);
@@ -175,6 +179,21 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
         onQualityChange?.(data.level);
+      });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) return;
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            hls!.startLoad();
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            hls!.recoverMediaError();
+            break;
+          default:
+            hls!.destroy();
+            hlsRef.current = null;
+            break;
+        }
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = streamUrl;
@@ -235,9 +254,10 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const ro = new ResizeObserver(() => {
-      canvas.width  = Math.round(canvas.offsetWidth  * (window.devicePixelRatio || 1));
-      canvas.height = Math.round(canvas.offsetHeight * (window.devicePixelRatio || 1));
+      canvas.width  = Math.round(canvas.offsetWidth  * dpr);
+      canvas.height = Math.round(canvas.offsetHeight * dpr);
     });
     ro.observe(canvas);
     return () => ro.disconnect();

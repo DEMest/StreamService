@@ -40,6 +40,7 @@ services:
     container_name: streamservice-mediamtx
     ports:
       - "${MEDIAMTX_SRT_PORT:-8890}:8890/udp"
+      - "${MEDIAMTX_RTMP_PORT:-1935}:1935/tcp"
       - "8888:8888"
       - "9997:9997"
     environment:

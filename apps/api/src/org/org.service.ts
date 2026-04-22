@@ -129,6 +129,14 @@ export class OrgService {
     return { ok: true };
   }
 
+  async verifyIngestKey(slug: string, key: string): Promise<boolean> {
+    const org = await this.prisma.organization.findUnique({
+      where: { slug },
+      select: { ingestKey: true, isActive: true },
+    });
+    return !!org && org.isActive && org.ingestKey === key;
+  }
+
   async handleWebhook(orgSlug: string, action: 'publish' | 'unpublish') {
     const org = await this.prisma.organization.findUnique({
       where: { slug: orgSlug },
