@@ -2,9 +2,9 @@ import { Header } from './Header';
 
 export function PublicLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: '#0a0a0a', color: '#fff' }}>
+    <div className="min-h-[100dvh] flex flex-col bg-surface-primary text-zinc-200">
       <Header />
-      <main style={{ flex: 1 }}>{children}</main>
+      <main className="flex-1">{children}</main>
     </div>
   );
 }

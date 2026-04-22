@@ -144,6 +144,25 @@ Copy `.env.example` to `.env`. Key variables:
 - `CORS_ORIGIN` — comma-separated allowed origins for the API
 - `SUPERADMIN_LOGIN`, `SUPERADMIN_PASSWORD` — used by `prisma:seed`
 
+## Frontend Design Skills
+
+When working on frontend code (`apps/web`), always apply the design instructions from:
+- `.claude/skills/taste-skill.md` — core design framework (typography, color, layout, motion, anti-patterns)
+- `.claude/skills/output-skill.md` — complete code output, no truncation or placeholders
+
+**Project-specific overrides** for taste-skill baseline:
+- DESIGN_VARIANCE: 6 (functional streaming app, not a creative portfolio)
+- MOTION_INTENSITY: 4 (smooth but not distracting — users are watching streams)
+- VISUAL_DENSITY: 5 (balanced: dashboard pages can be denser, public/watch pages lighter)
+
+Additional skills are available on request in `.claude/skills/`:
+- `redesign-skill.md` — audit and upgrade existing pages
+- `soft-skill.md` — luxury soft UI aesthetic
+- `minimalist-skill.md` — editorial Notion-inspired style
+- `brutalist-skill.md` — Swiss typographic + terminal aesthetic
+- `gpt-taste.md` — Awwwards-level GSAP motion
+- `stitch-skill.md` — generate DESIGN.md for Google Stitch
+
 ## Product Constraints
 
 - **Do not** split into separate streams per camera — single composite SRT stream per org, client-side zoom only

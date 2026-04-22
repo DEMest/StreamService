@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { OrgService } from './org.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -25,8 +26,11 @@ export class OrgController {
   @Patch('stream')
   updateStreamSettings(
     @CurrentUser() user: JwtPayload,
-    @Body() body: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean },
+    @Body() body: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean; previewMode?: string },
   ) {
+    if (body.previewMode && !['multicam', 'cam1', 'cam2', 'cam3', 'cam4'].includes(body.previewMode)) {
+      throw new BadRequestException('Invalid previewMode. Allowed: multicam, cam1, cam2, cam3, cam4');
+    }
     return this.org.updateStreamSettings(user.orgId!, body);
   }
 
@@ -48,5 +52,20 @@ export class OrgController {
   @Delete('broadcasts/:id')
   deleteBroadcast(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.org.deleteBroadcast(user.orgId!, id);
+  }
+
+  @Post('preview')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 } }))
+  uploadPreview(@CurrentUser() user: JwtPayload, @UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+      throw new BadRequestException('Only JPEG, PNG and WebP images are allowed');
+    }
+    return this.org.uploadPreview(user.orgId!, user.orgSlug!, file.buffer);
+  }
+
+  @Delete('preview')
+  deletePreview(@CurrentUser() user: JwtPayload) {
+    return this.org.deletePreview(user.orgId!, user.orgSlug!);
   }
 }

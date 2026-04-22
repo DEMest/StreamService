@@ -10,13 +10,20 @@ interface Props {
   isArchive?: boolean;
   onMutedFallback?: () => void;
   onTimeUpdate?: (current: number, duration: number, isLive: boolean) => void;
+  onBuffering?: (isBuffering: boolean) => void;
+  onQualityChange?: (levelIndex: number) => void;
 }
 
 export interface MatPlayerHandle {
   enterIOSFullscreen: () => void;
   seekTo: (time: number) => void;
   seekToLive: () => void;
+  pause: () => void;
+  play: () => void;
   getVideoElement: () => HTMLVideoElement | null;
+  getQualityLevels: () => { index: number; height: number; name: string }[];
+  setQualityLevel: (index: number) => void;
+  getCurrentQuality: () => number;
 }
 
 const QUAD: Record<string, [number, number]> = {
@@ -41,7 +48,7 @@ function drawContain(
   ctx.drawImage(video, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
-const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, volume = 1, isArchive = false, onMutedFallback, onTimeUpdate }, ref) => {
+const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, volume = 1, isArchive = false, onMutedFallback, onTimeUpdate, onBuffering, onQualityChange }, ref) => {
   const videoRef  = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const modeRef   = useRef(viewMode);
@@ -81,8 +88,40 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
         video.currentTime = video.duration;
       }
     },
+    pause() {
+      videoRef.current?.pause();
+    },
+    play() {
+      videoRef.current?.play().catch(() => {});
+    },
     getVideoElement() {
       return videoRef.current;
+    },
+    getQualityLevels() {
+      const hls = hlsRef.current;
+      if (!hls) return [];
+      return hls.levels.map((level, index) => {
+        let name: string;
+        if ((level as any).name) {
+          name = (level as any).name;
+        } else if (level.height > 0) {
+          name = `${level.height}p`;
+        } else if (level.bitrate > 0) {
+          const mbps = level.bitrate / 1_000_000;
+          name = mbps >= 1 ? `${mbps.toFixed(1)} Mbps` : `${Math.round(level.bitrate / 1000)} kbps`;
+        } else {
+          name = `Поток ${index + 1}`;
+        }
+        return { index, height: level.height, name };
+      });
+    },
+    setQualityLevel(index: number) {
+      const hls = hlsRef.current;
+      if (hls) hls.currentLevel = index;
+    },
+    getCurrentQuality() {
+      const hls = hlsRef.current;
+      return hls ? hls.currentLevel : -1;
     },
   }), []);
 
@@ -93,16 +132,40 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
     let hls: Hls | null = null;
 
     if (isArchive) {
-      video.src = streamUrl;
-      video.play().catch(() => {
-        video.muted = true;
-        onMutedFallback?.();
-        video.play().catch(() => {});
-      });
+      if (Hls.isSupported()) {
+        hls = new Hls();
+        hlsRef.current = hls;
+        hls.loadSource(streamUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(() => {
+            video.muted = true;
+            onMutedFallback?.();
+            video.play().catch(() => {});
+          });
+        });
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+          onQualityChange?.(data.level);
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari native HLS
+        video.src = streamUrl;
+        video.play().catch(() => {
+          video.muted = true;
+          onMutedFallback?.();
+          video.play().catch(() => {});
+        });
+      }
     } else if (Hls.isSupported()) {
       hls = new Hls({
         liveDurationInfinity: true,
-        liveBackBufferLength: Infinity,
+        lowLatencyMode: true,
+        liveSyncDuration: 3,
+        liveMaxLatencyDuration: 10,
+        maxBufferLength: 10,
+        maxMaxBufferLength: 15,
+        backBufferLength: 10,
+        startLevel: -1,
       });
       hlsRef.current = hls;
       hls.loadSource(streamUrl);
@@ -113,6 +176,24 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
           onMutedFallback?.();
           video.play().catch(() => {});
         });
+      });
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+        onQualityChange?.(data.level);
+      });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) return;
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            hls!.startLoad();
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            hls!.recoverMediaError();
+            break;
+          default:
+            hls!.destroy();
+            hlsRef.current = null;
+            break;
+        }
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = streamUrl;
@@ -149,13 +230,34 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
     video.muted = volume === 0;
   }, [volume]);
 
+  // Buffering detection
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !onBuffering) return;
+
+    const onWaiting = () => onBuffering(true);
+    const onPlaying = () => onBuffering(false);
+    const onCanPlay = () => onBuffering(false);
+
+    video.addEventListener('waiting', onWaiting);
+    video.addEventListener('playing', onPlaying);
+    video.addEventListener('canplay', onCanPlay);
+
+    return () => {
+      video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('playing', onPlaying);
+      video.removeEventListener('canplay', onCanPlay);
+    };
+  }, [onBuffering]);
+
   // Keep canvas pixel size synced with CSS size
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const ro = new ResizeObserver(() => {
-      canvas.width  = Math.round(canvas.offsetWidth  * (window.devicePixelRatio || 1));
-      canvas.height = Math.round(canvas.offsetHeight * (window.devicePixelRatio || 1));
+      canvas.width  = Math.round(canvas.offsetWidth  * dpr);
+      canvas.height = Math.round(canvas.offsetHeight * dpr);
     });
     ro.observe(canvas);
     return () => ro.disconnect();
@@ -192,7 +294,7 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#000' }}>
+    <div className="relative w-full h-full bg-black">
       <video
         ref={videoRef}
         autoPlay playsInline
