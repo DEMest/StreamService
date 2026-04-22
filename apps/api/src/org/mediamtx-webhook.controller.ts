@@ -19,8 +19,6 @@ export class MediamtxWebhookController {
       query?: string;
     },
   ) {
-    this.logger.log(`Auth request: action=${body.action} protocol=${body.protocol} path=${body.path} ip=${body.ip} query=${body.query}`);
-
     // Allow all reads (viewers, FFmpeg RTSP reader)
     if (body.action !== 'publish') return { ok: true };
 
