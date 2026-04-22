@@ -4,10 +4,12 @@ let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL ?? 'http://localhost:3001';
-    socket = io(`${socketUrl}/chat`, {
-      transports: ['websocket'],
-      withCredentials: true,
+    socket = io('/chat', {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
   }
   return socket;

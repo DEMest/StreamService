@@ -1,62 +1,191 @@
 'use client';
-import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { api } from '@/lib/api';
-import { PublicLayout } from '@/components/PublicLayout';
+import { motion } from 'framer-motion';
+import { Header } from '@/components/Header';
+import { ContactForm } from '@/components/ContactForm';
+import { fadeUp, staggerContainer, cardFadeUp, scaleIn } from '@/lib/motion';
+import {
+  Broadcast, VideoCamera, Gauge, Archive, ArrowRight,
+} from '@phosphor-icons/react';
 
-interface CatalogOrg {
-  slug: string;
-  name: string;
-  isLive: boolean;
-  streamTitle: string;
-}
 
-export default function CatalogPage() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['catalog'],
-    queryFn: () => api.get<CatalogOrg[]>('/v1/public/orgs'),
-    refetchInterval: 30_000,
-  });
+const FEATURES = [
+  {
+    icon: VideoCamera,
+    title: 'Мультикамерный стриминг',
+    desc: 'До 4 камер в одном потоке. Зрители переключают ракурсы прямо в браузере — без задержки и перезагрузки плеера.',
+    large: true,
+  },
+  {
+    icon: Gauge,
+    title: '4K без транскодинга',
+    desc: 'Прямая трансляция в максимальном качестве через SRT-протокол с минимальной задержкой.',
+  },
+  {
+    icon: Archive,
+    title: 'Полный архив записей',
+    desc: 'Все трансляции сохраняются автоматически. Зрители могут пересмотреть любой момент.',
+  },
+];
 
-  const live = data?.filter((o) => o.isLive) ?? [];
-  const offline = data?.filter((o) => !o.isLive) ?? [];
-
+export default function HomePage() {
   return (
-    <PublicLayout>
-      <div style={{ padding: '2rem' }}>
-        {isLoading && <p style={{ color: '#888' }}>Загрузка...</p>}
+    <div className="min-h-[100dvh] flex flex-col bg-surface-primary text-zinc-200">
+      <Header />
 
-        {live.length > 0 && (
-          <>
-            <h2 style={{ fontSize: '1rem', color: '#e53', marginBottom: '1rem' }}>● Сейчас в эфире</h2>
-            <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', marginBottom: '2rem' }}>
-              {live.map((org) => (
-                <Link key={org.slug} href={`/watch/${org.slug}`} style={{ textDecoration: 'none' }}>
-                  <div style={{ background: '#1a1a1a', borderRadius: '8px', padding: '1.25rem', border: '1px solid #e5330033', cursor: 'pointer' }}>
-                    <p style={{ color: '#fff', fontWeight: 600, margin: '0 0 0.25rem' }}>{org.name}</p>
-                    <p style={{ color: '#888', fontSize: '0.875rem', margin: 0 }}>{org.streamTitle}</p>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </>
-        )}
+      {/* ── Hero ─────────────────────────────────────────── */}
+      <section className="relative min-h-[100dvh] flex items-center overflow-hidden">
+        {/* Video background placeholder */}
+        <video
+          autoPlay
+          muted
+          loop
+          playsInline
+          className="absolute inset-0 w-full h-full object-cover opacity-20"
+        >
+          {/* <source src="/hero.mp4" type="video/mp4" /> */}
+        </video>
 
-        {offline.length > 0 && (
-          <>
-            <h2 style={{ fontSize: '1rem', color: '#666', marginBottom: '1rem' }}>Все организации</h2>
-            <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
-              {offline.map((org) => (
-                <Link key={org.slug} href={`/watch/${org.slug}`} style={{ textDecoration: 'none' }}>
-                  <div style={{ background: '#141414', borderRadius: '8px', padding: '1.25rem', border: '1px solid #2d2d2d', cursor: 'pointer' }}>
-                    <p style={{ color: '#ccc', fontWeight: 600, margin: 0 }}>{org.name}</p>
+        {/* Gradient overlays */}
+        <div className="absolute inset-0 bg-gradient-to-r from-surface-primary via-surface-primary/90 to-surface-primary/40" />
+        <div className="absolute inset-0 bg-gradient-to-t from-surface-primary via-transparent to-surface-primary/60" />
+
+        {/* Decorative blobs */}
+        <div className="absolute top-1/4 right-1/4 w-[500px] h-[500px] bg-brand/6 rounded-full blur-[150px]" />
+        <div className="absolute bottom-0 left-1/3 w-[300px] h-[300px] bg-brand/4 rounded-full blur-[100px]" />
+
+        <motion.div
+          className="relative max-w-[1400px] mx-auto px-6 py-20 md:py-32 w-full"
+          initial="hidden"
+          animate="visible"
+          variants={staggerContainer}
+        >
+          <div className="max-w-2xl">
+            <motion.div variants={scaleIn} className="mb-6">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-brand/10 border border-brand/20 rounded-full text-xs font-medium text-brand">
+                <Broadcast size={12} weight="fill" className="animate-pulse" />
+                Стриминговая платформа
+              </span>
+            </motion.div>
+
+            <motion.h1
+              variants={fadeUp}
+              className="text-4xl md:text-6xl font-bold text-zinc-50 tracking-tight leading-[1.08] mb-6"
+            >
+              Прямые трансляции
+              <br />
+              <span className="text-brand">спортивных</span> мероприятий
+            </motion.h1>
+
+            <motion.p
+              variants={fadeUp}
+              className="text-base md:text-lg text-zinc-400 leading-relaxed mb-10 max-w-lg"
+            >
+              Liga Live — профессиональная платформа для организаций.
+              Мультикамерный стриминг, управление событиями и полный архив записей.
+            </motion.p>
+
+            <motion.div variants={fadeUp} className="flex flex-wrap gap-3">
+              <Link
+                href="/streams"
+                className="flex items-center gap-2 px-7 py-3.5 bg-brand hover:bg-brand-hover text-white font-semibold rounded-lg transition-all duration-200 active:scale-[0.98] no-underline"
+              >
+                Смотреть трансляции
+                <ArrowRight size={16} weight="bold" />
+              </Link>
+              <a
+                href="#contact"
+                className="flex items-center gap-2 px-7 py-3.5 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 font-medium rounded-lg transition-all duration-200 active:scale-[0.98] no-underline border border-zinc-700/50"
+              >
+                Подключить организацию
+              </a>
+            </motion.div>
+          </div>
+        </motion.div>
+
+        {/* Scroll indicator */}
+        <motion.div
+          className="absolute bottom-8 left-1/2 -translate-x-1/2"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1.2 }}
+        >
+          <div className="w-5 h-8 rounded-full border-2 border-zinc-600 flex items-start justify-center pt-1.5">
+            <motion.div
+              className="w-1 h-1.5 rounded-full bg-zinc-400"
+              animate={{ y: [0, 8, 0] }}
+              transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+            />
+          </div>
+        </motion.div>
+      </section>
+
+      {/* ── Features ────────────────────────────────────── */}
+      <motion.section
+        className="py-20 md:py-28 border-t border-zinc-800/40"
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, margin: '-80px' }}
+        variants={staggerContainer}
+      >
+        <div className="max-w-[1400px] mx-auto px-6">
+          <motion.div variants={fadeUp} className="mb-12">
+            <h2 className="text-2xl md:text-3xl font-bold text-zinc-50 tracking-tight mb-3">Возможности платформы</h2>
+            <p className="text-sm text-zinc-500 max-w-md">Всё необходимое для профессиональных спортивных трансляций</p>
+          </motion.div>
+
+          {/* Asymmetric grid: 1 large left + 2 stacked right */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {FEATURES.map((f, i) => (
+              <motion.div
+                key={f.title}
+                variants={cardFadeUp}
+                className={i === 0 ? 'md:row-span-2' : ''}
+              >
+                <div className={`h-full p-6 ${i === 0 ? 'md:p-8' : ''} rounded-xl bg-surface-elevated border border-zinc-800/40 hover:border-zinc-700/60 transition-colors group`}>
+                  <div className={`${i === 0 ? 'w-12 h-12' : 'w-10 h-10'} rounded-lg bg-brand/10 flex items-center justify-center mb-4 group-hover:bg-brand/15 transition-colors`}>
+                    <f.icon size={i === 0 ? 26 : 22} className="text-brand" weight="duotone" />
                   </div>
-                </Link>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </PublicLayout>
+                  <h3 className={`${i === 0 ? 'text-lg' : 'text-sm'} font-semibold text-zinc-100 mb-2`}>{f.title}</h3>
+                  <p className={`${i === 0 ? 'text-sm' : 'text-xs'} text-zinc-500 leading-relaxed`}>{f.desc}</p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </motion.section>
+
+      {/* ── Contact Form ─────────────────────────────────── */}
+      <motion.section
+        id="contact"
+        className="py-20 md:py-28 border-t border-zinc-800/40"
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, margin: '-80px' }}
+        variants={staggerContainer}
+      >
+        <div className="max-w-[800px] mx-auto px-6">
+          <motion.div variants={fadeUp} className="mb-10">
+            <h2 className="text-2xl md:text-3xl font-bold text-zinc-50 tracking-tight mb-3">Подключите вашу организацию</h2>
+            <p className="text-sm text-zinc-500 max-w-md">Оставьте заявку и мы свяжемся с вами для обсуждения деталей подключения</p>
+          </motion.div>
+
+          <motion.div variants={fadeUp} className="bg-surface-elevated border border-zinc-800/50 rounded-xl p-6 md:p-8">
+            <ContactForm />
+          </motion.div>
+        </div>
+      </motion.section>
+
+      {/* ── Footer ────────────────────────────────────────── */}
+      <footer className="border-t border-zinc-800/40 py-8">
+        <div className="max-w-[1400px] mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <span className="text-xs text-zinc-600">&copy; {new Date().getFullYear()} Liga Live. Все права защищены.</span>
+          <div className="flex items-center gap-4">
+            <Link href="/streams" className="text-xs text-zinc-600 hover:text-zinc-400 no-underline transition-colors">Трансляции</Link>
+            <Link href="/login" className="text-xs text-zinc-600 hover:text-zinc-400 no-underline transition-colors">Вход для организаций</Link>
+          </div>
+        </div>
+      </footer>
+    </div>
   );
 }

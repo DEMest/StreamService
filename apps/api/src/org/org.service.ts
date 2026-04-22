@@ -3,6 +3,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
 import { randomBytes } from 'crypto';
+import * as sharp from 'sharp';
+import { promises as fs } from 'fs';
+import { join } from 'path';
 
 @Injectable()
 export class OrgService {
@@ -26,6 +29,8 @@ export class OrgService {
         streamDescription: true,
         streamIsPublic: true,
         streamPreviewKey: true,
+        previewMode: true,
+        previewImagePath: true,
         ingestKey: revealKey,
         ingestKeyCreatedAt: true,
         createdAt: true,
@@ -48,7 +53,7 @@ export class OrgService {
 
   async updateStreamSettings(
     orgId: string,
-    data: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean },
+    data: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean; previewMode?: string },
   ) {
     const updateData: Record<string, any> = { ...data };
 
@@ -70,6 +75,7 @@ export class OrgService {
       select: {
         id: true, streamTitle: true, streamDescription: true,
         streamIsPublic: true, streamPreviewKey: true, autoStream: true, isLive: true,
+        previewMode: true,
       },
     });
   }
@@ -123,6 +129,14 @@ export class OrgService {
     return { ok: true };
   }
 
+  async verifyIngestKey(slug: string, key: string): Promise<boolean> {
+    const org = await this.prisma.organization.findUnique({
+      where: { slug },
+      select: { ingestKey: true, isActive: true },
+    });
+    return !!org && org.isActive && org.ingestKey === key;
+  }
+
   async handleWebhook(orgSlug: string, action: 'publish' | 'unpublish') {
     const org = await this.prisma.organization.findUnique({
       where: { slug: orgSlug },
@@ -166,6 +180,41 @@ export class OrgService {
     if (!broadcast) throw new NotFoundException('Broadcast not found');
     await this.recording.deleteRecordingByBroadcastId(broadcastId);
     await this.prisma.broadcast.delete({ where: { id: broadcastId } });
+    return { ok: true };
+  }
+
+  private getUploadsDir(): string {
+    return join(process.cwd(), 'uploads', 'previews');
+  }
+
+  async uploadPreview(orgId: string, orgSlug: string, fileBuffer: Buffer): Promise<{ ok: true; previewImagePath: string }> {
+    const dir = this.getUploadsDir();
+    await fs.mkdir(dir, { recursive: true });
+
+    const filename = `${orgSlug}.jpg`;
+    const filePath = join(dir, filename);
+
+    await sharp(fileBuffer)
+      .resize(640, 360, { fit: 'cover' })
+      .jpeg({ quality: 80 })
+      .toFile(filePath);
+
+    const relativePath = `previews/${filename}`;
+    await this.prisma.organization.update({
+      where: { id: orgId },
+      data: { previewImagePath: relativePath },
+    });
+
+    return { ok: true, previewImagePath: relativePath };
+  }
+
+  async deletePreview(orgId: string, orgSlug: string): Promise<{ ok: true }> {
+    const filePath = join(this.getUploadsDir(), `${orgSlug}.jpg`);
+    await fs.unlink(filePath).catch(() => {});
+    await this.prisma.organization.update({
+      where: { id: orgId },
+      data: { previewImagePath: null },
+    });
     return { ok: true };
   }
 }

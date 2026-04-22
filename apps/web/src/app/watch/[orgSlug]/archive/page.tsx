@@ -1,12 +1,19 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
-import MatPlayer from '@/components/MatPlayer';
+import MatPlayer, { type MatPlayerHandle } from '@/components/MatPlayer';
+import ViewSwitcher, { type ViewMode } from '@/components/ViewSwitcher';
+import { Header } from '@/components/Header';
+import {
+  Play, Pause, X, Monitor,
+  CornersOut, CornersIn, SpeakerHigh, SpeakerLow, SpeakerSlash,
+  CaretLeft, CaretRight, VideoCamera, GearSix,
+} from '@phosphor-icons/react';
 
-interface Broadcast {
+interface BroadcastItem {
   id: string;
   title: string;
   description?: string;
@@ -21,7 +28,7 @@ interface Broadcast {
 }
 
 function formatTime(seconds: number): string {
-  if (!isFinite(seconds) || seconds <= 0) return '';
+  if (!isFinite(seconds) || seconds <= 0) return '0:00';
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
@@ -33,11 +40,29 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '/api';
+
 export default function ArchivePage({ params }: { params: { orgSlug: string } }) {
   const { orgSlug } = params;
   const searchParams = useSearchParams();
   const previewKey = searchParams.get('key') ?? undefined;
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('multicam');
+  const [volume, setVolume] = useState(1);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [viewPanelOpen, setViewPanelOpen] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [qualityLevel, setQualityLevel] = useState(-1); // -1 = auto
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
+  const [activeQuality, setActiveQuality] = useState(-1); // actual level chosen by ABR
+
+  const [isPaused, setIsPaused] = useState(false);
+  const prevVolumeRef = useRef(1);
+
+  const matRef = useRef<MatPlayerHandle>(null);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
 
   const url = previewKey
     ? `/v1/public/orgs/${orgSlug}/broadcasts?key=${previewKey}`
@@ -45,90 +70,283 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
 
   const { data: broadcasts, isLoading } = useQuery({
     queryKey: ['broadcasts', orgSlug, previewKey],
-    queryFn: () => api.get<Broadcast[]>(url),
+    queryFn: () => api.get<BroadcastItem[]>(url),
   });
 
   const selected = broadcasts?.find(b => b.id === selectedId);
   const recordingUrl = selectedId
-    ? `/api/v1/public/orgs/${orgSlug}/broadcasts/${selectedId}/recording/stream`
+    ? `/api/v1/public/orgs/${orgSlug}/broadcasts/${selectedId}/recording/hls/master.m3u8`
     : null;
 
   const watchLink = previewKey ? `/watch/${orgSlug}?key=${previewKey}` : `/watch/${orgSlug}`;
+  const thumbUrl = `${API_BASE}/v1/public/orgs/${orgSlug}/thumbnail`;
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  function toggleFullscreen() {
+    if (isFullscreen) {
+      document.exitFullscreen();
+    } else if (document.fullscreenEnabled && playerContainerRef.current) {
+      playerContainerRef.current.requestFullscreen();
+    } else {
+      matRef.current?.enterIOSFullscreen();
+    }
+  }
+
+  function handleTimeUpdate(current: number, dur: number) {
+    setCurrentTime(current);
+    setDuration(dur);
+  }
+
+  function handleSeek(e: React.ChangeEvent<HTMLInputElement>) {
+    const time = parseFloat(e.target.value);
+    matRef.current?.seekTo(time);
+    setCurrentTime(time);
+  }
+
+  function handleVideoClick(e: React.MouseEvent<HTMLDivElement>) {
+    setQualityMenuOpen(false);
+    if (viewMode !== 'multicam') { setViewMode('multicam'); return; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    if      (x < 0.5 && y < 0.5) setViewMode('cam1');
+    else if (x >= 0.5 && y < 0.5) setViewMode('cam2');
+    else if (x < 0.5)             setViewMode('cam3');
+    else                           setViewMode('cam4');
+  }
+
+  function VolumeIcon() {
+    if (volume === 0) return <SpeakerSlash size={18} />;
+    if (volume <= 0.5) return <SpeakerLow size={18} />;
+    return <SpeakerHigh size={18} />;
+  }
+
+  function toggleMute() {
+    if (volume === 0) {
+      setVolume(prevVolumeRef.current || 1);
+    } else {
+      prevVolumeRef.current = volume;
+      setVolume(0);
+    }
+  }
+
+  function togglePause() {
+    if (isPaused) {
+      matRef.current?.play();
+      setIsPaused(false);
+    } else {
+      matRef.current?.pause();
+      setIsPaused(true);
+    }
+  }
+
+  const readyBroadcasts = broadcasts?.filter(b => b.recording?.status === 'ready') ?? [];
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#fff' }}>
-      <div style={{ padding: '0.75rem 1rem', background: '#111', borderBottom: '1px solid #222', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <Link href="/" style={{ color: '#888', textDecoration: 'none', fontSize: '0.875rem' }}>← Главная</Link>
-        <Link href={watchLink} style={{ color: '#888', textDecoration: 'none', fontSize: '0.875rem' }}>Смотреть LIVE</Link>
-        <span style={{ fontWeight: 700 }}>Архив трансляций</span>
-      </div>
+    <div className="min-h-[100dvh] bg-surface-primary text-zinc-200">
+      {!isFullscreen && <Header />}
 
+      {/* Player */}
       {selectedId && recordingUrl && (
-        <div style={{ position: 'relative', background: '#000', aspectRatio: '16/9', maxHeight: '60vh' }}>
-          <MatPlayer
-            streamUrl={recordingUrl}
-            viewMode="multicam"
-            volume={1}
-            isArchive={true}
-            onMutedFallback={() => {}}
-            onTimeUpdate={() => {}}
-          />
-          <button
-            onClick={() => setSelectedId(null)}
-            style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(0,0,0,0.7)', border: 'none', color: '#fff', padding: '0.4rem 0.8rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem' }}
+        <div className="bg-black">
+          <div
+            ref={playerContainerRef}
+            className={`relative bg-black mx-auto w-full ${isFullscreen ? 'h-screen' : 'max-w-[1100px] md:max-h-[70vh]'}`}
           >
-            ✕ Закрыть
-          </button>
-          {selected && (
-            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '0.75rem 1rem', background: 'linear-gradient(transparent, rgba(0,0,0,0.8))' }}>
-              <div style={{ fontWeight: 600 }}>{selected.title}</div>
-              <div style={{ color: '#888', fontSize: '0.8rem' }}>{formatDate(selected.startedAt)}</div>
+            {!isFullscreen && <div className="w-full" style={{ paddingTop: '56.25%' }} />}
+            <div className="absolute inset-0 cursor-pointer" onClick={handleVideoClick}>
+              <MatPlayer
+                ref={matRef}
+                streamUrl={recordingUrl}
+                viewMode={viewMode}
+                volume={volume}
+                isArchive={true}
+                onMutedFallback={() => setVolume(0)}
+                onTimeUpdate={handleTimeUpdate}
+                onBuffering={setIsBuffering}
+                onQualityChange={setActiveQuality}
+              />
             </div>
-          )}
+
+            {/* Buffering spinner */}
+            {isBuffering && (
+              <div className="absolute inset-0 flex items-center justify-center z-[11] pointer-events-none">
+                <div className="w-12 h-12 border-3 border-zinc-600 border-t-white rounded-full animate-spin" />
+              </div>
+            )}
+
+            {/* View panel toggle */}
+            {!isFullscreen && (
+              <>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setViewPanelOpen((v) => !v); }}
+                  className="absolute top-1/2 -translate-y-1/2 z-10 bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 p-1.5 cursor-pointer rounded-r-lg transition-all text-white"
+                  style={{ left: viewPanelOpen ? 160 : 0 }}>
+                  {viewPanelOpen ? <CaretLeft size={14} /> : <CaretRight size={14} />}
+                </button>
+                {viewPanelOpen && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute left-0 inset-y-0 w-40 backdrop-blur-sm p-4 flex flex-col justify-center z-[9]"
+                    style={{ background: 'rgba(12,12,14,0.95)' }}>
+                    <ViewSwitcher mode={viewMode} onChange={setViewMode} />
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Control bar */}
+            <div
+              className="absolute inset-x-0 bottom-0 z-20 px-3 py-2.5 flex items-center gap-2"
+              style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.85))' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button onClick={togglePause} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors">
+                {isPaused ? <Play size={18} weight="fill" /> : <Pause size={18} weight="fill" />}
+              </button>
+              <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(currentTime)}</span>
+              <input type="range" min={0} max={duration || 0} step={0.1} value={currentTime} onChange={handleSeek} className="flex-1" />
+              <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(duration)}</span>
+              <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-20 shrink-0" />
+              <button onClick={toggleMute} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors"><VolumeIcon /></button>
+              {/* Quality selector */}
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setQualityMenuOpen((v) => !v)}
+                  className="text-white bg-transparent border-none h-9 px-2 rounded flex items-center gap-1 cursor-pointer hover:bg-white/10 transition-colors text-xs font-medium"
+                >
+                  <GearSix size={16} />
+                  <span className="text-zinc-400">
+                    {qualityLevel === -1
+                      ? `Авто${activeQuality >= 0 ? ` (${matRef.current?.getQualityLevels()?.[activeQuality]?.name ?? ''})` : ''}`
+                      : (matRef.current?.getQualityLevels()?.[qualityLevel]?.name ?? 'HD')}
+                  </span>
+                </button>
+                {qualityMenuOpen && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 border border-zinc-700/50 rounded-lg overflow-hidden min-w-[120px] backdrop-blur-sm">
+                    <button
+                      onClick={() => { setQualityLevel(-1); matRef.current?.setQualityLevel(-1); setQualityMenuOpen(false); }}
+                      className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === -1 ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
+                    >
+                      Авто
+                    </button>
+                    {(matRef.current?.getQualityLevels() ?? []).map((q) => (
+                      <button
+                        key={q.index}
+                        onClick={() => { setQualityLevel(q.index); matRef.current?.setQualityLevel(q.index); setQualityMenuOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === q.index ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
+                      >
+                        {q.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button onClick={toggleFullscreen} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors">
+                {isFullscreen ? <CornersIn size={18} /> : <CornersOut size={18} />}
+              </button>
+            </div>
+
+            {/* Close button */}
+            <button
+              onClick={() => { setSelectedId(null); setCurrentTime(0); setDuration(0); setIsBuffering(false); setQualityLevel(-1); setQualityMenuOpen(false); setActiveQuality(-1); setIsPaused(false); }}
+              className="absolute top-3 right-3 bg-black/70 hover:bg-black text-white p-2 rounded-lg z-20 transition-all cursor-pointer border-none flex items-center gap-1.5 text-xs"
+            >
+              <X size={14} /> Закрыть
+            </button>
+
+            {/* Title overlay */}
+            {selected && !isFullscreen && (
+              <div className="absolute top-0 inset-x-0 px-4 py-3 z-[15]" style={{ background: 'linear-gradient(rgba(0,0,0,0.7), transparent)' }}>
+                <div className="font-semibold text-sm text-zinc-100">{selected.title}</div>
+                <div className="text-zinc-500 text-xs mt-0.5">{formatDate(selected.startedAt)}</div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      <div style={{ padding: '1.5rem', maxWidth: 900, margin: '0 auto' }}>
-        {isLoading && <p style={{ color: '#888' }}>Загрузка...</p>}
-
-        {!isLoading && broadcasts?.length === 0 && (
-          <p style={{ color: '#555' }}>Записей пока нет.</p>
+      {/* Broadcast list */}
+      <div className="max-w-[920px] mx-auto px-6 py-6">
+        {isLoading && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-xl overflow-hidden bg-surface-elevated border border-zinc-800/50 animate-pulse">
+                <div className="aspect-video bg-zinc-800" />
+                <div className="p-4 space-y-2">
+                  <div className="h-4 bg-zinc-800 rounded w-3/4" />
+                  <div className="h-3 bg-zinc-800/60 rounded w-1/2" />
+                </div>
+              </div>
+            ))}
+          </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {broadcasts?.filter(b => b.recording?.status === 'ready').map((b) => (
-            <div
+        {!isLoading && readyBroadcasts.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-24 gap-3 opacity-50">
+            <VideoCamera size={48} className="text-zinc-600" weight="thin" />
+            <p className="text-zinc-500 text-sm">Записей пока нет</p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          {readyBroadcasts.map((b) => (
+            <article
               key={b.id}
               onClick={() => setSelectedId(selectedId === b.id ? null : b.id)}
-              style={{
-                background: selectedId === b.id ? '#1a1a2e' : '#1a1a1a',
-                border: `1px solid ${selectedId === b.id ? '#7c3aed' : '#2d2d2d'}`,
-                borderRadius: 8,
-                padding: '1rem 1.25rem',
-                cursor: 'pointer',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: '1rem',
-              }}
+              className={`group rounded-xl overflow-hidden border cursor-pointer transition-all duration-200 active:scale-[0.99] ${
+                selectedId === b.id
+                  ? 'bg-brand/5 border-brand/40'
+                  : 'bg-surface-elevated border-zinc-800/50 hover:border-zinc-700 hover:shadow-lg hover:shadow-black/20'
+              }`}
             >
-              <div>
-                <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>{b.title}</div>
-                <div style={{ color: '#888', fontSize: '0.8rem' }}>{formatDate(b.startedAt)}</div>
-                {b.description && <div style={{ color: '#666', fontSize: '0.8rem', marginTop: '0.25rem' }}>{b.description}</div>}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexShrink: 0 }}>
+              {/* Thumbnail */}
+              <div className="relative aspect-video bg-zinc-900 overflow-hidden">
+                <ThumbnailImage src={thumbUrl} />
                 {b.recording?.duration && (
-                  <span style={{ color: '#888', fontSize: '0.8rem' }}>{formatTime(b.recording.duration)}</span>
+                  <span className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-black/80 text-zinc-300 text-[0.65rem] font-mono rounded">
+                    {formatTime(b.recording.duration)}
+                  </span>
                 )}
-                <span style={{ color: selectedId === b.id ? '#7c3aed' : '#555', fontSize: '0.8rem' }}>
-                  {selectedId === b.id ? '▶ Воспроизводится' : '▶ Смотреть'}
-                </span>
+                {/* Play overlay on hover */}
+                <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
+                    <Play size={24} weight="fill" className="text-white" />
+                  </div>
+                </div>
               </div>
-            </div>
+
+              {/* Info */}
+              <div className="p-4">
+                <div className="font-semibold text-sm text-zinc-100 group-hover:text-white transition-colors">{b.title}</div>
+                <div className="text-zinc-500 text-xs mt-0.5">{formatDate(b.startedAt)}</div>
+                {b.description && <div className="text-zinc-600 text-xs mt-1 line-clamp-2">{b.description}</div>}
+              </div>
+            </article>
           ))}
         </div>
       </div>
     </div>
+  );
+}
+
+function ThumbnailImage({ src }: { src: string }) {
+  const [error, setError] = useState(false);
+  return error ? (
+    <div className="absolute inset-0 flex items-center justify-center">
+      <Monitor size={48} className="text-zinc-800" weight="thin" />
+    </div>
+  ) : (
+    <img
+      src={src}
+      alt=""
+      onError={() => setError(true)}
+      className="absolute inset-0 w-full h-full object-cover"
+    />
   );
 }
