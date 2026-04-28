@@ -1,19 +1,20 @@
 'use client';
+
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Header } from '@/components/Header';
 import { ContactForm } from '@/components/ContactForm';
+import { InteractiveDemo } from '@/components/InteractiveDemo';
 import { fadeUp, staggerContainer, cardFadeUp, scaleIn } from '@/lib/motion';
 import {
   Broadcast, VideoCamera, Gauge, Archive, ArrowRight,
 } from '@phosphor-icons/react';
 
-
 const FEATURES = [
   {
     icon: VideoCamera,
     title: 'Мультикамерный стриминг',
-    desc: 'До 4 камер в одном потоке. Зрители переключают ракурсы прямо в браузере — без задержки и перезагрузки плеера.',
+    desc: 'До 4 камер в одном потоке. Зрители переключают ракурсы прямо в браузере \u2014 без задержки и перезагрузки плеера.',
     large: true,
   },
   {
@@ -28,39 +29,43 @@ const FEATURES = [
   },
 ];
 
+const STEPS = [
+  {
+    num: '01',
+    title: 'Подключите видеомикшер',
+    desc: 'Настройте vMix или OBS с 4 камерами и отправьте один SRT-поток на платформу.',
+  },
+  {
+    num: '02',
+    title: 'Создайте событие',
+    desc: 'В панели управления создайте трансляцию, настройте приватность и поделитесь ссылкой.',
+  },
+  {
+    num: '03',
+    title: 'Зрители управляют',
+    desc: 'Зрители открывают страницу в браузере и переключают камеры самостоятельно.',
+  },
+];
+
 export default function HomePage() {
   return (
     <div className="min-h-[100dvh] flex flex-col bg-surface-primary text-zinc-200">
       <Header />
 
-      {/* ── Hero ─────────────────────────────────────────── */}
+      {/* ── Hero ───────────────────────────────────────────── */}
       <section className="relative min-h-[100dvh] flex items-center overflow-hidden">
-        {/* Video background placeholder */}
-        <video
-          autoPlay
-          muted
-          loop
-          playsInline
-          className="absolute inset-0 w-full h-full object-cover opacity-20"
-        >
-          {/* <source src="/hero.mp4" type="video/mp4" /> */}
-        </video>
-
-        {/* Gradient overlays */}
-        <div className="absolute inset-0 bg-gradient-to-r from-surface-primary via-surface-primary/90 to-surface-primary/40" />
-        <div className="absolute inset-0 bg-gradient-to-t from-surface-primary via-transparent to-surface-primary/60" />
-
         {/* Decorative blobs */}
-        <div className="absolute top-1/4 right-1/4 w-[500px] h-[500px] bg-brand/6 rounded-full blur-[150px]" />
-        <div className="absolute bottom-0 left-1/3 w-[300px] h-[300px] bg-brand/4 rounded-full blur-[100px]" />
+        <div className="absolute top-1/4 right-1/4 w-[500px] h-[500px] bg-brand/6 rounded-full blur-[150px] pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 w-[300px] h-[300px] bg-brand/4 rounded-full blur-[100px] pointer-events-none" />
 
         <motion.div
-          className="relative max-w-[1400px] mx-auto px-6 py-20 md:py-32 w-full"
+          className="relative max-w-[1400px] mx-auto px-6 py-20 md:py-32 w-full grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-10 lg:gap-14 items-center"
           initial="hidden"
           animate="visible"
           variants={staggerContainer}
         >
-          <div className="max-w-2xl">
+          {/* Left ─ text */}
+          <div>
             <motion.div variants={scaleIn} className="mb-6">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-brand/10 border border-brand/20 rounded-full text-xs font-medium text-brand">
                 <Broadcast size={12} weight="fill" className="animate-pulse" />
@@ -101,6 +106,11 @@ export default function HomePage() {
               </a>
             </motion.div>
           </div>
+
+          {/* Right ─ interactive demo */}
+          <motion.div variants={fadeUp}>
+            <InteractiveDemo />
+          </motion.div>
         </motion.div>
 
         {/* Scroll indicator */}
@@ -120,7 +130,37 @@ export default function HomePage() {
         </motion.div>
       </section>
 
-      {/* ── Features ────────────────────────────────────── */}
+      {/* ── How It Works ───────────────────────────────────── */}
+      <motion.section
+        className="py-20 md:py-28 border-t border-zinc-800/40"
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, margin: '-80px' }}
+        variants={staggerContainer}
+      >
+        <div className="max-w-[1400px] mx-auto px-6">
+          <motion.div variants={fadeUp} className="mb-10">
+            <h2 className="text-2xl md:text-3xl font-bold text-zinc-50 tracking-tight mb-3">Как это работает</h2>
+            <p className="text-sm text-zinc-500 max-w-md">От подключения камер до зрителей за три шага</p>
+          </motion.div>
+
+          <div className="divide-y divide-zinc-800/40">
+            {STEPS.map((s, i) => (
+              <motion.div
+                key={i}
+                variants={fadeUp}
+                className="py-6 first:pt-0 last:pb-0 grid grid-cols-1 md:grid-cols-[48px_200px_1fr] gap-2 md:gap-6 items-baseline"
+              >
+                <span className="text-xl font-bold text-brand/30 font-mono">{s.num}</span>
+                <h3 className="text-sm font-semibold text-zinc-100">{s.title}</h3>
+                <p className="text-sm text-zinc-500 leading-relaxed">{s.desc}</p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </motion.section>
+
+      {/* ── Features ───────────────────────────────────────── */}
       <motion.section
         className="py-20 md:py-28 border-t border-zinc-800/40"
         initial="hidden"
@@ -134,7 +174,6 @@ export default function HomePage() {
             <p className="text-sm text-zinc-500 max-w-md">Всё необходимое для профессиональных спортивных трансляций</p>
           </motion.div>
 
-          {/* Asymmetric grid: 1 large left + 2 stacked right */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {FEATURES.map((f, i) => (
               <motion.div
@@ -155,7 +194,7 @@ export default function HomePage() {
         </div>
       </motion.section>
 
-      {/* ── Contact Form ─────────────────────────────────── */}
+      {/* ── Contact Form ───────────────────────────────────── */}
       <motion.section
         id="contact"
         className="py-20 md:py-28 border-t border-zinc-800/40"
@@ -176,7 +215,7 @@ export default function HomePage() {
         </div>
       </motion.section>
 
-      {/* ── Footer ────────────────────────────────────────── */}
+      {/* ── Footer ─────────────────────────────────────────── */}
       <footer className="border-t border-zinc-800/40 py-8">
         <div className="max-w-[1400px] mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <span className="text-xs text-zinc-600">&copy; {new Date().getFullYear()} Liga Live. Все права защищены.</span>
