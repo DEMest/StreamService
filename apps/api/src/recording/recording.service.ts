@@ -73,7 +73,7 @@ export class RecordingService {
           '-c', 'copy',
           '-movflags', '+faststart',
           tempMp4,
-        ], { timeout: 30 * 60 * 1000 });
+        ], { timeout: 4 * 60 * 60 * 1000 });
 
         fs.unlinkSync(listFile);
       }
@@ -94,25 +94,9 @@ export class RecordingService {
         '-hls_playlist_type', 'vod',
         '-hls_segment_filename', path.join(hdDir, 'seg%03d.ts'),
         path.join(hdDir, 'index.m3u8'),
-      ], { timeout: 30 * 60 * 1000 });
+      ], { timeout: 4 * 60 * 60 * 1000 });
 
-      // Step 4: Create LQ variant (480p transcode)
-      const lqDir = path.join(outputDir, 'lq');
-      fs.mkdirSync(lqDir, { recursive: true });
-
-      await execFileAsync('ffmpeg', [
-        '-i', originalMp4,
-        '-vf', 'scale=-2:480',
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '28',
-        '-c:a', 'aac', '-b:a', '96k',
-        '-hls_time', '6',
-        '-hls_segment_type', 'mpegts',
-        '-hls_playlist_type', 'vod',
-        '-hls_segment_filename', path.join(lqDir, 'seg%03d.ts'),
-        path.join(lqDir, 'index.m3u8'),
-      ], { timeout: 60 * 60 * 1000 });
-
-      // Step 5: Read HD playlist to get resolution & bandwidth for master playlist
+      // Step 4: Read resolution & bandwidth for master playlist
       let hdBandwidth = 5000000;
       let hdResolution = '1920x1080';
       try {
@@ -131,20 +115,17 @@ export class RecordingService {
         }
       } catch { /* use defaults */ }
 
-      // Step 6: Write master.m3u8
+      // Step 5: Write master.m3u8
       const masterContent = [
         '#EXTM3U',
         '#EXT-X-VERSION:3',
         '',
         `#EXT-X-STREAM-INF:BANDWIDTH=${hdBandwidth},RESOLUTION=${hdResolution},NAME="HD"`,
         'hd/index.m3u8',
-        '',
-        '#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480,NAME="480p"',
-        'lq/index.m3u8',
       ].join('\n');
       fs.writeFileSync(path.join(outputDir, 'master.m3u8'), masterContent);
 
-      // Step 7: Get duration and total file size
+      // Step 6: Get duration and total file size
       let duration: number | null = null;
       try {
         const { stdout } = await execFileAsync('ffprobe', [
@@ -238,27 +219,56 @@ export class RecordingService {
 
   @Cron('30 3 * * *')
   async retryFailed(): Promise<void> {
-    const failed = await this.prisma.recording.findMany({
-      where: { status: 'failed' },
+    // Retry both failed and stuck processing (older than 12 hours)
+    const stuckCutoff = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    const toRetry = await this.prisma.recording.findMany({
+      where: {
+        OR: [
+          { status: 'failed' },
+          { status: 'processing', createdAt: { lt: stuckCutoff } },
+        ],
+      },
       include: { broadcast: { include: { org: true } } },
     });
 
-    for (const rec of failed) {
+    for (const rec of toRetry) {
       const orgSlug = rec.broadcast.org.slug;
       const segmentsDir = path.join(RECORDINGS_ROOT, 'live', orgSlug);
 
-      if (!fs.existsSync(segmentsDir)) continue;
+      if (!fs.existsSync(segmentsDir)) {
+        this.logger.warn(`No source segments for ${rec.id}, marking failed`);
+        await this.prisma.recording.update({
+          where: { id: rec.id },
+          data: { status: 'failed' },
+        });
+        continue;
+      }
 
       const files = fs.readdirSync(segmentsDir)
         .filter(f => f.endsWith('.mp4'))
         .sort();
 
-      if (files.length === 0) continue;
+      if (files.length === 0) {
+        this.logger.warn(`Empty segments dir for ${rec.id}, marking failed`);
+        await this.prisma.recording.update({
+          where: { id: rec.id },
+          data: { status: 'failed' },
+        });
+        continue;
+      }
+
+      // Clean up partial archive output before retry
+      const outputDir = path.join(ARCHIVE_ROOT, orgSlug, rec.broadcastId);
+      try { fs.rmSync(outputDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      const tempMp4 = path.join(ARCHIVE_ROOT, orgSlug, `${rec.broadcastId}_temp.mp4`);
+      try { fs.unlinkSync(tempMp4); } catch { /* ignore */ }
 
       await this.prisma.recording.update({
         where: { id: rec.id },
         data: { status: 'processing' },
       });
+
+      this.logger.log(`Retrying conversion for recording ${rec.id} (was ${rec.status})`);
 
       this.convertRecording(rec.id, orgSlug, rec.broadcastId, files, segmentsDir).catch(err => {
         this.logger.error(`Retry conversion failed for ${rec.id}: ${err.message}`);
