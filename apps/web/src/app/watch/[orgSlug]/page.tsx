@@ -213,7 +213,13 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
 
   function handlePortraitTap(e: React.MouseEvent<HTMLDivElement>) {
     if (swipedRef.current) { swipedRef.current = false; return; }
-    toggleMobileUi();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    if (x > 0.5) {
+      cycleViewMode();
+    } else {
+      toggleMobileUi();
+    }
   }
 
   function handleSwipeStart(e: React.TouchEvent) {
@@ -514,23 +520,6 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
                   </span>
                 </div>
               </div>
-            </div>
-
-            {/* Camera switcher */}
-            <div className="flex gap-1.5 px-3 py-2 border-b border-zinc-800/60 shrink-0 overflow-x-auto">
-              {(['multicam', 'cam1', 'cam2', 'cam3', 'cam4'] as ViewMode[]).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setViewMode(m)}
-                  className={`flex-1 min-w-0 h-11 rounded-lg text-xs font-semibold border-none cursor-pointer transition-all duration-150 active:scale-95 ${
-                    viewMode === m
-                      ? 'bg-brand text-white shadow-lg shadow-brand/25'
-                      : 'bg-zinc-800/70 text-zinc-400 active:bg-zinc-700'
-                  }`}
-                >
-                  {m === 'multicam' ? 'Все' : m.replace('cam', '')}
-                </button>
-              ))}
             </div>
 
             {/* Chat */}
