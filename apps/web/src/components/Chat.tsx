@@ -17,6 +17,8 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
   const [nickname, setNickname] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [nicknameModalOpen, setNicknameModalOpen] = useState(false);
+  const pendingContentRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const onViewersRef = useRef(onViewersChange);
   useEffect(() => { onViewersRef.current = onViewersChange; });
@@ -71,25 +73,45 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
     return () => clearInterval(interval);
   }, []);
 
+  function sendMessage(content: string, nick: string) {
+    const tempId = `_tmp_${Date.now()}`;
+    setMessages((prev) => [...prev, { id: tempId, nickname: nick, content, createdAt: new Date().toISOString() }]);
+    getSocket().emit('message', { orgSlug, nickname: nick, content });
+  }
+
   function handleNicknameConfirm(name: string) {
     localStorage.setItem('chat_nickname', name);
     setNickname(name);
+    setNicknameModalOpen(false);
+    const pending = pendingContentRef.current;
+    pendingContentRef.current = null;
+    if (pending) {
+      sendMessage(pending, name);
+      setInput('');
+    }
+  }
+
+  function handleNicknameCancel() {
+    pendingContentRef.current = null;
+    setNicknameModalOpen(false);
   }
 
   function handleSend(e: React.FormEvent) {
     e.preventDefault();
-    if (!input.trim() || !nickname) return;
     const content = input.trim();
-    // Optimistic: show message instantly with temp id
-    const tempId = `_tmp_${Date.now()}`;
-    setMessages((prev) => [...prev, { id: tempId, nickname, content, createdAt: new Date().toISOString() }]);
-    getSocket().emit('message', { orgSlug, nickname, content });
+    if (!content) return;
+    if (!nickname) {
+      pendingContentRef.current = content;
+      setNicknameModalOpen(true);
+      return;
+    }
+    sendMessage(content, nickname);
     setInput('');
   }
 
   return (
     <div className="flex flex-col h-full bg-surface-elevated">
-      {!nickname && !authorName && !authLoading && <NicknameModal onConfirm={handleNicknameConfirm} />}
+      {nicknameModalOpen && <NicknameModal onConfirm={handleNicknameConfirm} onCancel={handleNicknameCancel} />}
 
       <div className="flex-1 overflow-y-auto p-3 space-y-1 scrollbar-thin">
         {messages.length === 0 && (
