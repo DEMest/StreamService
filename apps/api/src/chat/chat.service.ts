@@ -2,7 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 
-const MESSAGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+export const DEFAULT_CHAT_TTL_MINUTES = 180;
+export const ALLOWED_CHAT_TTL_MINUTES = [5, 30, 60, 180, 300] as const;
 
 @Injectable()
 export class ChatService {
@@ -25,27 +26,36 @@ export class ChatService {
   async getRecentMessages(orgSlug: string, limit = 50) {
     const org = await this.prisma.organization.findUnique({
       where: { slug: orgSlug },
-      select: { id: true },
+      select: { id: true, chatTtlMinutes: true },
     });
-    if (!org) return [];
-    const cutoff = new Date(Date.now() - MESSAGE_TTL_MS);
+    if (!org) return { messages: [], ttlMinutes: DEFAULT_CHAT_TTL_MINUTES };
+    const ttlMinutes = org.chatTtlMinutes ?? DEFAULT_CHAT_TTL_MINUTES;
+    const cutoff = new Date(Date.now() - ttlMinutes * 60 * 1000);
     const messages = await this.prisma.chatMessage.findMany({
       where: { orgId: org.id, createdAt: { gte: cutoff } },
       orderBy: { createdAt: 'desc' },
       take: limit,
       select: { id: true, nickname: true, content: true, createdAt: true },
     });
-    return messages.reverse();
+    return { messages: messages.reverse(), ttlMinutes };
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
   async cleanupOldMessages() {
-    const cutoff = new Date(Date.now() - MESSAGE_TTL_MS);
-    const { count } = await this.prisma.chatMessage.deleteMany({
-      where: { createdAt: { lt: cutoff } },
+    const orgs = await this.prisma.organization.findMany({
+      select: { id: true, chatTtlMinutes: true },
     });
-    if (count > 0) {
-      this.logger.log(`Удалено ${count} старых сообщений чата`);
+    let total = 0;
+    for (const org of orgs) {
+      const ttlMinutes = org.chatTtlMinutes ?? DEFAULT_CHAT_TTL_MINUTES;
+      const cutoff = new Date(Date.now() - ttlMinutes * 60 * 1000);
+      const { count } = await this.prisma.chatMessage.deleteMany({
+        where: { orgId: org.id, createdAt: { lt: cutoff } },
+      });
+      total += count;
+    }
+    if (total > 0) {
+      this.logger.log(`Удалено ${total} старых сообщений чата`);
     }
   }
 }

@@ -34,6 +34,7 @@ model Organization {
   autoStream         Boolean       @default(true)
   previewMode        String        @default("multicam")
   previewImagePath   String?
+  chatTtlMinutes     Int           @default(180)
   currentBroadcastId String?       @unique
   // Relations
   broadcasts         Broadcast[]

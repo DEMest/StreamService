@@ -18,6 +18,7 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [nicknameModalOpen, setNicknameModalOpen] = useState(false);
+  const [ttlMinutes, setTtlMinutes] = useState(180);
   const pendingContentRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const onViewersRef = useRef(onViewersChange);
@@ -51,27 +52,30 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
       return [...prev, msg];
     });
     const onViewers = (count: number) => onViewersRef.current?.(count);
+    const onTtl = (mins: number) => { if (typeof mins === 'number' && mins > 0) setTtlMinutes(mins); };
     socket.on('history', onHistory);
     socket.on('message', onMessage);
     socket.on('viewers', onViewers);
+    socket.on('chat_ttl', onTtl);
     return () => {
       socket.off('connect', join);
       socket.off('history', onHistory);
       socket.off('message', onMessage);
       socket.off('viewers', onViewers);
+      socket.off('chat_ttl', onTtl);
     };
   }, [orgSlug]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  // Auto-prune messages older than 5 minutes
+  // Auto-prune messages older than configured TTL
   useEffect(() => {
     const interval = setInterval(() => {
-      const cutoff = Date.now() - 5 * 60 * 1000;
+      const cutoff = Date.now() - ttlMinutes * 60 * 1000;
       setMessages((prev) => prev.filter((m) => new Date(m.createdAt).getTime() > cutoff));
     }, 30_000);
     return () => clearInterval(interval);
-  }, []);
+  }, [ttlMinutes]);
 
   function sendMessage(content: string, nick: string) {
     const tempId = `_tmp_${Date.now()}`;

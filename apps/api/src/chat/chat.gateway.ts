@@ -64,8 +64,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     client.to(room).emit('viewers', count);
 
     try {
-      const messages = await this.chat.getRecentMessages(data.orgSlug);
+      const { messages, ttlMinutes } = await this.chat.getRecentMessages(data.orgSlug);
       client.emit('history', messages);
+      client.emit('chat_ttl', ttlMinutes);
     } catch (err) {
       this.logger.error(`Failed to load history for ${data.orgSlug}: ${err}`);
       client.emit('history', []);

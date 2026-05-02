@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
+import { ALLOWED_CHAT_TTL_MINUTES } from '../chat/chat.service';
 import { randomBytes } from 'crypto';
 import * as sharp from 'sharp';
 import { promises as fs } from 'fs';
@@ -31,6 +32,7 @@ export class OrgService {
         streamPreviewKey: true,
         previewMode: true,
         previewImagePath: true,
+        chatTtlMinutes: true,
         ingestKey: revealKey,
         ingestKeyCreatedAt: true,
         createdAt: true,
@@ -53,9 +55,15 @@ export class OrgService {
 
   async updateStreamSettings(
     orgId: string,
-    data: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean; previewMode?: string },
+    data: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean; previewMode?: string; chatTtlMinutes?: number },
   ) {
     const updateData: Record<string, any> = { ...data };
+
+    if (data.chatTtlMinutes !== undefined) {
+      if (!ALLOWED_CHAT_TTL_MINUTES.includes(data.chatTtlMinutes as any)) {
+        throw new BadRequestException(`Invalid chatTtlMinutes. Allowed: ${ALLOWED_CHAT_TTL_MINUTES.join(', ')}`);
+      }
+    }
 
     if (data.streamIsPublic === false) {
       const org = await this.prisma.organization.findUnique({
@@ -75,7 +83,7 @@ export class OrgService {
       select: {
         id: true, streamTitle: true, streamDescription: true,
         streamIsPublic: true, streamPreviewKey: true, autoStream: true, isLive: true,
-        previewMode: true,
+        previewMode: true, chatTtlMinutes: true,
       },
     });
   }

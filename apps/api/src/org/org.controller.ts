@@ -26,7 +26,7 @@ export class OrgController {
   @Patch('stream')
   updateStreamSettings(
     @CurrentUser() user: JwtPayload,
-    @Body() body: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean; previewMode?: string },
+    @Body() body: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean; previewMode?: string; chatTtlMinutes?: number },
   ) {
     if (body.previewMode && !['multicam', 'cam1', 'cam2', 'cam3', 'cam4'].includes(body.previewMode)) {
       throw new BadRequestException('Invalid previewMode. Allowed: multicam, cam1, cam2, cam3, cam4');

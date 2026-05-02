@@ -19,7 +19,16 @@ interface OrgProfile {
   streamPreviewKey?: string;
   previewMode: string;
   previewImagePath?: string;
+  chatTtlMinutes: number;
 }
+
+const CHAT_TTL_PRESETS: { minutes: number; label: string }[] = [
+  { minutes: 5,   label: '5 мин' },
+  { minutes: 30,  label: '30 мин' },
+  { minutes: 60,  label: '1 час' },
+  { minutes: 180, label: '3 часа' },
+  { minutes: 300, label: '5 часов' },
+];
 interface BroadcastItem {
   id: string;
   title: string;
@@ -457,6 +466,33 @@ export default function DashboardPage() {
                   <Copy size={12} /> Скопировать ссылку для зрителей
                 </button>
               )}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <div className="flex items-baseline justify-between gap-3">
+                <label className="text-xs text-zinc-500">Автоудаление сообщений чата</label>
+                <span className="text-xs text-zinc-400 tabular-nums">
+                  {CHAT_TTL_PRESETS.find((p) => p.minutes === (profile?.chatTtlMinutes ?? 180))?.label ?? '3 часа'}
+                </span>
+              </div>
+              <div className="flex gap-1 bg-surface-primary rounded-lg p-1">
+                {CHAT_TTL_PRESETS.map((p) => {
+                  const active = (profile?.chatTtlMinutes ?? 180) === p.minutes;
+                  return (
+                    <button
+                      key={p.minutes}
+                      onClick={() => updateStreamMutation.mutate({ chatTtlMinutes: p.minutes } as Partial<OrgProfile>)}
+                      disabled={updateStreamMutation.isPending}
+                      className={`flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
+                        active ? 'bg-brand text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-zinc-600">Сообщения старше выбранного интервала автоматически удаляются у всех зрителей.</p>
             </div>
 
             <div className="pt-3 border-t border-zinc-800/40">
