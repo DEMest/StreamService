@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getSocket } from '@/lib/socket';
 import { NicknameModal } from './NicknameModal';
-import { PaperPlaneRight, ChatCircle } from '@phosphor-icons/react';
+import { PaperPlaneRight, ChatCircle, Lock } from '@phosphor-icons/react';
 
 interface Message { id: string; nickname: string; content: string; createdAt: string }
 
@@ -19,6 +19,7 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
   const [input, setInput] = useState('');
   const [nicknameModalOpen, setNicknameModalOpen] = useState(false);
   const [ttlMinutes, setTtlMinutes] = useState(180);
+  const [chatEnabled, setChatEnabled] = useState(true);
   const pendingContentRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const onViewersRef = useRef(onViewersChange);
@@ -53,16 +54,22 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
     });
     const onViewers = (count: number) => onViewersRef.current?.(count);
     const onTtl = (mins: number) => { if (typeof mins === 'number' && mins > 0) setTtlMinutes(mins); };
+    const onEnabled = (enabled: boolean) => setChatEnabled(enabled !== false);
+    const onCleared = () => setMessages([]);
     socket.on('history', onHistory);
     socket.on('message', onMessage);
     socket.on('viewers', onViewers);
     socket.on('chat_ttl', onTtl);
+    socket.on('chat_enabled', onEnabled);
+    socket.on('chat_cleared', onCleared);
     return () => {
       socket.off('connect', join);
       socket.off('history', onHistory);
       socket.off('message', onMessage);
       socket.off('viewers', onViewers);
       socket.off('chat_ttl', onTtl);
+      socket.off('chat_enabled', onEnabled);
+      socket.off('chat_cleared', onCleared);
     };
   }, [orgSlug]);
 
@@ -102,6 +109,7 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
 
   function handleSend(e: React.FormEvent) {
     e.preventDefault();
+    if (!chatEnabled) return;
     const content = input.trim();
     if (!content) return;
     if (!nickname) {
@@ -133,21 +141,28 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={handleSend} className="border-t border-zinc-800/60 p-2 flex gap-1.5">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Сообщение..."
-          maxLength={500}
-          className="flex-1 px-3 py-2 bg-surface-primary border-none rounded-lg text-sm text-zinc-200 placeholder:text-zinc-600 focus:ring-1 focus:ring-brand/30 outline-none transition-colors"
-        />
-        <button
-          type="submit"
-          className="p-2 bg-brand hover:bg-brand-hover text-white rounded-lg transition-all duration-200 active:scale-95"
-        >
-          <PaperPlaneRight size={16} weight="fill" />
-        </button>
-      </form>
+      {chatEnabled ? (
+        <form onSubmit={handleSend} className="border-t border-zinc-800/60 p-2 flex gap-1.5">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Сообщение..."
+            maxLength={500}
+            className="flex-1 px-3 py-2 bg-surface-primary border-none rounded-lg text-sm text-zinc-200 placeholder:text-zinc-600 focus:ring-1 focus:ring-brand/30 outline-none transition-colors"
+          />
+          <button
+            type="submit"
+            className="p-2 bg-brand hover:bg-brand-hover text-white rounded-lg transition-all duration-200 active:scale-95"
+          >
+            <PaperPlaneRight size={16} weight="fill" />
+          </button>
+        </form>
+      ) : (
+        <div className="border-t border-zinc-800/60 p-3 flex items-center justify-center gap-2 bg-surface-primary/40">
+          <Lock size={14} className="text-zinc-500" />
+          <span className="text-xs text-zinc-400">Чат временно отключён организатором</span>
+        </div>
+      )}
     </div>
   );
 }

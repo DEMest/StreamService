@@ -20,6 +20,7 @@ interface OrgProfile {
   previewMode: string;
   previewImagePath?: string;
   chatTtlMinutes: number;
+  chatEnabled: boolean;
 }
 
 const CHAT_TTL_PRESETS: { minutes: number; label: string }[] = [
@@ -70,6 +71,10 @@ export default function DashboardPage() {
   const updateStreamMutation = useMutation({
     mutationFn: (data: Partial<OrgProfile>) => api.patch('/v1/org/stream', data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['org-profile'] }),
+  });
+
+  const clearChatMutation = useMutation({
+    mutationFn: () => api.post('/v1/org/chat/clear'),
   });
 
   const uploadPreviewMutation = useMutation({
@@ -466,6 +471,44 @@ export default function DashboardPage() {
                   <Copy size={12} /> Скопировать ссылку для зрителей
                 </button>
               )}
+            </div>
+
+            <div className="flex flex-col gap-3 p-3 rounded-lg border border-zinc-800/60 bg-surface-primary/30">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col">
+                  <span className="text-sm text-zinc-200 font-medium">Чат на трансляции</span>
+                  <span className="text-xs text-zinc-500">
+                    {profile?.chatEnabled === false ? 'Зрители не могут писать сообщения' : 'Открыт для зрителей'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => updateStreamMutation.mutate({ chatEnabled: !(profile?.chatEnabled ?? true) } as Partial<OrgProfile>)}
+                  disabled={updateStreamMutation.isPending}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                    profile?.chatEnabled === false
+                      ? 'bg-brand text-white hover:bg-brand-hover'
+                      : 'bg-red-500/15 text-red-400 hover:bg-red-500/25'
+                  }`}
+                >
+                  {profile?.chatEnabled === false ? 'Включить чат' : 'Заблокировать'}
+                </button>
+              </div>
+              <div className="flex items-center justify-between gap-3 pt-2 border-t border-zinc-800/50">
+                <span className="text-xs text-zinc-500">Удалить все сообщения у всех зрителей</span>
+                <button
+                  onClick={() => {
+                    if (clearChatMutation.isPending) return;
+                    if (confirm('Удалить все сообщения чата? Действие необратимо.')) {
+                      clearChatMutation.mutate();
+                    }
+                  }}
+                  disabled={clearChatMutation.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-zinc-100 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Trash size={12} />
+                  {clearChatMutation.isPending ? 'Очистка...' : 'Очистить чат'}
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-col gap-2">

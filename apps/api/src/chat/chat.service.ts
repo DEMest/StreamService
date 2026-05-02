@@ -14,9 +14,10 @@ export class ChatService {
   async saveMessage(orgSlug: string, nickname: string, content: string) {
     const org = await this.prisma.organization.findUnique({
       where: { slug: orgSlug },
-      select: { id: true },
+      select: { id: true, chatEnabled: true },
     });
     if (!org) return null;
+    if (org.chatEnabled === false) return null;
     return this.prisma.chatMessage.create({
       data: { orgId: org.id, nickname, content: content.slice(0, 500) },
       select: { id: true, nickname: true, content: true, createdAt: true },
@@ -26,9 +27,9 @@ export class ChatService {
   async getRecentMessages(orgSlug: string, limit = 50) {
     const org = await this.prisma.organization.findUnique({
       where: { slug: orgSlug },
-      select: { id: true, chatTtlMinutes: true },
+      select: { id: true, chatTtlMinutes: true, chatEnabled: true },
     });
-    if (!org) return { messages: [], ttlMinutes: DEFAULT_CHAT_TTL_MINUTES };
+    if (!org) return { messages: [], ttlMinutes: DEFAULT_CHAT_TTL_MINUTES, chatEnabled: true };
     const ttlMinutes = org.chatTtlMinutes ?? DEFAULT_CHAT_TTL_MINUTES;
     const cutoff = new Date(Date.now() - ttlMinutes * 60 * 1000);
     const messages = await this.prisma.chatMessage.findMany({
@@ -37,7 +38,20 @@ export class ChatService {
       take: limit,
       select: { id: true, nickname: true, content: true, createdAt: true },
     });
-    return { messages: messages.reverse(), ttlMinutes };
+    return { messages: messages.reverse(), ttlMinutes, chatEnabled: org.chatEnabled !== false };
+  }
+
+  async isChatEnabled(orgSlug: string): Promise<boolean> {
+    const org = await this.prisma.organization.findUnique({
+      where: { slug: orgSlug },
+      select: { chatEnabled: true },
+    });
+    return org?.chatEnabled !== false;
+  }
+
+  async clearMessages(orgId: string): Promise<{ deleted: number }> {
+    const { count } = await this.prisma.chatMessage.deleteMany({ where: { orgId } });
+    return { deleted: count };
   }
 
   @Cron(CronExpression.EVERY_MINUTE)

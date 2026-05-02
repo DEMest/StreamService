@@ -35,6 +35,7 @@ model Organization {
   previewMode        String        @default("multicam")
   previewImagePath   String?
   chatTtlMinutes     Int           @default(180)
+  chatEnabled        Boolean       @default(true)
   currentBroadcastId String?       @unique
   // Relations
   broadcasts         Broadcast[]

@@ -26,7 +26,7 @@ export class OrgController {
   @Patch('stream')
   updateStreamSettings(
     @CurrentUser() user: JwtPayload,
-    @Body() body: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean; previewMode?: string; chatTtlMinutes?: number },
+    @Body() body: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean; previewMode?: string; chatTtlMinutes?: number; chatEnabled?: boolean },
   ) {
     if (body.previewMode && !['multicam', 'cam1', 'cam2', 'cam3', 'cam4'].includes(body.previewMode)) {
       throw new BadRequestException('Invalid previewMode. Allowed: multicam, cam1, cam2, cam3, cam4');
@@ -52,6 +52,11 @@ export class OrgController {
   @Delete('broadcasts/:id')
   deleteBroadcast(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.org.deleteBroadcast(user.orgId!, id);
+  }
+
+  @Post('chat/clear')
+  clearChat(@CurrentUser() user: JwtPayload) {
+    return this.org.clearChat(user.orgId!);
   }
 
   @Post('preview')
