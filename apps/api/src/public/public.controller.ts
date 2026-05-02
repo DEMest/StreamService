@@ -1,10 +1,25 @@
-import { Controller, Get, Param, Query, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { PublicService } from './public.service';
+import { ContactService, CreateContactDto } from '../contact/contact.service';
 
 @Controller('v1/public')
 export class PublicController {
-  constructor(private pub: PublicService) {}
+  constructor(
+    private pub: PublicService,
+    private contact: ContactService,
+  ) {}
+
+  @Post('contact')
+  submitContact(@Body() body: CreateContactDto) {
+    if (!body?.org?.trim() || !body?.name?.trim() || !body?.email?.trim()) {
+      throw new BadRequestException('org, name, email are required');
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim())) {
+      throw new BadRequestException('Invalid email');
+    }
+    return this.contact.create(body);
+  }
 
   @Get('orgs')
   getCatalog() {

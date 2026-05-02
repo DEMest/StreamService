@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AdminService } from './admin.service';
+import { ContactService } from '../contact/contact.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -8,7 +9,10 @@ import { Roles } from '../auth/roles.decorator';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('superadmin')
 export class AdminController {
-  constructor(private admin: AdminService) {}
+  constructor(
+    private admin: AdminService,
+    private contact: ContactService,
+  ) {}
 
   @Post('orgs')
   createOrg(@Body() body: { slug: string; name: string; password: string }) {
@@ -28,5 +32,20 @@ export class AdminController {
   @Delete('orgs/:slug')
   deleteOrg(@Param('slug') slug: string) {
     return this.admin.deleteOrg(slug);
+  }
+
+  @Get('contact-requests')
+  listContactRequests(@Query('status') status?: string) {
+    return this.contact.list(status);
+  }
+
+  @Patch('contact-requests/:id')
+  updateContactRequest(@Param('id') id: string, @Body() body: { status: string }) {
+    return this.contact.updateStatus(id, body.status);
+  }
+
+  @Delete('contact-requests/:id')
+  deleteContactRequest(@Param('id') id: string) {
+    return this.contact.remove(id);
   }
 }

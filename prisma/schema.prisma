@@ -72,3 +72,16 @@ model Recording {
   expiresAt   DateTime
   createdAt   DateTime  @default(now())
 }
+
+model ContactRequest {
+  id        String   @id @default(cuid())
+  org       String
+  name      String
+  email     String
+  phone     String?
+  message   String?
+  status    String   @default("new")
+  createdAt DateTime @default(now())
+
+  @@index([status, createdAt])
+}

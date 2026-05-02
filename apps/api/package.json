@@ -3,13 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "nest start --watch",
+    "dev": "dotenv -e ../../.env -- nest start --watch",
     "build": "nest build",
     "start": "node dist/main",
     "test": "jest",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
-    "prisma:seed": "ts-node ../../prisma/seed.ts"
+    "prisma:seed": "ts-node ../../prisma/seed.ts",
+    "prisma:push": "dotenv -e ../../.env -- prisma db push"
   },
   "prisma": {
     "schema": "../../prisma/schema.prisma"
@@ -59,6 +60,7 @@
     "@types/multer": "^2.1.0",
     "@types/node": "^20.0.0",
     "@types/sharp": "^0.32.0",
+    "dotenv-cli": "^11.0.0",
     "jest": "^30.3.0",
     "prisma": "^6.19.3",
     "ts-jest": "^29.4.9",

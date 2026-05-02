@@ -1,9 +1,10 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PublicLayout } from '@/components/PublicLayout';
-import { Plus, Trash, Prohibit, Warning } from '@phosphor-icons/react';
+import { Plus, Trash, Prohibit, Warning, Tray } from '@phosphor-icons/react';
 
 interface Org { id: string; slug: string; name: string; isActive: boolean; createdAt: string }
 
@@ -36,15 +37,24 @@ export default function AdminPage() {
   return (
     <PublicLayout>
       <div className="max-w-[920px] mx-auto px-6 py-8">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
           <h1 className="text-xl font-semibold text-zinc-50 tracking-tight">Управление организациями</h1>
-          <button
-            onClick={() => setShowCreate((v) => !v)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
-          >
-            <Plus size={16} weight="bold" />
-            Новая организация
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/admin/requests"
+              className="flex items-center gap-2 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer no-underline"
+            >
+              <Tray size={16} weight="bold" />
+              Заявки
+            </Link>
+            <button
+              onClick={() => setShowCreate((v) => !v)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
+            >
+              <Plus size={16} weight="bold" />
+              Новая организация
+            </button>
+          </div>
         </div>
 
         {showCreate && (
