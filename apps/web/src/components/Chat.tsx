@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getSocket } from '@/lib/socket';
 import { NicknameModal } from './NicknameModal';
-import { PaperPlaneRight, ChatCircle } from '@phosphor-icons/react';
+import { PaperPlaneRight, ChatCircle, Lock } from '@phosphor-icons/react';
 
 interface Message { id: string; nickname: string; content: string; createdAt: string }
 
@@ -17,6 +17,10 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
   const [nickname, setNickname] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [nicknameModalOpen, setNicknameModalOpen] = useState(false);
+  const [ttlMinutes, setTtlMinutes] = useState(180);
+  const [chatEnabled, setChatEnabled] = useState(true);
+  const pendingContentRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const onViewersRef = useRef(onViewersChange);
   useEffect(() => { onViewersRef.current = onViewersChange; });
@@ -49,47 +53,77 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
       return [...prev, msg];
     });
     const onViewers = (count: number) => onViewersRef.current?.(count);
+    const onTtl = (mins: number) => { if (typeof mins === 'number' && mins > 0) setTtlMinutes(mins); };
+    const onEnabled = (enabled: boolean) => setChatEnabled(enabled !== false);
+    const onCleared = () => setMessages([]);
     socket.on('history', onHistory);
     socket.on('message', onMessage);
     socket.on('viewers', onViewers);
+    socket.on('chat_ttl', onTtl);
+    socket.on('chat_enabled', onEnabled);
+    socket.on('chat_cleared', onCleared);
     return () => {
       socket.off('connect', join);
       socket.off('history', onHistory);
       socket.off('message', onMessage);
       socket.off('viewers', onViewers);
+      socket.off('chat_ttl', onTtl);
+      socket.off('chat_enabled', onEnabled);
+      socket.off('chat_cleared', onCleared);
     };
   }, [orgSlug]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  // Auto-prune messages older than 5 minutes
+  // Auto-prune messages older than configured TTL
   useEffect(() => {
     const interval = setInterval(() => {
-      const cutoff = Date.now() - 5 * 60 * 1000;
+      const cutoff = Date.now() - ttlMinutes * 60 * 1000;
       setMessages((prev) => prev.filter((m) => new Date(m.createdAt).getTime() > cutoff));
     }, 30_000);
     return () => clearInterval(interval);
-  }, []);
+  }, [ttlMinutes]);
+
+  function sendMessage(content: string, nick: string) {
+    const tempId = `_tmp_${Date.now()}`;
+    setMessages((prev) => [...prev, { id: tempId, nickname: nick, content, createdAt: new Date().toISOString() }]);
+    getSocket().emit('message', { orgSlug, nickname: nick, content });
+  }
 
   function handleNicknameConfirm(name: string) {
     localStorage.setItem('chat_nickname', name);
     setNickname(name);
+    setNicknameModalOpen(false);
+    const pending = pendingContentRef.current;
+    pendingContentRef.current = null;
+    if (pending) {
+      sendMessage(pending, name);
+      setInput('');
+    }
+  }
+
+  function handleNicknameCancel() {
+    pendingContentRef.current = null;
+    setNicknameModalOpen(false);
   }
 
   function handleSend(e: React.FormEvent) {
     e.preventDefault();
-    if (!input.trim() || !nickname) return;
+    if (!chatEnabled) return;
     const content = input.trim();
-    // Optimistic: show message instantly with temp id
-    const tempId = `_tmp_${Date.now()}`;
-    setMessages((prev) => [...prev, { id: tempId, nickname, content, createdAt: new Date().toISOString() }]);
-    getSocket().emit('message', { orgSlug, nickname, content });
+    if (!content) return;
+    if (!nickname) {
+      pendingContentRef.current = content;
+      setNicknameModalOpen(true);
+      return;
+    }
+    sendMessage(content, nickname);
     setInput('');
   }
 
   return (
     <div className="flex flex-col h-full bg-surface-elevated">
-      {!nickname && !authorName && !authLoading && <NicknameModal onConfirm={handleNicknameConfirm} />}
+      {nicknameModalOpen && <NicknameModal onConfirm={handleNicknameConfirm} onCancel={handleNicknameCancel} />}
 
       <div className="flex-1 overflow-y-auto p-3 space-y-1 scrollbar-thin">
         {messages.length === 0 && (
@@ -107,21 +141,28 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={handleSend} className="border-t border-zinc-800/60 p-2 flex gap-1.5">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Сообщение..."
-          maxLength={500}
-          className="flex-1 px-3 py-2 bg-surface-primary border-none rounded-lg text-sm text-zinc-200 placeholder:text-zinc-600 focus:ring-1 focus:ring-brand/30 outline-none transition-colors"
-        />
-        <button
-          type="submit"
-          className="p-2 bg-brand hover:bg-brand-hover text-white rounded-lg transition-all duration-200 active:scale-95"
-        >
-          <PaperPlaneRight size={16} weight="fill" />
-        </button>
-      </form>
+      {chatEnabled ? (
+        <form onSubmit={handleSend} className="border-t border-zinc-800/60 p-2 flex gap-1.5">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Сообщение..."
+            maxLength={500}
+            className="flex-1 px-3 py-2 bg-surface-primary border-none rounded-lg text-sm text-zinc-200 placeholder:text-zinc-600 focus:ring-1 focus:ring-brand/30 outline-none transition-colors"
+          />
+          <button
+            type="submit"
+            className="p-2 bg-brand hover:bg-brand-hover text-white rounded-lg transition-all duration-200 active:scale-95"
+          >
+            <PaperPlaneRight size={16} weight="fill" />
+          </button>
+        </form>
+      ) : (
+        <div className="border-t border-zinc-800/60 p-3 flex items-center justify-center gap-2 bg-surface-primary/40">
+          <Lock size={14} className="text-zinc-500" />
+          <span className="text-xs text-zinc-400">Чат временно отключён организатором</span>
+        </div>
+      )}
     </div>
   );
 }

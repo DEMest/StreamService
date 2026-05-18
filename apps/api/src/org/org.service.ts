@@ -1,7 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
+import { ALLOWED_CHAT_TTL_MINUTES } from '../chat/chat.service';
+import { ChatGateway } from '../chat/chat.gateway';
+import { ChatService } from '../chat/chat.service';
 import { randomBytes } from 'crypto';
 import * as sharp from 'sharp';
 import { promises as fs } from 'fs';
@@ -13,7 +16,20 @@ export class OrgService {
     private prisma: PrismaService,
     private mediamtx: MediamtxService,
     private recording: RecordingService,
+    private chatGateway: ChatGateway,
+    private chatService: ChatService,
   ) {}
+
+  async clearChat(orgId: string) {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { slug: true },
+    });
+    if (!org) throw new NotFoundException('Organization not found');
+    const result = await this.chatService.clearMessages(orgId);
+    this.chatGateway.broadcastChatCleared(org.slug);
+    return { ok: true, ...result };
+  }
 
   async getProfile(orgId: string, revealKey = false) {
     const org = await this.prisma.organization.findUnique({
@@ -31,6 +47,8 @@ export class OrgService {
         streamPreviewKey: true,
         previewMode: true,
         previewImagePath: true,
+        chatTtlMinutes: true,
+        chatEnabled: true,
         ingestKey: revealKey,
         ingestKeyCreatedAt: true,
         createdAt: true,
@@ -53,9 +71,15 @@ export class OrgService {
 
   async updateStreamSettings(
     orgId: string,
-    data: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean; previewMode?: string },
+    data: { streamTitle?: string; streamDescription?: string; streamIsPublic?: boolean; autoStream?: boolean; previewMode?: string; chatTtlMinutes?: number; chatEnabled?: boolean },
   ) {
     const updateData: Record<string, any> = { ...data };
+
+    if (data.chatTtlMinutes !== undefined) {
+      if (!ALLOWED_CHAT_TTL_MINUTES.includes(data.chatTtlMinutes as any)) {
+        throw new BadRequestException(`Invalid chatTtlMinutes. Allowed: ${ALLOWED_CHAT_TTL_MINUTES.join(', ')}`);
+      }
+    }
 
     if (data.streamIsPublic === false) {
       const org = await this.prisma.organization.findUnique({
@@ -69,15 +93,21 @@ export class OrgService {
       updateData.streamPreviewKey = null;
     }
 
-    return this.prisma.organization.update({
+    const updated = await this.prisma.organization.update({
       where: { id: orgId },
       data: updateData,
       select: {
-        id: true, streamTitle: true, streamDescription: true,
+        id: true, slug: true, streamTitle: true, streamDescription: true,
         streamIsPublic: true, streamPreviewKey: true, autoStream: true, isLive: true,
-        previewMode: true,
+        previewMode: true, chatTtlMinutes: true, chatEnabled: true,
       },
     });
+
+    if (data.chatEnabled !== undefined) {
+      this.chatGateway.broadcastChatEnabled(updated.slug, updated.chatEnabled);
+    }
+
+    return updated;
   }
 
   async startStream(orgId: string) {

@@ -64,8 +64,10 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     client.to(room).emit('viewers', count);
 
     try {
-      const messages = await this.chat.getRecentMessages(data.orgSlug);
+      const { messages, ttlMinutes, chatEnabled } = await this.chat.getRecentMessages(data.orgSlug);
       client.emit('history', messages);
+      client.emit('chat_ttl', ttlMinutes);
+      client.emit('chat_enabled', chatEnabled);
     } catch (err) {
       this.logger.error(`Failed to load history for ${data.orgSlug}: ${err}`);
       client.emit('history', []);
@@ -88,9 +90,22 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         const room = `org:${data.orgSlug}`;
         client.to(room).emit('message', message);
         client.emit('message', message);
+      } else {
+        const enabled = await this.chat.isChatEnabled(data.orgSlug);
+        if (!enabled) client.emit('chat_enabled', false);
       }
     } catch (err) {
       this.logger.error(`Failed to save message for ${data.orgSlug}: ${err}`);
     }
+  }
+
+  broadcastChatEnabled(orgSlug: string, enabled: boolean) {
+    const room = `org:${orgSlug}`;
+    this.server.to(room).emit('chat_enabled', enabled);
+  }
+
+  broadcastChatCleared(orgSlug: string) {
+    const room = `org:${orgSlug}`;
+    this.server.to(room).emit('chat_cleared');
   }
 }
