@@ -53,13 +53,13 @@ export default function HomePage() {
       <Header />
 
       {/* ── Hero ───────────────────────────────────────────── */}
-      <section className="relative min-h-[100dvh] flex items-center overflow-hidden">
+      <section className="relative lg:min-h-[100dvh] lg:flex lg:items-center overflow-hidden">
         {/* Decorative blobs */}
         <div className="absolute top-1/4 right-1/4 w-[500px] h-[500px] bg-brand/6 rounded-full blur-[150px] pointer-events-none" />
         <div className="absolute bottom-0 left-1/3 w-[300px] h-[300px] bg-brand/4 rounded-full blur-[100px] pointer-events-none" />
 
         <motion.div
-          className="relative max-w-[1400px] mx-auto px-6 py-20 md:py-32 w-full grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-10 lg:gap-14 items-center"
+          className="relative max-w-[1400px] mx-auto px-6 py-16 md:py-24 lg:py-32 w-full grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-10 lg:gap-14 lg:items-center"
           initial="hidden"
           animate="visible"
           variants={staggerContainer}
@@ -113,9 +113,9 @@ export default function HomePage() {
           </motion.div>
         </motion.div>
 
-        {/* Scroll indicator */}
+        {/* Scroll indicator — desktop only */}
         <motion.div
-          className="absolute bottom-8 left-1/2 -translate-x-1/2"
+          className="hidden lg:block absolute bottom-8 left-1/2 -translate-x-1/2"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 1.2 }}

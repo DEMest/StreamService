@@ -7,11 +7,11 @@ import { CornersOut, GridFour, VideoCamera, CircleNotch } from '@phosphor-icons/
 type CamId = 'cam1' | 'cam2' | 'cam3' | 'cam4';
 type ViewMode = 'multicam' | CamId;
 
-const CAMERAS: { id: CamId; label: string; col: number; row: number }[] = [
-  { id: 'cam1', label: 'Камера 1', col: 0, row: 0 },
-  { id: 'cam2', label: 'Камера 2', col: 1, row: 0 },
-  { id: 'cam3', label: 'Камера 3', col: 0, row: 1 },
-  { id: 'cam4', label: 'Камера 4', col: 1, row: 1 },
+const CAMERAS: { id: CamId; label: string; shortLabel: string; col: number; row: number }[] = [
+  { id: 'cam1', label: 'Камера 1', shortLabel: '1', col: 0, row: 0 },
+  { id: 'cam2', label: 'Камера 2', shortLabel: '2', col: 1, row: 0 },
+  { id: 'cam3', label: 'Камера 3', shortLabel: '3', col: 0, row: 1 },
+  { id: 'cam4', label: 'Камера 4', shortLabel: '4', col: 1, row: 1 },
 ];
 
 /*
@@ -192,7 +192,8 @@ export function InteractiveDemo() {
           }`}
         >
           <GridFour size={13} weight={mode === 'multicam' ? 'fill' : 'regular'} />
-          Все камеры
+          <span className="hidden sm:inline">Все камеры</span>
+          <span className="sm:hidden">Все</span>
         </button>
         {CAMERAS.map(cam => (
           <button
@@ -203,9 +204,11 @@ export function InteractiveDemo() {
                 ? 'bg-brand/12 text-brand border-brand/25'
                 : 'bg-surface-card text-zinc-500 border-zinc-800/40 hover:text-zinc-300 hover:border-zinc-700'
             }`}
+            aria-label={cam.label}
           >
             <VideoCamera size={12} weight={mode === cam.id ? 'fill' : 'regular'} />
-            {cam.label}
+            <span className="hidden sm:inline">{cam.label}</span>
+            <span className="sm:hidden">{cam.shortLabel}</span>
           </button>
         ))}
       </div>

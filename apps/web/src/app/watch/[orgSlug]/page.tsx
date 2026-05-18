@@ -8,12 +8,22 @@ import MatPlayer, { type MatPlayerHandle } from '@/components/MatPlayer';
 import ViewSwitcher, { type ViewMode } from '@/components/ViewSwitcher';
 import { Chat } from '@/components/Chat';
 import { Header } from '@/components/Header';
+import { MobileSeekBar } from '@/components/MobileSeekBar';
 import {
   Broadcast, Eye, CornersOut, CornersIn,
   SpeakerHigh, SpeakerLow, SpeakerSlash,
   CaretLeft, CaretRight, ChatCircle, Archive,
   TelevisionSimple, GearSix, Play, Pause,
+  GridFour, VideoCamera,
 } from '@phosphor-icons/react';
+
+const PORTRAIT_CAMS: { key: ViewMode; label: string }[] = [
+  { key: 'multicam', label: 'Все' },
+  { key: 'cam1', label: '1' },
+  { key: 'cam2', label: '2' },
+  { key: 'cam3', label: '3' },
+  { key: 'cam4', label: '4' },
+];
 
 interface Me { sub: string; role: string; orgSlug?: string }
 
@@ -478,19 +488,41 @@ export default function WatchPage({ params }: { params: { orgSlug: string } }) {
                     </div>
                   )}
 
-                  <div className="relative" style={{ height: 16 }}>
-                    <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/20">
-                      <div className="h-full bg-brand" style={{ width: duration - seekableStart > 0 ? `${((currentTime - seekableStart) / (duration - seekableStart)) * 100}%` : '0%' }} />
-                    </div>
-                    <input
-                      type="range" min={seekableStart} max={duration || 0} step={0.1} value={currentTime}
-                      onChange={handleSeek}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer m-0 p-0"
-                      style={{ WebkitAppearance: 'none', touchAction: 'none' }}
+                  <div className="px-2">
+                    <MobileSeekBar
+                      min={seekableStart}
+                      max={duration || 0}
+                      value={currentTime}
+                      onChange={(t) => { matRef.current?.seekTo(t); setIsAtLive(false); }}
+                      disabled={duration - seekableStart <= 0}
                     />
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Camera selector row */}
+            <div className="px-3 py-2 border-b border-zinc-800/40 shrink-0 flex items-center gap-1.5 overflow-x-auto">
+              {PORTRAIT_CAMS.map((m) => {
+                const active = viewMode === m.key;
+                return (
+                  <button
+                    key={m.key}
+                    onClick={() => setViewMode(m.key)}
+                    className={`flex items-center gap-1.5 shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 cursor-pointer border active:scale-95 ${
+                      active
+                        ? 'bg-brand/15 text-brand border-brand/30'
+                        : 'bg-surface-card text-zinc-400 border-zinc-800/50 hover:text-zinc-200'
+                    }`}
+                    aria-label={m.key === 'multicam' ? 'Мультикам' : `Камера ${m.label}`}
+                  >
+                    {m.key === 'multicam'
+                      ? <GridFour size={13} weight={active ? 'fill' : 'regular'} />
+                      : <VideoCamera size={12} weight={active ? 'fill' : 'regular'} />}
+                    {m.key === 'multicam' ? 'Все камеры' : `Камера ${m.label}`}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Info bar */}
