@@ -1,18 +1,30 @@
 'use client';
 import { useState } from 'react';
 import {
-  PaperPlaneTilt, CheckCircle, Buildings, User, Envelope, Phone,
+  PaperPlaneTilt, CheckCircle, Buildings, User, Envelope, Phone, Warning,
 } from '@phosphor-icons/react';
+import { api } from '@/lib/api';
 
 const inputClasses = 'w-full px-4 py-3 bg-surface-primary border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-brand focus:ring-1 focus:ring-brand/30 outline-none transition-colors';
 
 export function ContactForm() {
   const [form, setForm] = useState({ org: '', name: '', email: '', phone: '', message: '' });
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setSubmitted(true);
+    setError(null);
+    setSubmitting(true);
+    try {
+      await api.post('/v1/public/contact', form);
+      setSubmitted(true);
+    } catch (err) {
+      setError((err as Error).message || 'Не удалось отправить заявку');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (submitted) {
@@ -70,11 +82,18 @@ export function ContactForm() {
           rows={3} className={`${inputClasses} resize-y min-h-[80px]`} />
       </div>
 
+      {error && (
+        <div className="md:col-span-2 flex items-center gap-2 text-sm text-red-400">
+          <Warning size={16} weight="fill" className="shrink-0" />
+          {error}
+        </div>
+      )}
+
       <div className="md:col-span-2">
-        <button type="submit"
-          className="flex items-center justify-center gap-2 w-full md:w-auto px-8 py-3 bg-brand hover:bg-brand-hover text-white font-semibold rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer">
+        <button type="submit" disabled={submitting}
+          className="flex items-center justify-center gap-2 w-full md:w-auto px-8 py-3 bg-brand hover:bg-brand-hover text-white font-semibold rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
           <PaperPlaneTilt size={18} weight="fill" />
-          Отправить заявку
+          {submitting ? 'Отправляем...' : 'Отправить заявку'}
         </button>
       </div>
     </form>

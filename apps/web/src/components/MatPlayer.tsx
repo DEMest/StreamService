@@ -9,7 +9,7 @@ interface Props {
   volume?: number;
   isArchive?: boolean;
   onMutedFallback?: () => void;
-  onTimeUpdate?: (current: number, duration: number, isLive: boolean) => void;
+  onTimeUpdate?: (current: number, duration: number, isLive: boolean, seekableStart: number) => void;
   onBuffering?: (isBuffering: boolean) => void;
   onQualityChange?: (levelIndex: number) => void;
 }
@@ -159,12 +159,12 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
     } else if (Hls.isSupported()) {
       hls = new Hls({
         liveDurationInfinity: true,
-        lowLatencyMode: true,
-        liveSyncDuration: 3,
-        liveMaxLatencyDuration: 10,
-        maxBufferLength: 10,
-        maxMaxBufferLength: 15,
-        backBufferLength: 10,
+        lowLatencyMode: false,
+        liveSyncDuration: 4,
+        liveMaxLatencyDuration: 600,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        backBufferLength: 600,
         startLevel: -1,
       });
       hlsRef.current = hls;
@@ -215,7 +215,9 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>(({ streamUrl, viewMode, vol
       const hls = hlsRef.current;
       const isLive = !isArchive && !!hls && hls.latency !== undefined;
       const duration = isArchive ? video.duration : (hls?.liveSyncPosition ?? video.duration);
-      onTimeUpdate(video.currentTime, duration, isLive);
+      let seekableStart = 0;
+      try { if (video.seekable.length > 0) seekableStart = video.seekable.start(0); } catch {}
+      onTimeUpdate(video.currentTime, duration, isLive, seekableStart);
     };
 
     video.addEventListener('timeupdate', handler);

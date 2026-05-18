@@ -34,6 +34,8 @@ model Organization {
   autoStream         Boolean       @default(true)
   previewMode        String        @default("multicam")
   previewImagePath   String?
+  chatTtlMinutes     Int           @default(180)
+  chatEnabled        Boolean       @default(true)
   currentBroadcastId String?       @unique
   // Relations
   broadcasts         Broadcast[]
@@ -71,4 +73,17 @@ model Recording {
   duration    Int?
   expiresAt   DateTime
   createdAt   DateTime  @default(now())
+}
+
+model ContactRequest {
+  id        String   @id @default(cuid())
+  org       String
+  name      String
+  email     String
+  phone     String?
+  message   String?
+  status    String   @default("new")
+  createdAt DateTime @default(now())
+
+  @@index([status, createdAt])
 }
