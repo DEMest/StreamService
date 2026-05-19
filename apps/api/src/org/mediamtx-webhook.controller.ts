@@ -1,11 +1,11 @@
 import { Body, Controller, Headers, Logger, Post, UnauthorizedException } from '@nestjs/common';
-import { OrgService } from './org.service';
+import { StreamService } from '../stream/stream.service';
 
 @Controller('v1/internal/mediamtx')
 export class MediamtxWebhookController {
   private readonly logger = new Logger(MediamtxWebhookController.name);
 
-  constructor(private org: OrgService) {}
+  constructor(private stream: StreamService) {}
 
   @Post('auth')
   async handleAuth(
@@ -19,35 +19,33 @@ export class MediamtxWebhookController {
       query?: string;
     },
   ) {
-    // Allow all reads (viewers, FFmpeg RTSP reader)
     if (body.action !== 'publish') return { ok: true };
 
-    // SRT publish — passphrase already verified at transport level
     if (body.protocol === 'srt') return { ok: true };
 
-    // RTMP/RTSP publish — verify ingestKey
-    const match = body.path?.match(/^live\/(.+)$/);
-    if (!match) {
+    // Парсим путь: live/<org>[/<stream>] (в Step 3 расширится с /<slot>)
+    const m = body.path?.match(/^live\/([^/]+)(?:\/([^/]+))?$/);
+    if (!m) {
       this.logger.warn(`Auth rejected: invalid path "${body.path}" from ${body.ip}`);
       throw new UnauthorizedException('Invalid path');
     }
+    const orgSlug = m[1];
+    const streamSlug = m[2] ?? '';
 
-    const orgSlug = match[1];
     const params = new URLSearchParams(body.query ?? '');
     const key = params.get('key') || body.password;
-
     if (!key) {
-      this.logger.warn(`RTMP auth rejected for "${orgSlug}": no key provided (${body.ip})`);
+      this.logger.warn(`RTMP auth rejected for "${orgSlug}/${streamSlug}": no key (${body.ip})`);
       throw new UnauthorizedException('No key provided');
     }
 
-    const valid = await this.org.verifyIngestKey(orgSlug, key);
+    const valid = await this.stream.verifyIngestKey(orgSlug, streamSlug, key);
     if (!valid) {
-      this.logger.warn(`RTMP auth rejected for "${orgSlug}": invalid key (${body.ip})`);
+      this.logger.warn(`RTMP auth rejected for "${orgSlug}/${streamSlug}": invalid key (${body.ip})`);
       throw new UnauthorizedException('Invalid key');
     }
 
-    this.logger.log(`RTMP auth accepted for "${orgSlug}" (${body.ip})`);
+    this.logger.log(`RTMP auth accepted for "${orgSlug}/${streamSlug}" (${body.ip})`);
     return { ok: true };
   }
 
@@ -61,12 +59,8 @@ export class MediamtxWebhookController {
       throw new UnauthorizedException();
     }
 
-    const match = body.path?.match(/^live\/(.+)$/);
-    if (!match) return { ok: true };
-
-    const orgSlug = match[1];
     if (body.action === 'publish' || body.action === 'unpublish') {
-      await this.org.handleWebhook(orgSlug, body.action);
+      await this.stream.handleWebhook(body.path, body.action);
     }
 
     return { ok: true };

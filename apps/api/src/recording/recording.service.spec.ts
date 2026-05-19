@@ -48,4 +48,19 @@ describe('RecordingService', () => {
       await expect(service.deleteRecordingByBroadcastId('none')).resolves.not.toThrow();
     });
   });
+
+  describe('retryFailed', () => {
+    it('skips recordings where broadcast.stream is null', async () => {
+      mockPrisma.recording.findMany.mockResolvedValue([
+        {
+          id: 'rec1',
+          broadcastId: 'b1',
+          status: 'failed',
+          broadcast: { stream: null },
+        },
+      ]);
+      await expect(service.retryFailed()).resolves.not.toThrow();
+      expect(mockPrisma.recording.update).not.toHaveBeenCalled();
+    });
+  });
 });

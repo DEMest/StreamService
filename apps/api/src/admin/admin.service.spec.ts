@@ -12,6 +12,10 @@ const mockPrisma = {
     update: jest.fn(),
     delete: jest.fn(),
   },
+  stream: {
+    create: jest.fn(),
+    findMany: jest.fn(),
+  },
 };
 const mockMediamtx = { addPath: jest.fn(), deletePath: jest.fn() };
 
@@ -32,10 +36,32 @@ describe('AdminService', () => {
 
   it('creates org with generated ingestKey and calls mediamtx.addPath', async () => {
     mockPrisma.organization.create.mockResolvedValue({
-      id: '1', slug: 'club', name: 'Club', ingestKey: 'key123', isActive: true, createdAt: new Date(),
+      id: '1', slug: 'club', name: 'Club', isActive: true, createdAt: new Date(),
     });
+    mockPrisma.stream.create.mockResolvedValue({ id: 's1' });
     const result = await service.createOrg({ slug: 'club', name: 'Club', password: 'pass' });
     expect(result.slug).toBe('club');
+    expect(mockMediamtx.addPath).toHaveBeenCalledWith('club', expect.any(String));
+  });
+
+  it('creates Org with a default Stream (slug=\'\', mode=composite)', async () => {
+    mockPrisma.organization.create.mockResolvedValue({
+      id: 'o1', slug: 'club', name: 'Club', isActive: true, createdAt: new Date(),
+    });
+    mockPrisma.stream.create.mockResolvedValue({ id: 's1' });
+
+    await service.createOrg({ slug: 'club', name: 'Club', password: 'p' });
+
+    expect(mockPrisma.stream.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        orgId: 'o1',
+        slug: '',
+        mode: 'composite',
+        slotCount: 1,
+        layoutPreset: 'solo',
+        ingestKey: expect.any(String),
+      }),
+    }));
     expect(mockMediamtx.addPath).toHaveBeenCalledWith('club', expect.any(String));
   });
 

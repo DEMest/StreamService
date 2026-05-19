@@ -16,11 +16,11 @@ export class RecordingService {
 
   constructor(private prisma: PrismaService) {}
 
-  async onStreamEnded(broadcastId: string, orgSlug: string): Promise<void> {
-    const segmentsDir = path.join(RECORDINGS_ROOT, 'live', orgSlug);
+  async onStreamEnded(broadcastId: string, mediamtxPath: string): Promise<void> {
+    const segmentsDir = path.join(RECORDINGS_ROOT, 'live', mediamtxPath);
 
     if (!fs.existsSync(segmentsDir)) {
-      this.logger.warn(`No recordings directory for ${orgSlug}`);
+      this.logger.warn(`No recordings directory for ${mediamtxPath}`);
       return;
     }
 
@@ -29,7 +29,7 @@ export class RecordingService {
       .sort();
 
     if (files.length === 0) {
-      this.logger.warn(`No recording segments found for ${orgSlug}`);
+      this.logger.warn(`No recording segments found for ${mediamtxPath}`);
       return;
     }
 
@@ -40,19 +40,19 @@ export class RecordingService {
       data: { broadcastId, status: 'processing', expiresAt },
     });
 
-    this.convertRecording(recording.id, orgSlug, broadcastId, files, segmentsDir).catch(err => {
+    this.convertRecording(recording.id, mediamtxPath, broadcastId, files, segmentsDir).catch(err => {
       this.logger.error(`Conversion failed for recording ${recording.id}: ${err.message}`);
     });
   }
 
   private async convertRecording(
     recordingId: string,
-    orgSlug: string,
+    mediamtxPath: string,
     broadcastId: string,
     files: string[],
     segmentsDir: string,
   ): Promise<void> {
-    const archiveDir = path.join(ARCHIVE_ROOT, orgSlug);
+    const archiveDir = path.join(ARCHIVE_ROOT, mediamtxPath);
     const outputDir = path.join(archiveDir, broadcastId);
     fs.mkdirSync(outputDir, { recursive: true });
 
@@ -240,12 +240,18 @@ export class RecordingService {
   async retryFailed(): Promise<void> {
     const failed = await this.prisma.recording.findMany({
       where: { status: 'failed' },
-      include: { broadcast: { include: { org: true } } },
+      include: { broadcast: { include: { stream: { include: { org: { select: { slug: true } } } } } } },
     });
 
     for (const rec of failed) {
-      const orgSlug = rec.broadcast.org.slug;
-      const segmentsDir = path.join(RECORDINGS_ROOT, 'live', orgSlug);
+      if (!rec.broadcast.stream) continue;
+
+      const { stream } = rec.broadcast;
+      const mediamtxPath = stream.slug === ''
+        ? stream.org.slug
+        : `${stream.org.slug}/${stream.slug}`;
+
+      const segmentsDir = path.join(RECORDINGS_ROOT, 'live', mediamtxPath);
 
       if (!fs.existsSync(segmentsDir)) continue;
 
@@ -260,7 +266,7 @@ export class RecordingService {
         data: { status: 'processing' },
       });
 
-      this.convertRecording(rec.id, orgSlug, rec.broadcastId, files, segmentsDir).catch(err => {
+      this.convertRecording(rec.id, mediamtxPath, rec.broadcastId, files, segmentsDir).catch(err => {
         this.logger.error(`Retry conversion failed for ${rec.id}: ${err.message}`);
       });
     }
