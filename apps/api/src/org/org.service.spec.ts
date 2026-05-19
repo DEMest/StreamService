@@ -1,16 +1,30 @@
 import { Test } from '@nestjs/testing';
 import { OrgService } from './org.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { MediamtxService } from '../mediamtx/mediamtx.service';
+import { StreamService } from '../stream/stream.service';
 import { RecordingService } from '../recording/recording.service';
+import { ChatGateway } from '../chat/chat.gateway';
+import { ChatService } from '../chat/chat.service';
 import { NotFoundException } from '@nestjs/common';
 
 const mockPrisma = {
   organization: { findUnique: jest.fn(), update: jest.fn() },
-  broadcast: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
+  stream: { update: jest.fn() },
+  broadcast: { findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn() },
 };
-const mockMediamtx = { patchPath: jest.fn() };
-const mockRecording = { onStreamEnded: jest.fn(), deleteRecordingByBroadcastId: jest.fn() };
+const mockStream = {
+  getDefaultStream: jest.fn(),
+  rotateKey: jest.fn(),
+  updateSettings: jest.fn(),
+};
+const mockRecording = { deleteRecordingByBroadcastId: jest.fn() };
+const mockChatGateway = {
+  broadcastChatEnabled: jest.fn(),
+  broadcastChatCleared: jest.fn(),
+};
+const mockChatService = {
+  clearMessages: jest.fn(),
+};
 
 describe('OrgService', () => {
   let service: OrgService;
@@ -21,96 +35,100 @@ describe('OrgService', () => {
       providers: [
         OrgService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: MediamtxService, useValue: mockMediamtx },
+        { provide: StreamService, useValue: mockStream },
         { provide: RecordingService, useValue: mockRecording },
+        { provide: ChatGateway, useValue: mockChatGateway },
+        { provide: ChatService, useValue: mockChatService },
       ],
     }).compile();
     service = module.get(OrgService);
   });
 
-  it('rotates ingestKey and calls mediamtx.patchPath', async () => {
+  it('getProfile returns org + default stream merged into legacy DTO', async () => {
+    mockStream.getDefaultStream.mockResolvedValue({
+      id: 's1', slug: '', name: 'My', description: null,
+      ingestKey: 'k', ingestKeyCreatedAt: new Date(),
+      isPublic: true, previewKey: null, previewMode: 'multicam',
+      previewImagePath: null, isLive: false, autoStartMode: 'public',
+    });
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      id: 'o1', slug: 'org', name: 'Org', isActive: true, createdAt: new Date(),
+      chatTtlMinutes: 180, chatEnabled: true,
+    });
+    const r = await service.getProfile('o1', true);
+    expect(r.slug).toBe('org');
+    expect(r.streamTitle).toBe('My');
+    expect(r.ingestKey).toBe('k');
+    expect(r.autoStream).toBe(true);
+    expect(r.chatTtlMinutes).toBe(180);
+    expect(r.chatEnabled).toBe(true);
+  });
+
+  it('rotateKey delegates to StreamService.rotateKey for default stream', async () => {
+    mockStream.getDefaultStream.mockResolvedValue({ id: 's1' });
+    mockStream.rotateKey.mockResolvedValue({ ingestKey: 'newkey', ingestKeyCreatedAt: new Date() });
+    const r = await service.rotateKey('o1', 'orgslug');
+    expect(mockStream.rotateKey).toHaveBeenCalledWith('s1');
+    expect(r.ingestKey).toBe('newkey');
+  });
+
+  it('updateStreamSettings delegates to StreamService.updateSettings for stream-fields', async () => {
+    mockStream.getDefaultStream.mockResolvedValue({ id: 's1' });
+    mockStream.updateSettings.mockResolvedValue({
+      id: 's1', name: 'NewTitle', description: null,
+      isPublic: true, previewKey: null, autoStartMode: 'public', isLive: false, previewMode: 'cam1',
+    });
+    mockPrisma.organization.findUnique.mockResolvedValue({ chatTtlMinutes: 180, chatEnabled: true });
+    const r = await service.updateStreamSettings('o1', {
+      streamTitle: 'NewTitle', previewMode: 'cam1', autoStream: true,
+    });
+    expect(mockStream.updateSettings).toHaveBeenCalledWith('s1', expect.objectContaining({
+      name: 'NewTitle',
+      previewMode: 'cam1',
+      autoStartMode: 'public',
+    }));
+    expect(r.streamTitle).toBe('NewTitle');
+    expect(r.autoStream).toBe(true);
+  });
+
+  it('updateStreamSettings updates chatEnabled on Organization and broadcasts event', async () => {
+    mockStream.getDefaultStream.mockResolvedValue({ id: 's1' });
+    mockStream.updateSettings.mockResolvedValue({
+      id: 's1', name: 'X', description: null, isPublic: true,
+      previewKey: null, autoStartMode: 'public', isLive: false, previewMode: 'multicam',
+    });
     mockPrisma.organization.update.mockResolvedValue({
-      id: '1', slug: 'club', ingestKey: 'newkey', ingestKeyCreatedAt: new Date(),
+      slug: 'org', chatTtlMinutes: 60, chatEnabled: false,
     });
-    const result = await service.rotateKey('1', 'club');
-    expect(mockMediamtx.patchPath).toHaveBeenCalledWith('club', expect.any(String));
-    expect(result.ingestKey).toBeDefined();
-  });
-
-  it('startStream creates a Broadcast and sets isLive=true', async () => {
-    mockPrisma.organization.findUnique.mockResolvedValue({
-      id: 'org1', streamTitle: 'My Stream', streamDescription: null, isLive: false,
-    });
-    mockPrisma.broadcast.create.mockResolvedValue({ id: 'bcast1' });
-    mockPrisma.organization.update.mockResolvedValue({});
-
-    const result = await service.startStream('org1');
-
-    expect(mockPrisma.broadcast.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ orgId: 'org1', title: 'My Stream' }),
-    }));
+    await service.updateStreamSettings('o1', { chatTtlMinutes: 60, chatEnabled: false });
     expect(mockPrisma.organization.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: { isLive: true, currentBroadcastId: 'bcast1' },
+      data: { chatTtlMinutes: 60, chatEnabled: false },
     }));
-    expect(result).toEqual({ ok: true, broadcastId: 'bcast1' });
+    expect(mockChatGateway.broadcastChatEnabled).toHaveBeenCalledWith('org', false);
   });
 
-  it('startStream returns alreadyLive if org is already live', async () => {
-    mockPrisma.organization.findUnique.mockResolvedValue({ id: 'org1', isLive: true });
-    const result = await service.startStream('org1');
-    expect(result).toEqual({ alreadyLive: true });
-    expect(mockPrisma.broadcast.create).not.toHaveBeenCalled();
+  it('clearChat delegates to ChatService and broadcasts', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({ slug: 'org' });
+    mockChatService.clearMessages.mockResolvedValue({ deleted: 5 });
+    const r = await service.clearChat('o1');
+    expect(mockChatService.clearMessages).toHaveBeenCalledWith('o1');
+    expect(mockChatGateway.broadcastChatCleared).toHaveBeenCalledWith('org');
+    expect(r).toEqual({ ok: true, deleted: 5 });
   });
 
-  it('endStream closes broadcast and triggers recording', async () => {
-    mockPrisma.organization.findUnique.mockResolvedValue({
-      id: 'org1', slug: 'myorg', isLive: true, currentBroadcastId: 'bcast1',
-    });
-    mockPrisma.broadcast.update.mockResolvedValue({});
-    mockPrisma.organization.update.mockResolvedValue({});
-    mockRecording.onStreamEnded.mockResolvedValue(undefined);
-
-    const result = await service.endStream('org1');
-
-    expect(mockPrisma.broadcast.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'bcast1' },
-      data: expect.objectContaining({ endedAt: expect.any(Date) }),
+  it('listBroadcasts returns broadcasts of default stream', async () => {
+    mockStream.getDefaultStream.mockResolvedValue({ id: 's1' });
+    mockPrisma.broadcast.findMany.mockResolvedValue([{ id: 'b1', title: 'T' }]);
+    const r = await service.listBroadcasts('o1');
+    expect(mockPrisma.broadcast.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { streamId: 's1', endedAt: { not: null } },
     }));
-    expect(mockPrisma.organization.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: { isLive: false, currentBroadcastId: null },
-    }));
-    expect(result).toEqual({ ok: true });
+    expect(r[0].id).toBe('b1');
   });
 
-  it('endStream returns alreadyOff if org is not live', async () => {
-    mockPrisma.organization.findUnique.mockResolvedValue({
-      id: 'org1', slug: 'myorg', isLive: false, currentBroadcastId: null,
-    });
-    const result = await service.endStream('org1');
-    expect(result).toEqual({ alreadyOff: true });
-  });
-
-  it('handleWebhook calls startStream when action=publish and autoStream=true', async () => {
-    mockPrisma.organization.findUnique.mockResolvedValueOnce({ id: 'org1', autoStream: true });
-    mockPrisma.organization.findUnique.mockResolvedValueOnce({
-      id: 'org1', streamTitle: 'Test', streamDescription: null, isLive: false,
-    });
-    mockPrisma.broadcast.create.mockResolvedValue({ id: 'bcast1' });
-    mockPrisma.organization.update.mockResolvedValue({});
-
-    await service.handleWebhook('myorg', 'publish');
-
-    expect(mockPrisma.broadcast.create).toHaveBeenCalled();
-  });
-
-  it('handleWebhook does nothing when autoStream=false', async () => {
-    mockPrisma.organization.findUnique.mockResolvedValue({ id: 'org1', autoStream: false });
-    await service.handleWebhook('myorg', 'publish');
-    expect(mockPrisma.broadcast.create).not.toHaveBeenCalled();
-  });
-
-  it('deleteBroadcast throws NotFoundException when broadcast not in org', async () => {
+  it('deleteBroadcast throws NotFoundException when broadcast not in org streams', async () => {
+    mockStream.getDefaultStream.mockResolvedValue({ id: 's1' });
     mockPrisma.broadcast.findFirst.mockResolvedValue(null);
-    await expect(service.deleteBroadcast('org1', 'bcast1')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.deleteBroadcast('o1', 'bcast1')).rejects.toBeInstanceOf(NotFoundException);
   });
 });

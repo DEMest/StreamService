@@ -12,39 +12,43 @@ export class PublicService {
   ) {}
 
   async getCatalog() {
-    const orgs = await this.prisma.organization.findMany({
-      where: { isActive: true },
+    const streams = await this.prisma.stream.findMany({
+      where: { slug: '', org: { isActive: true } },
       select: {
         slug: true,
         name: true,
         isLive: true,
-        streamTitle: true,
         previewMode: true,
         previewImagePath: true,
+        org: { select: { slug: true, name: true, createdAt: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { org: { createdAt: 'desc' } },
     });
-    return orgs.map(({ previewImagePath, ...rest }) => ({
-      ...rest,
-      hasCustomPreview: !!previewImagePath,
+    return streams.map((s) => ({
+      slug: s.org.slug,
+      name: s.org.name,
+      isLive: s.isLive,
+      streamTitle: s.name,
+      previewMode: s.previewMode,
+      hasCustomPreview: !!s.previewImagePath,
     }));
   }
 
   async getThumbnail(orgSlug: string): Promise<{ buffer: Buffer; maxAge: number }> {
-    const org = await this.prisma.organization.findUnique({
-      where: { slug: orgSlug, isActive: true },
+    const stream = await this.prisma.stream.findFirst({
+      where: { slug: '', org: { slug: orgSlug, isActive: true } },
       select: { isLive: true, previewMode: true, previewImagePath: true },
     });
-    if (!org) throw new NotFoundException('Organization not found');
+    if (!stream) throw new NotFoundException('Organization not found');
 
-    if (org.isLive) {
-      const buf = await this.thumbnail.getSnapshot(orgSlug, org.previewMode);
+    if (stream.isLive) {
+      const buf = await this.thumbnail.getSnapshot(orgSlug, stream.previewMode);
       if (!buf) throw new NotFoundException('Snapshot not available');
       return { buffer: buf, maxAge: 30 };
     }
 
-    if (org.previewImagePath) {
-      const filePath = join(process.cwd(), 'uploads', org.previewImagePath);
+    if (stream.previewImagePath) {
+      const filePath = join(process.cwd(), 'uploads', stream.previewImagePath);
       const buf = await fs.readFile(filePath).catch(() => null);
       if (!buf) throw new NotFoundException('Preview image not found');
       return { buffer: buf, maxAge: 300 };
@@ -54,25 +58,23 @@ export class PublicService {
   }
 
   async getOrgWatch(orgSlug: string, key?: string) {
-    const org = await this.prisma.organization.findUnique({
-      where: { slug: orgSlug, isActive: true },
+    const stream = await this.prisma.stream.findFirst({
+      where: { slug: '', org: { slug: orgSlug, isActive: true } },
       select: {
-        slug: true,
         name: true,
         description: true,
         isLive: true,
-        streamTitle: true,
-        streamDescription: true,
-        streamIsPublic: true,
-        streamPreviewKey: true,
+        isPublic: true,
+        previewKey: true,
+        org: { select: { slug: true, name: true, description: true } },
       },
     });
-    if (!org) throw new NotFoundException('Organization not found');
+    if (!stream) throw new NotFoundException('Organization not found');
 
-    if (!org.streamIsPublic && org.streamPreviewKey !== key) {
+    if (!stream.isPublic && stream.previewKey !== key) {
       return {
-        slug: org.slug,
-        name: org.name,
+        slug: stream.org.slug,
+        name: stream.org.name,
         isLive: false,
         streamTitle: '',
         streamDescription: null,
@@ -81,32 +83,39 @@ export class PublicService {
       };
     }
 
-    const { streamPreviewKey: _, ...safe } = org;
-    return safe;
+    return {
+      slug: stream.org.slug,
+      name: stream.org.name,
+      description: stream.org.description,
+      isLive: stream.isLive,
+      streamTitle: stream.name,
+      streamDescription: stream.description,
+      streamIsPublic: stream.isPublic,
+    };
   }
 
   async getStreamUrl(orgSlug: string, key?: string) {
-    const org = await this.prisma.organization.findUnique({
-      where: { slug: orgSlug, isActive: true },
-      select: { slug: true, isLive: true, streamIsPublic: true, streamPreviewKey: true },
+    const stream = await this.prisma.stream.findFirst({
+      where: { slug: '', org: { slug: orgSlug, isActive: true } },
+      select: { isLive: true, isPublic: true, previewKey: true },
     });
-    if (!org || !org.isLive) throw new NotFoundException('No live stream');
-    if (!org.streamIsPublic && org.streamPreviewKey !== key) {
+    if (!stream || !stream.isLive) throw new NotFoundException('No live stream');
+    if (!stream.isPublic && stream.previewKey !== key) {
       throw new NotFoundException('No live stream');
     }
     return { hlsUrl: `/api/v1/public/orgs/${orgSlug}/live/hls/master.m3u8` };
   }
 
   async getOrgBroadcasts(orgSlug: string, key?: string) {
-    const org = await this.prisma.organization.findUnique({
-      where: { slug: orgSlug, isActive: true },
-      select: { id: true, streamIsPublic: true, streamPreviewKey: true },
+    const stream = await this.prisma.stream.findFirst({
+      where: { slug: '', org: { slug: orgSlug, isActive: true } },
+      select: { id: true, isPublic: true, previewKey: true },
     });
-    if (!org) throw new NotFoundException('Organization not found');
-    if (!org.streamIsPublic && org.streamPreviewKey !== key) return [];
+    if (!stream) throw new NotFoundException('Organization not found');
+    if (!stream.isPublic && stream.previewKey !== key) return [];
 
     return this.prisma.broadcast.findMany({
-      where: { orgId: org.id, endedAt: { not: null } },
+      where: { streamId: stream.id, endedAt: { not: null } },
       orderBy: { startedAt: 'desc' },
       select: {
         id: true,

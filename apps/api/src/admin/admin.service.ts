@@ -37,14 +37,17 @@ export class AdminService implements OnModuleInit {
       console.error('❌ Ошибка при создании суперпользователя', error);
     }
 
-    // Восстановить пути в MediaMTX для всех существующих организаций
+    // Восстановить пути в MediaMTX для всех Stream'ов (default-стримы дают пути 'live/<orgSlug>')
     try {
-      const orgs = await this.prisma.organization.findMany({
-        select: { slug: true, ingestKey: true },
+      const streams = await this.prisma.stream.findMany({
+        select: { slug: true, ingestKey: true, org: { select: { slug: true } } },
       });
-      await Promise.all(orgs.map((org) => this.mediamtx.addPath(org.slug, org.ingestKey)));
-      if (orgs.length > 0) {
-        console.log(`✅ Восстановлено ${orgs.length} путей в MediaMTX`);
+      await Promise.all(streams.map((s) => {
+        const path = s.slug === '' ? s.org.slug : `${s.org.slug}/${s.slug}`;
+        return this.mediamtx.addPath(path, s.ingestKey);
+      }));
+      if (streams.length > 0) {
+        console.log(`✅ Восстановлено ${streams.length} путей в MediaMTX`);
       }
     } catch (error) {
       console.error('❌ Ошибка при восстановлении путей MediaMTX', error);
@@ -60,9 +63,28 @@ export class AdminService implements OnModuleInit {
     const passwordHash = await bcrypt.hash(data.password, 10);
     try {
       const org = await this.prisma.organization.create({
-        data: { slug: data.slug, name: data.name, passwordHash, ingestKey },
+        data: { slug: data.slug, name: data.name, passwordHash },
         select: { id: true, slug: true, name: true, isActive: true, createdAt: true },
       });
+
+      // Создать default Stream сразу
+      await this.prisma.stream.create({
+        data: {
+          orgId: org.id,
+          slug: '',
+          mode: 'composite',
+          slotCount: 1,
+          slots: [{ index: 1, name: '' }],
+          slotOrder: [1],
+          layoutPreset: 'solo',
+          name: '',
+          ingestKey,
+          isPublic: true,
+          previewMode: 'multicam',
+          autoStartMode: 'public',
+        },
+      });
+
       await this.mediamtx.addPath(data.slug, ingestKey);
       return org;
     } catch (e: any) {

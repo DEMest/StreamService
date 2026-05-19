@@ -26,7 +26,10 @@ export class RecordingController {
     @Res() res: Response,
   ) {
     const broadcast = await this.prisma.broadcast.findFirst({
-      where: { id: broadcastId, org: { slug: orgSlug, isActive: true } },
+      where: {
+        id: broadcastId,
+        stream: { slug: '', org: { slug: orgSlug, isActive: true } },
+      },
     });
     if (!broadcast) {
       res.status(404).json({ message: 'Broadcast not found' });
@@ -171,7 +174,7 @@ export class RecordingController {
     @Res() res: Response,
   ) {
     const broadcast = await this.prisma.broadcast.findFirst({
-      where: { id: broadcastId, orgId: user.orgId },
+      where: { id: broadcastId, stream: { orgId: user.orgId } },
     });
     if (!broadcast) {
       res.status(404).json({ message: 'Broadcast not found' });
