@@ -114,7 +114,7 @@ export class PublicService {
     if (!stream) throw new NotFoundException('Organization not found');
     if (!stream.isPublic && stream.previewKey !== key) return [];
 
-    return this.prisma.broadcast.findMany({
+    const broadcasts = await this.prisma.broadcast.findMany({
       where: { streamId: stream.id, endedAt: { not: null } },
       orderBy: { startedAt: 'desc' },
       select: {
@@ -123,10 +123,17 @@ export class PublicService {
         description: true,
         startedAt: true,
         endedAt: true,
-        recording: {
+        recordings: {
+          where: { slotIndex: 1 },
           select: { id: true, status: true, fileSize: true, duration: true },
+          take: 1,
         },
       },
     });
+    // Preserve legacy DTO shape: recording (singular) instead of recordings (array)
+    return broadcasts.map(({ recordings, ...rest }) => ({
+      ...rest,
+      recording: recordings[0] ?? null,
+    }));
   }
 }

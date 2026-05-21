@@ -116,14 +116,15 @@ describe('OrgService', () => {
     expect(r).toEqual({ ok: true, deleted: 5 });
   });
 
-  it('listBroadcasts returns broadcasts of default stream', async () => {
+  it('listBroadcasts returns broadcasts of default stream with legacy recording field', async () => {
     mockStream.getDefaultStream.mockResolvedValue({ id: 's1' });
-    mockPrisma.broadcast.findMany.mockResolvedValue([{ id: 'b1', title: 'T' }]);
+    mockPrisma.broadcast.findMany.mockResolvedValue([{ id: 'b1', title: 'T', recordings: [] }]);
     const r = await service.listBroadcasts('o1');
     expect(mockPrisma.broadcast.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { streamId: 's1', endedAt: { not: null } },
     }));
     expect(r[0].id).toBe('b1');
+    expect(r[0].recording).toBeNull();
   });
 
   it('deleteBroadcast throws NotFoundException when broadcast not in org streams', async () => {
