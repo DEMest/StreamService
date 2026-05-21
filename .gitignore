@@ -41,5 +41,3 @@ pnpm-debug.log*
 package-lock.json
 yarn.lock
 AGENTS.md
-
-docker-compose.yml

@@ -33,6 +33,11 @@ RUN pnpm config set fetch-retries 5 && \
 RUN pnpm add -w -D prisma@6.19.3
 RUN pnpm add -w @prisma/client@6.19.3
 
+# bcrypt в корень — seed.ts (в /app/prisma/) импортирует его, а в workspace-репе
+# bcrypt живёт только в apps/api/node_modules, недоступен ts-node компилятору сверху.
+RUN pnpm add -w bcrypt@^6.0.0
+RUN pnpm add -w -D @types/bcrypt@^6.0.0
+
 # Копируем весь остальной код (чтобы Nest.js было что собирать)
 COPY . .
 
@@ -42,9 +47,20 @@ RUN pnpm exec prisma generate
 # Собираем Nest.js
 RUN pnpm --filter api build
 
+# Прекомпилируем seed в .js, чтобы не зависеть от ts-node / ESM-loader на runtime.
+RUN pnpm --filter api exec tsc \
+        --outDir /app/seed-out \
+        --rootDir /app/prisma \
+        --esModuleInterop \
+        --skipLibCheck \
+        --resolveJsonModule \
+        --target es2020 \
+        --module commonjs \
+        /app/prisma/seed.ts
+
 ENV API_PORT=3001
 ENV STREAM_URL=/hls/live/stream/index.m3u8
 
 EXPOSE 3001
 
-CMD ["sh", "-c", "pnpm exec prisma db push --accept-data-loss && node apps/api/dist/main.js"]
+CMD ["sh", "-c", "pnpm exec prisma migrate deploy && NODE_PATH=/app/apps/api/node_modules node /app/seed-out/seed.js && node apps/api/dist/main.js"]

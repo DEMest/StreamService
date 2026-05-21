@@ -71,6 +71,12 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
   const { data: broadcasts, isLoading } = useQuery({
     queryKey: ['broadcasts', orgSlug, previewKey],
     queryFn: () => api.get<BroadcastItem[]>(url),
+    // Пока есть хоть одна processing-запись — поллим каждые 5 сек, чтобы карточка
+    // обновилась как только конвертация завершится.
+    refetchInterval: (query) => {
+      const data = query.state.data as BroadcastItem[] | undefined;
+      return data?.some((b) => b.recording && b.recording.status !== 'ready') ? 5000 : false;
+    },
   });
 
   const selected = broadcasts?.find(b => b.id === selectedId);
@@ -145,7 +151,9 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
     }
   }
 
-  const readyBroadcasts = broadcasts?.filter(b => b.recording?.status === 'ready') ?? [];
+  // Показываем все broadcasts, у которых есть Recording-объект (даже processing).
+  // Карточки с status !== 'ready' рендерятся как disabled c индикатором «Подготовка».
+  const visibleBroadcasts = broadcasts?.filter(b => !!b.recording) ?? [];
 
   return (
     <div className="min-h-[100dvh] bg-surface-primary text-zinc-200">
@@ -214,39 +222,41 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
               <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(duration)}</span>
               <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-20 shrink-0" />
               <button onClick={toggleMute} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors"><VolumeIcon /></button>
-              {/* Quality selector */}
-              <div className="relative shrink-0">
-                <button
-                  onClick={() => setQualityMenuOpen((v) => !v)}
-                  className="text-white bg-transparent border-none h-9 px-2 rounded flex items-center gap-1 cursor-pointer hover:bg-white/10 transition-colors text-xs font-medium"
-                >
-                  <GearSix size={16} />
-                  <span className="text-zinc-400">
-                    {qualityLevel === -1
-                      ? `Авто${activeQuality >= 0 ? ` (${matRef.current?.getQualityLevels()?.[activeQuality]?.name ?? ''})` : ''}`
-                      : (matRef.current?.getQualityLevels()?.[qualityLevel]?.name ?? 'HD')}
-                  </span>
-                </button>
-                {qualityMenuOpen && (
-                  <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 border border-zinc-700/50 rounded-lg overflow-hidden min-w-[120px] backdrop-blur-sm">
-                    <button
-                      onClick={() => { setQualityLevel(-1); matRef.current?.setQualityLevel(-1); setQualityMenuOpen(false); }}
-                      className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === -1 ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
-                    >
-                      Авто
-                    </button>
-                    {(matRef.current?.getQualityLevels() ?? []).map((q) => (
+              {/* Quality selector — скрыт когда вариант один (single-slot HLS-VOD) */}
+              {(matRef.current?.getQualityLevels()?.length ?? 0) > 1 && (
+                <div className="relative shrink-0">
+                  <button
+                    onClick={() => setQualityMenuOpen((v) => !v)}
+                    className="text-white bg-transparent border-none h-9 px-2 rounded flex items-center gap-1 cursor-pointer hover:bg-white/10 transition-colors text-xs font-medium"
+                  >
+                    <GearSix size={16} />
+                    <span className="text-zinc-400">
+                      {qualityLevel === -1
+                        ? `Авто${activeQuality >= 0 ? ` (${matRef.current?.getQualityLevels()?.[activeQuality]?.name ?? ''})` : ''}`
+                        : (matRef.current?.getQualityLevels()?.[qualityLevel]?.name ?? 'HD')}
+                    </span>
+                  </button>
+                  {qualityMenuOpen && (
+                    <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 border border-zinc-700/50 rounded-lg overflow-hidden min-w-[120px] backdrop-blur-sm">
                       <button
-                        key={q.index}
-                        onClick={() => { setQualityLevel(q.index); matRef.current?.setQualityLevel(q.index); setQualityMenuOpen(false); }}
-                        className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === q.index ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
+                        onClick={() => { setQualityLevel(-1); matRef.current?.setQualityLevel(-1); setQualityMenuOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === -1 ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
                       >
-                        {q.name}
+                        Авто
                       </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      {(matRef.current?.getQualityLevels() ?? []).map((q) => (
+                        <button
+                          key={q.index}
+                          onClick={() => { setQualityLevel(q.index); matRef.current?.setQualityLevel(q.index); setQualityMenuOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-sm cursor-pointer border-none transition-colors ${qualityLevel === q.index ? 'bg-white/10 text-white' : 'bg-transparent text-zinc-300 hover:bg-white/5'}`}
+                        >
+                          {q.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <button onClick={toggleFullscreen} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors">
                 {isFullscreen ? <CornersIn size={18} /> : <CornersOut size={18} />}
               </button>
@@ -287,7 +297,7 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
           </div>
         )}
 
-        {!isLoading && readyBroadcasts.length === 0 && (
+        {!isLoading && visibleBroadcasts.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 gap-3 opacity-50">
             <VideoCamera size={48} className="text-zinc-600" weight="thin" />
             <p className="text-zinc-500 text-sm">Записей пока нет</p>
@@ -295,40 +305,53 @@ export default function ArchivePage({ params }: { params: { orgSlug: string } })
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-          {readyBroadcasts.map((b) => (
-            <article
-              key={b.id}
-              onClick={() => setSelectedId(selectedId === b.id ? null : b.id)}
-              className={`group rounded-xl overflow-hidden border cursor-pointer transition-all duration-200 active:scale-[0.99] ${
-                selectedId === b.id
-                  ? 'bg-brand/5 border-brand/40'
-                  : 'bg-surface-elevated border-zinc-800/50 hover:border-zinc-700 hover:shadow-lg hover:shadow-black/20'
-              }`}
-            >
-              {/* Thumbnail */}
-              <div className="relative aspect-video bg-zinc-900 overflow-hidden">
-                <ThumbnailImage src={thumbUrl} />
-                {b.recording?.duration && (
-                  <span className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-black/80 text-zinc-300 text-[0.65rem] font-mono rounded">
-                    {formatTime(b.recording.duration)}
-                  </span>
-                )}
-                {/* Play overlay on hover */}
-                <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                  <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
-                    <Play size={24} weight="fill" className="text-white" />
-                  </div>
+          {visibleBroadcasts.map((b) => {
+            const isReady = b.recording?.status === 'ready';
+            return (
+              <article
+                key={b.id}
+                onClick={() => isReady && setSelectedId(selectedId === b.id ? null : b.id)}
+                className={`group rounded-xl overflow-hidden border transition-all duration-200 ${
+                  isReady ? 'cursor-pointer active:scale-[0.99]' : 'cursor-default'
+                } ${
+                  selectedId === b.id
+                    ? 'bg-brand/5 border-brand/40'
+                    : 'bg-surface-elevated border-zinc-800/50 hover:border-zinc-700 hover:shadow-lg hover:shadow-black/20'
+                }`}
+              >
+                {/* Thumbnail */}
+                <div className="relative aspect-video bg-zinc-900 overflow-hidden">
+                  <ThumbnailImage src={thumbUrl} />
+                  {isReady && b.recording?.duration && (
+                    <span className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-black/80 text-zinc-300 text-[0.65rem] font-mono rounded">
+                      {formatTime(b.recording.duration)}
+                    </span>
+                  )}
+                  {isReady ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                      <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
+                        <Play size={24} weight="fill" className="text-white" />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/70">
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/90 border border-zinc-700/50 rounded-full">
+                        <div className="w-3 h-3 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
+                        <span className="text-zinc-300 text-xs">Подготовка</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
 
-              {/* Info */}
-              <div className="p-4">
-                <div className="font-semibold text-sm text-zinc-100 group-hover:text-white transition-colors">{b.title}</div>
-                <div className="text-zinc-500 text-xs mt-0.5">{formatDate(b.startedAt)}</div>
-                {b.description && <div className="text-zinc-600 text-xs mt-1 line-clamp-2">{b.description}</div>}
-              </div>
-            </article>
-          ))}
+                {/* Info */}
+                <div className="p-4">
+                  <div className={`font-semibold text-sm transition-colors ${isReady ? 'text-zinc-100 group-hover:text-white' : 'text-zinc-400'}`}>{b.title}</div>
+                  <div className="text-zinc-500 text-xs mt-0.5">{formatDate(b.startedAt)}</div>
+                  {b.description && <div className="text-zinc-600 text-xs mt-1 line-clamp-2">{b.description}</div>}
+                </div>
+              </article>
+            );
+          })}
         </div>
       </div>
     </div>

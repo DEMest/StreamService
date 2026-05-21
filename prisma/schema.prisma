@@ -100,7 +100,7 @@ model Broadcast {
   startedAt   DateTime
   endedAt     DateTime?
   createdAt   DateTime     @default(now())
-  recording   Recording?
+  recordings  Recording[]
 }
 
 model ChatMessage {
@@ -113,15 +113,18 @@ model ChatMessage {
 }
 
 model Recording {
-  id          String    @id @default(cuid())
-  broadcastId String    @unique
-  broadcast   Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
-  status      String    @default("processing")
-  filePath    String?
-  fileSize    Int?
-  duration    Int?
-  expiresAt   DateTime
-  createdAt   DateTime  @default(now())
+  id           String    @id @default(cuid())
+  broadcastId  String
+  slotIndex    Int       @default(1)
+  broadcast    Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  status       String    @default("processing")
+  manifestPath String?
+  fileSize     Int?
+  duration     Int?
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+
+  @@unique([broadcastId, slotIndex])
 }
 
 model ContactRequest {

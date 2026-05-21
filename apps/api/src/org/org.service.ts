@@ -151,15 +151,24 @@ export class OrgService {
 
   async listBroadcasts(orgId: string) {
     const defaultStream = await this.stream.getDefaultStream(orgId);
-    return this.prisma.broadcast.findMany({
+    const broadcasts = await this.prisma.broadcast.findMany({
       where: { streamId: defaultStream.id, endedAt: { not: null } },
       orderBy: { startedAt: 'desc' },
       select: {
         id: true, title: true, description: true,
         startedAt: true, endedAt: true, createdAt: true,
-        recording: { select: { id: true, status: true, fileSize: true, duration: true } },
+        recordings: {
+          where: { slotIndex: 1 },
+          select: { id: true, status: true, fileSize: true, duration: true },
+          take: 1,
+        },
       },
     });
+    // Preserve legacy DTO shape: recording (singular) instead of recordings (array)
+    return broadcasts.map(({ recordings, ...rest }) => ({
+      ...rest,
+      recording: recordings[0] ?? null,
+    }));
   }
 
   async updateBroadcast(
