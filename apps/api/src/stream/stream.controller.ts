@@ -127,4 +127,22 @@ export class StreamController {
   stop(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.streams.forceStop(user.orgId!, id);
   }
+
+  /**
+   * PATCH /v1/org/streams/:id/recording — управление записью Stream'а.
+   * Body: { enabled?: boolean, mode?: 'auto' | 'manual' } — оба поля
+   * опциональны и независимы.
+   * - enabled — переключает запись прямо сейчас (patches MediaMTX `record`)
+   * - mode — политика автостарта: 'auto' включит запись при publish-webhook'е
+   *   если она была выключена; 'manual' оставит как есть, пусть пользователь
+   *   рулит кнопкой
+   */
+  @Patch(':id/recording')
+  setRecording(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() body: { enabled?: boolean; mode?: 'auto' | 'manual' },
+  ) {
+    return this.streams.setRecording(user.orgId!, id, body ?? {});
+  }
 }

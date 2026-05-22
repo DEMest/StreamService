@@ -245,7 +245,12 @@ export class RecordingController {
     } else {
       res.setHeader('Content-Type', 'video/mp2t');
     }
-    res.setHeader('Cache-Control', 'no-cache');
+    // Live HLS-сегменты ротируются — кэш на промежуточных прокси (включая
+    // Next.js fetch-cache) приводит к 404 на удалённые segs и наоборот к
+    // отдаче несвежего manifest. no-store + revalidate отключают любой кэш.
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
 
     const stat = fs.statSync(resolved);
     const fileSize = stat.size;

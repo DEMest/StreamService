@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { EventsSection } from '@/components/dashboard/EventsSection';
+import { RecordingControl, type RecordingMode } from '@/components/dashboard/RecordingControl';
 import { Broadcast, Gear, ImageSquare, Archive, Copy, Eye, EyeSlash, ArrowsClockwise, PencilSimple, DownloadSimple, Trash, VideoCamera, Upload, CaretDown, ArrowRight, Stack, Plus, DotsThreeVertical, X, Warning } from '@phosphor-icons/react';
 
 interface OrgStreamSummary {
@@ -92,6 +93,27 @@ export default function DashboardPage() {
     queryKey: ['org-streams-list'],
     queryFn: () => api.get<OrgStreamSummary[]>('/v1/org/streams'),
     refetchInterval: 30_000,
+  });
+
+  // ID default-стрима (slug='') нужен для toggle записи дефолтного композитного
+  // стрима. У орги всегда ровно один такой Stream (создаётся при заведении орги).
+  const defaultStreamId = streamsList?.find((s) => s.slug === '')?.id;
+
+  const { data: defaultStream } = useQuery({
+    queryKey: ['org-stream', defaultStreamId],
+    queryFn: () =>
+      api.get<{ id: string; recordingEnabled: boolean; recordingMode: RecordingMode }>(
+        `/v1/org/streams/${defaultStreamId}`,
+      ),
+    enabled: !!defaultStreamId,
+    refetchInterval: 15_000,
+  });
+
+  const patchDefaultRecording = useMutation({
+    mutationFn: (patch: { enabled?: boolean; mode?: RecordingMode }) =>
+      api.patch(`/v1/org/streams/${defaultStreamId}/recording`, patch),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['org-stream', defaultStreamId] }),
   });
 
   // Сортируем: default первый, потом по имени.
@@ -185,14 +207,16 @@ export default function DashboardPage() {
   });
 
   const serverIp = process.env.NEXT_PUBLIC_SERVER_IP ?? '';
+  const srtPort = process.env.NEXT_PUBLIC_SRT_PORT ?? '8890';
+  const rtmpPort = process.env.NEXT_PUBLIC_RTMP_PORT ?? '1935';
   const streamId = `publish:live/${profile?.slug}`;
-  const srtServer = serverIp ? `${serverIp}:8890` : '';
-  const rtmpServer = serverIp ? `rtmp://${serverIp}:1935/live` : '';
+  const srtServer = serverIp ? `${serverIp}:${srtPort}` : '';
+  const rtmpServer = serverIp ? `rtmp://${serverIp}:${rtmpPort}/live` : '';
   const srtFullUrl = serverIp && profile?.ingestKey
-    ? `srt://${serverIp}:8890?streamid=publish:live/${profile.slug}&passphrase=${profile.ingestKey}`
+    ? `srt://${serverIp}:${srtPort}?streamid=publish:live/${profile.slug}&passphrase=${profile.ingestKey}`
     : '';
   const rtmpFullUrl = serverIp && profile?.ingestKey
-    ? `rtmp://${serverIp}:1935/live/${profile.slug}?key=${profile.ingestKey}`
+    ? `rtmp://${serverIp}:${rtmpPort}/live/${profile.slug}?key=${profile.ingestKey}`
     : '';
 
   function copyText(text: string) {
@@ -385,10 +409,19 @@ export default function DashboardPage() {
 
         {/* Stream Parameters */}
         <section className="bg-surface-elevated border border-zinc-800/50 rounded-xl p-5">
-          <h2 className="flex items-center gap-2 text-base font-medium text-zinc-300 mb-4">
-            <Broadcast size={18} className="text-brand" weight="fill" />
-            Параметры трансляции
-          </h2>
+          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            <h2 className="flex items-center gap-2 text-base font-medium text-zinc-300">
+              <Broadcast size={18} className="text-brand" weight="fill" />
+              Параметры трансляции
+            </h2>
+            <RecordingControl
+              enabled={defaultStream?.recordingEnabled ?? false}
+              mode={defaultStream?.recordingMode ?? 'auto'}
+              onPatch={(p) => patchDefaultRecording.mutate(p)}
+              pending={patchDefaultRecording.isPending}
+              available={!!defaultStreamId}
+            />
+          </div>
 
           {/* Protocol tabs */}
           <div className="flex gap-1 mb-4 bg-surface-primary rounded-lg p-1">
@@ -421,8 +454,8 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
                   <span className="w-28 shrink-0 text-xs text-zinc-500">Порт</span>
-                  <span className="flex-1 font-mono text-sm text-zinc-300">8890</span>
-                  <button onClick={() => copyText('8890')} className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer">
+                  <span className="flex-1 font-mono text-sm text-zinc-300">{srtPort}</span>
+                  <button onClick={() => copyText(srtPort)} className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer">
                     <Copy size={12} /> Копировать
                   </button>
                 </div>
@@ -508,7 +541,7 @@ export default function DashboardPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-zinc-400 mb-1.5">В поле <span className="text-zinc-200">«Сервер»</span> вставьте полную ссылку:</p>
                         <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
-                          <code className="flex-1 text-sm text-zinc-200 font-mono break-all">{srtFullUrl || `srt://${serverIp || 'IP'}:8890?streamid=${streamId}&passphrase=\u2022\u2022\u2022`}</code>
+                          <code className="flex-1 text-sm text-zinc-200 font-mono break-all">{srtFullUrl || `srt://${serverIp || 'IP'}:${srtPort}?streamid=${streamId}&passphrase=\u2022\u2022\u2022`}</code>
                           {srtFullUrl && (
                             <button onClick={() => copyText(srtFullUrl)} className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer" title="Копировать">
                               <Copy size={14} />
@@ -538,7 +571,7 @@ export default function DashboardPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-zinc-400 mb-1.5">В поле <span className="text-zinc-200">«Сервер»</span> вставьте:</p>
                         <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
-                          <code className="flex-1 text-sm text-zinc-200 font-mono">{rtmpServer || `rtmp://${serverIp || 'IP'}:1935/live`}</code>
+                          <code className="flex-1 text-sm text-zinc-200 font-mono">{rtmpServer || `rtmp://${serverIp || 'IP'}:${rtmpPort}/live`}</code>
                           {serverIp && (
                             <button onClick={() => copyText(rtmpServer)} className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer" title="Копировать">
                               <Copy size={14} />
@@ -595,7 +628,7 @@ export default function DashboardPage() {
                           <span className="text-zinc-500">Hostname:</span>
                           <span className="text-zinc-200 font-mono">{serverIp || 'IP сервера'}</span>
                           <span className="text-zinc-500">Port:</span>
-                          <span className="text-zinc-200 font-mono">8890</span>
+                          <span className="text-zinc-200 font-mono">{srtPort}</span>
                           <span className="text-zinc-500">Stream ID:</span>
                           <span className="text-zinc-200 font-mono break-all">{streamId}</span>
                           <span className="text-zinc-500">Passphrase:</span>
@@ -621,7 +654,7 @@ export default function DashboardPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-zinc-400 mb-1.5">В поле <span className="text-zinc-200">URL</span> вставьте полную ссылку:</p>
                         <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
-                          <code className="flex-1 text-sm text-zinc-200 font-mono break-all">{rtmpFullUrl || `rtmp://${serverIp || 'IP'}:1935/live/${profile?.slug ?? 'slug'}?key=\u2022\u2022\u2022`}</code>
+                          <code className="flex-1 text-sm text-zinc-200 font-mono break-all">{rtmpFullUrl || `rtmp://${serverIp || 'IP'}:${rtmpPort}/live/${profile?.slug ?? 'slug'}?key=\u2022\u2022\u2022`}</code>
                           {rtmpFullUrl && (
                             <button onClick={() => copyText(rtmpFullUrl)} className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer" title="Копировать">
                               <Copy size={14} />

@@ -11,8 +11,15 @@ export class JwtAuthGuard implements CanActivate {
     const token = req.cookies?.['access_token'];
     if (!token) throw new UnauthorizedException('Not authenticated');
     try {
-      req['user'] = await this.jwt.verifyAsync(token);
-    } catch {
+      const payload = await this.jwt.verifyAsync<{ type?: 'access' | 'refresh' }>(token);
+      // Refresh-токен не должен пускать на обычные endpoint'ы. type undefined
+      // — legacy access (до миграции на пару access/refresh), считаем валидным.
+      if (payload.type === 'refresh') {
+        throw new UnauthorizedException('Refresh token cannot be used for API calls');
+      }
+      req['user'] = payload;
+    } catch (e) {
+      if (e instanceof UnauthorizedException) throw e;
       throw new UnauthorizedException('Invalid or expired token');
     }
     return true;

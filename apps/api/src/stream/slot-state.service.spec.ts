@@ -121,7 +121,7 @@ describe('SlotStateService', () => {
   describe('onModuleInit (reconcile)', () => {
     it('запускает setPublishing для каждого ready=true пути из MediaMTX', async () => {
       const mediamtx = {
-        listActivePaths: jest.fn().mockResolvedValue([
+        listActivePublishers: jest.fn().mockResolvedValue([
           { name: 'live/orgA/1', ready: true },
           { name: 'live/orgA/2', ready: true },
           { name: 'live/orgB', ready: true },
@@ -150,7 +150,7 @@ describe('SlotStateService', () => {
 
     it('игнорирует пути не резолвящиеся в Stream (legacy/чужие)', async () => {
       const mediamtx = {
-        listActivePaths: jest.fn().mockResolvedValue([
+        listActivePublishers: jest.fn().mockResolvedValue([
           { name: 'live/ghost', ready: true },
           { name: 'live/orgA', ready: true },
         ]),
@@ -170,7 +170,7 @@ describe('SlotStateService', () => {
 
     it('не падает если MediaMTX недоступен на старте', async () => {
       const mediamtx = {
-        listActivePaths: jest.fn().mockRejectedValue(new Error('ECONNREFUSED')),
+        listActivePublishers: jest.fn().mockRejectedValue(new Error('ECONNREFUSED')),
       };
       const streams = { resolvePathToStream: jest.fn() };
 

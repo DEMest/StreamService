@@ -54,7 +54,12 @@ export class SlotStateService implements OnModuleInit {
    * упал во время живой публикации — без этого reconcile в Studio будет
    * «нет камер» пока кто-то не выполнит publish/unpublish цикл.
    *
-   * Идём через `MediamtxService.listActivePaths` + `StreamService.resolvePathToStream`.
+   * Используем {@link MediamtxService.listActivePublishers} — он смотрит в
+   * `paths/list` + runtime `srtconns/list` / `rtspsessions/list` /
+   * `rtmpconns/list`. Это важно, потому что mediamtx хранит configured-paths
+   * в RAM: после его рестарта /v3/paths/list пустой, но активные SRT/RTMP/RTSP
+   * коннекшены продолжают идти и видны в *conns/list.
+   *
    * Пути, которые не маппятся в Stream (legacy / чужие), игнорируем.
    * MediaMTX-недоступность на старте не валит API — логируем warn и
    * восстанавливаемся при следующих publish-webhook'ах.
@@ -62,7 +67,7 @@ export class SlotStateService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     if (!this.mediamtx || !this.streams) return; // тестовый инстанс
     try {
-      const paths = await this.mediamtx.listActivePaths();
+      const paths = await this.mediamtx.listActivePublishers();
       for (const p of paths) {
         if (!p.ready) continue;
         try {
@@ -76,7 +81,7 @@ export class SlotStateService implements OnModuleInit {
           );
         }
       }
-      this.logger.log(`SlotState reconcile complete: ${paths.length} paths inspected`);
+      this.logger.log(`SlotState reconcile complete: ${paths.length} active publishers`);
     } catch (err: any) {
       this.logger.warn(
         `SlotState reconcile skipped (MediaMTX unreachable): ${err?.message ?? err}`,

@@ -4,10 +4,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ChangeEvent,
   type DragEvent,
 } from 'react';
+import Hls from 'hls.js';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -20,11 +22,13 @@ import {
   ArrowSquareOut,
   ArrowsClockwise,
   ArrowsLeftRight,
+  CaretDown,
   CaretLeft,
   Copy,
   Eye,
   EyeSlash,
   Gear,
+  Info,
   PencilSimple,
   Power,
   QrCode,
@@ -42,6 +46,7 @@ import { api } from '@/lib/api';
 import { getStudioSocket } from '@/lib/socket';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import MatPlayer from '@/components/MatPlayer';
+import { RecordingControl, type RecordingMode } from '@/components/dashboard/RecordingControl';
 import {
   LAYOUT_PRESETS,
   DEFAULT_LAYOUT_BY_COUNT,
@@ -72,6 +77,8 @@ interface StreamDto {
   previewMode: string;
   previewImagePath?: string | null;
   isLive: boolean;
+  recordingEnabled: boolean;
+  recordingMode: RecordingMode;
   autoStartMode: 'public' | 'test';
   ingestKey?: string;
   ingestKeyCreatedAt: string;
@@ -239,6 +246,12 @@ export default function StudioPage() {
     },
   });
 
+  const patchRecording = useMutation({
+    mutationFn: (patch: { enabled?: boolean; mode?: RecordingMode }) =>
+      api.patch<StreamDto>(`/v1/org/streams/${streamId}/recording`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream', streamId] }),
+  });
+
   // ─── WebSocket /studio ──────────────────────────────────────────────────
   useEffect(() => {
     if (!streamId) return;
@@ -318,9 +331,12 @@ export default function StudioPage() {
 
   const slotHlsUrls = useMemo<string[]>(() => {
     if (!stream || !orgSlug) return [];
-    return slotsArr.map(
-      (s) => `/api/v1/public/orgs/${orgSlug}/live/hls/${s.index}/index.m3u8`,
-    );
+    // Default Stream (slug=''): /api/v1/public/orgs/<org>/live/hls/<n>/index.m3u8
+    // Named Stream:             /api/v1/public/orgs/<org>/streams/<slug>/live/hls/<n>/index.m3u8
+    const prefix = stream.slug
+      ? `/api/v1/public/orgs/${orgSlug}/streams/${stream.slug}`
+      : `/api/v1/public/orgs/${orgSlug}`;
+    return slotsArr.map((s) => `${prefix}/live/hls/${s.index}/index.m3u8`);
   }, [stream, orgSlug, slotsArr]);
 
   const availableLayoutsForCurrentCount = useMemo<LayoutPreset[]>(() => {
@@ -451,6 +467,8 @@ export default function StudioPage() {
           activeCount={activeCount}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenStop={() => setStopOpen(true)}
+          onPatchRecording={(p) => patchRecording.mutate(p)}
+          recordingPending={patchRecording.isPending}
         />
 
         {/* ─── Main grid: preview + slots ───────────────────────────── */}
@@ -501,6 +519,21 @@ export default function StudioPage() {
               current={stream.layoutPreset}
               onSelect={setLayout}
               pending={patchStream.isPending}
+            />
+
+            {/* Setup guide — пошаговая инструкция для vMix/OBS + параметры по слотам */}
+            <SetupGuide
+              serverIp={serverIp}
+              srtPort={srtPort}
+              rtmpPort={rtmpPort}
+              orgSlug={orgSlug}
+              streamSlug={stream.slug}
+              slots={slotsArr}
+              ingestKey={stream.ingestKey}
+              keyVisible={keyVisible}
+              onReveal={() => setKeyVisible(true)}
+              onCopy={handleCopy}
+              copiedFlash={copiedFlash}
             />
           </section>
 
@@ -553,6 +586,7 @@ export default function StudioPage() {
                     isPublishing={isPublishing}
                     bitrate={bitrate}
                     orgSlug={orgSlug}
+                    streamSlug={stream.slug}
                     keyVisible={keyVisible}
                     isEditing={isEditing}
                     editingName={editingSlotName}
@@ -570,6 +604,7 @@ export default function StudioPage() {
                     maskedRtmp={maskedRtmp}
                     onCopySrt={() => handleCopy(srtUrl, `srt-${slot.index}`)}
                     onCopyRtmp={() => handleCopy(rtmpUrl, `rtmp-${slot.index}`)}
+                    onReveal={() => setKeyVisible(true)}
                     copiedFlash={copiedFlash}
                   />
                 );
@@ -704,12 +739,16 @@ function StudioHeader({
   activeCount,
   onOpenSettings,
   onOpenStop,
+  onPatchRecording,
+  recordingPending,
 }: {
   stream: StreamDto;
   status: Status;
   activeCount: number;
   onOpenSettings: () => void;
   onOpenStop: () => void;
+  onPatchRecording: (patch: { enabled?: boolean; mode?: RecordingMode }) => void;
+  recordingPending: boolean;
 }) {
   return (
     <div className="flex items-center gap-3 flex-wrap">
@@ -730,6 +769,12 @@ function StudioHeader({
       </span>
 
       <div className="ml-auto flex items-center gap-2">
+        <RecordingControl
+          enabled={stream.recordingEnabled}
+          mode={stream.recordingMode}
+          onPatch={onPatchRecording}
+          pending={recordingPending}
+        />
         <button
           onClick={onOpenSettings}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-zinc-100 text-sm font-medium rounded-lg transition-all active:scale-[0.98] cursor-pointer"
@@ -894,6 +939,7 @@ function SlotCard({
   isPublishing,
   bitrate,
   orgSlug,
+  streamSlug,
   keyVisible,
   isEditing,
   editingName,
@@ -908,12 +954,14 @@ function SlotCard({
   maskedRtmp,
   onCopySrt,
   onCopyRtmp,
+  onReveal,
   copiedFlash,
 }: {
   slot: StreamSlot;
   isPublishing: boolean;
   bitrate: number | null;
   orgSlug: string;
+  streamSlug: string;
   keyVisible: boolean;
   isEditing: boolean;
   editingName: string;
@@ -928,6 +976,7 @@ function SlotCard({
   maskedRtmp: string;
   onCopySrt: () => void;
   onCopyRtmp: () => void;
+  onReveal: () => void;
   copiedFlash: string | null;
 }) {
   const label = slot.name?.trim() || 'Без имени';
@@ -1012,10 +1061,14 @@ function SlotCard({
         )}
       </div>
 
-      {/* Thumbnail */}
+      {/* Live preview (own hls.js per slot) */}
       <div className="mt-3 aspect-video w-full rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800/60 flex items-center justify-center">
         {isPublishing && orgSlug ? (
-          <SlotThumbnail orgSlug={orgSlug} slotIndex={slot.index} />
+          <SlotLivePreview
+            orgSlug={orgSlug}
+            streamSlug={streamSlug}
+            slotIndex={slot.index}
+          />
         ) : (
           <div className="flex flex-col items-center gap-1 text-zinc-700">
             <VideoCamera size={28} weight="thin" />
@@ -1031,6 +1084,7 @@ function SlotCard({
           value={keyVisible ? srtUrl : maskedSrt}
           onCopy={onCopySrt}
           canCopy={keyVisible && !!srtUrl}
+          onReveal={onReveal}
           flashing={copiedFlash === `srt-${slot.index}`}
         />
         <UrlRow
@@ -1038,6 +1092,7 @@ function SlotCard({
           value={keyVisible ? rtmpUrl : maskedRtmp}
           onCopy={onCopyRtmp}
           canCopy={keyVisible && !!rtmpUrl}
+          onReveal={onReveal}
           flashing={copiedFlash === `rtmp-${slot.index}`}
         />
       </div>
@@ -1045,34 +1100,63 @@ function SlotCard({
   );
 }
 
-function SlotThumbnail({ orgSlug, slotIndex }: { orgSlug: string; slotIndex: number }) {
-  // Composite preview is the org-level thumbnail; per-slot thumbnails are a
-  // separate feature (MediaMTX runOnReady → ffmpeg). For now we show the
-  // composite preview for slot 1 and a placeholder otherwise — this matches
-  // the spec C3 instructions ("полноценный из задачи MediaMTX runOnReady
-  // thumbnails — отдельная фича, отложим").
-  const [bust, setBust] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setBust(Date.now()), 15_000);
-    return () => window.clearInterval(id);
-  }, []);
+function SlotLivePreview({
+  orgSlug,
+  streamSlug,
+  slotIndex,
+}: {
+  orgSlug: string;
+  streamSlug: string;
+  slotIndex: number;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  if (slotIndex !== 1) {
-    return (
-      <div className="flex flex-col items-center gap-1 text-zinc-700">
-        <VideoCamera size={28} weight="thin" />
-        <span className="text-xs">Превью</span>
-      </div>
-    );
-  }
+  const hlsUrl = streamSlug
+    ? `/api/v1/public/orgs/${orgSlug}/streams/${streamSlug}/live/hls/${slotIndex}/index.m3u8`
+    : `/api/v1/public/orgs/${orgSlug}/live/hls/${slotIndex}/index.m3u8`;
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    let hls: Hls | null = null;
+
+    if (Hls.isSupported()) {
+      hls = new Hls({
+        liveDurationInfinity: true,
+        lowLatencyMode: false,
+        liveSyncDuration: 4,
+        maxBufferLength: 10,
+        backBufferLength: 0,
+      });
+      hls.loadSource(hlsUrl);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch(() => {});
+      });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls?.startLoad();
+        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls?.recoverMediaError();
+        else { hls?.destroy(); hls = null; }
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = hlsUrl;
+      video.play().catch(() => {});
+    }
+
+    return () => {
+      hls?.destroy();
+    };
+  }, [hlsUrl]);
+
   return (
-    <img
-      src={`/api/v1/public/orgs/${orgSlug}/thumbnail?t=${bust}`}
-      alt={`Slot ${slotIndex} preview`}
-      className="w-full h-full object-cover"
-      onError={(e) => {
-        (e.currentTarget as HTMLImageElement).style.display = 'none';
-      }}
+    <video
+      ref={videoRef}
+      muted
+      autoPlay
+      playsInline
+      className="w-full h-full object-cover bg-black"
     />
   );
 }
@@ -1082,34 +1166,58 @@ function UrlRow({
   value,
   onCopy,
   canCopy,
+  onReveal,
   flashing,
 }: {
   label: string;
   value: string;
   onCopy: () => void;
   canCopy: boolean;
+  /**
+   * Если ключ скрыт — вместо кнопки Copy показываем "глаз": один клик раскроет
+   * ключ, после чего на её месте появится Copy. Это убирает 2-этапный путь
+   * "сначала жмёшь Показать наверху, потом возвращайся к URL'у".
+   */
+  onReveal?: () => void;
   flashing: boolean;
 }) {
+  const showReveal = !canCopy && !!onReveal;
   return (
     <div className="flex items-center gap-2 bg-surface-primary border border-zinc-800/60 rounded-lg px-2.5 py-1.5">
       <span className="shrink-0 text-[10px] font-semibold tracking-wider text-zinc-500 uppercase font-mono">
         {label}
       </span>
-      <code className="flex-1 min-w-0 text-xs text-zinc-300 font-mono truncate">
+      {/* overflow-x-auto + whitespace-nowrap: текст не обрезается многоточием,
+          можно выделить мышью и проскроллить вправо. Скрываем скроллбар, чтобы
+          ряд не «прыгал» при появлении (Firefox: thin; WebKit: transparent track). */}
+      <code
+        className="flex-1 min-w-0 text-xs text-zinc-300 font-mono overflow-x-auto whitespace-nowrap select-text cursor-text"
+        style={{ scrollbarWidth: 'thin' }}
+      >
         {value || '—'}
       </code>
-      <button
-        onClick={onCopy}
-        disabled={!canCopy}
-        className={`shrink-0 p-1 rounded-md transition-all active:scale-[0.95] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-          flashing
-            ? 'bg-emerald-500/20 text-emerald-300'
-            : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
-        }`}
-        title={canCopy ? 'Копировать' : 'Покажите ключ, чтобы скопировать'}
-      >
-        <Copy size={12} />
-      </button>
+      {showReveal ? (
+        <button
+          onClick={onReveal}
+          className="shrink-0 p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-all active:scale-[0.95] cursor-pointer"
+          title="Показать ключ, чтобы скопировать"
+        >
+          <Eye size={12} />
+        </button>
+      ) : (
+        <button
+          onClick={onCopy}
+          disabled={!canCopy}
+          className={`shrink-0 p-1 rounded-md transition-all active:scale-[0.95] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            flashing
+              ? 'bg-emerald-500/20 text-emerald-300'
+              : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
+          }`}
+          title={canCopy ? 'Копировать' : 'Покажите ключ, чтобы скопировать'}
+        >
+          <Copy size={12} />
+        </button>
+      )}
     </div>
   );
 }
@@ -1307,6 +1415,484 @@ function SharePanel({
         </div>
       </div>
     </section>
+  );
+}
+
+// ─── SetupGuide ─────────────────────────────────────────────────────────────
+//
+// Пошаговый помощник по вставке в vMix / OBS / ffmpeg. Слот выбирается
+// отдельным селектором (камера = слот), потому что у каждой камеры свой
+// `streamid` и свой URL. Параметры всегда видны (Hostname/Port/Stream ID),
+// passphrase скрывается до клика «Показать», как и в SlotCard.
+//
+// Зачем здесь, а не как мини-гайд внутри SlotCard:
+//  - аside 360px слишком узкий для пошагового how-to с 4-мя шагами;
+//  - стример обычно копирует под ОДИН софт за раз — выбрал слот, потом текст;
+//  - снимает пустое пространство под LayoutPicker'ом на широких экранах.
+
+interface SetupGuideProps {
+  serverIp: string;
+  srtPort: string;
+  rtmpPort: string;
+  orgSlug: string;
+  streamSlug: string;
+  slots: StreamSlot[];
+  ingestKey: string | undefined;
+  keyVisible: boolean;
+  onReveal: () => void;
+  onCopy: (text: string, flashId: string) => void;
+  copiedFlash: string | null;
+}
+
+function SetupGuide({
+  serverIp,
+  srtPort,
+  rtmpPort,
+  orgSlug,
+  streamSlug,
+  slots,
+  ingestKey,
+  keyVisible,
+  onReveal,
+  onCopy,
+  copiedFlash,
+}: SetupGuideProps) {
+  const [protocol, setProtocol] = useState<'srt' | 'rtmp'>('srt');
+  const [activeSlotIdx, setActiveSlotIdx] = useState<number>(slots[0]?.index ?? 1);
+
+  const slot = useMemo(
+    () => slots.find((s) => s.index === activeSlotIdx) ?? slots[0],
+    [slots, activeSlotIdx],
+  );
+
+  // Куски URL. Передаём в гайды по отдельности (поле «Server», поле «Stream ID»)
+  // и склеиваем в одну полную ссылку — vMix-style и OBS-style разные.
+  const streamPath = streamSlug ? `${orgSlug}/${streamSlug}` : orgSlug;
+  const streamId = slot ? `publish:live/${streamPath}/${slot.index}` : '';
+  const passDisplay = ingestKey && keyVisible ? ingestKey : '••••••••••••';
+  const passForCopy = ingestKey ?? '';
+
+  const srtFullUrl =
+    serverIp && ingestKey && slot
+      ? `srt://${serverIp}:${srtPort}?streamid=${streamId}&passphrase=${ingestKey}`
+      : '';
+  const rtmpServer = serverIp ? `rtmp://${serverIp}:${rtmpPort}/live` : '';
+  const rtmpKey =
+    slot && ingestKey ? `${streamPath}/${slot.index}?key=${ingestKey}` : '';
+  const rtmpFullUrl =
+    serverIp && ingestKey && slot
+      ? `rtmp://${serverIp}:${rtmpPort}/live/${streamPath}/${slot.index}?key=${ingestKey}`
+      : '';
+
+  // ffmpeg-команда для SRT (одна камера). Для RTMP конструкция аналогичная,
+  // но vMix/OBS обычно — два самых популярных варианта, поэтому ffmpeg
+  // оставим только в SRT-режиме как «for power users».
+  const ffmpegSrt =
+    srtFullUrl
+      ? `ffmpeg -re -i input.mp4 -c:v libx264 -preset veryfast -b:v 6M -c:a aac -f mpegts "${srtFullUrl}"`
+      : '';
+
+  const slotLabel = (s: StreamSlot) =>
+    s.name?.trim() ? `Слот ${s.index} · ${s.name.trim()}` : `Слот ${s.index}`;
+
+  return (
+    <section className="bg-surface-elevated border border-zinc-800/60 rounded-xl p-5">
+      <div className="flex items-center gap-2 mb-1">
+        <Info size={16} className="text-brand" weight="fill" />
+        <h2 className="text-sm font-medium text-zinc-200">Как подключить камеру</h2>
+      </div>
+      <p className="text-xs text-zinc-500 mb-4">
+        У каждой камеры свой <span className="text-zinc-300 font-mono">streamid</span> — выберите
+        слот ниже и скопируйте параметры под нужный софт.
+      </p>
+
+      {/* Protocol tabs */}
+      <div className="flex gap-1 mb-4 bg-surface-primary rounded-lg p-1">
+        {(['srt', 'rtmp'] as const).map((p) => (
+          <button
+            key={p}
+            onClick={() => setProtocol(p)}
+            className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
+              protocol === p ? 'bg-brand text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            {p.toUpperCase()}
+          </button>
+        ))}
+      </div>
+
+      {/* Slot selector — только если больше одной камеры */}
+      {slots.length > 1 && (
+        <div className="mb-4">
+          <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1.5">
+            Камера
+          </label>
+          <div className="flex gap-1.5 flex-wrap">
+            {slots.map((s) => {
+              const active = s.index === activeSlotIdx;
+              return (
+                <button
+                  key={s.index}
+                  onClick={() => setActiveSlotIdx(s.index)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-[0.98] cursor-pointer ${
+                    active
+                      ? 'bg-brand text-white shadow-sm shadow-brand/20'
+                      : 'bg-zinc-800/60 hover:bg-zinc-800 text-zinc-300 hover:text-zinc-100'
+                  }`}
+                >
+                  {slotLabel(s)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Параметры подключения (Сервер / Порт / Stream ID / Passphrase) */}
+      <div className="flex flex-col">
+        <SetupRow
+          label="Сервер"
+          value={serverIp || ''}
+          placeholder="Задайте NEXT_PUBLIC_SERVER_IP"
+          onCopy={() => onCopy(serverIp, 'guide-server')}
+          flashing={copiedFlash === 'guide-server'}
+        />
+        <SetupRow
+          label="Порт"
+          value={protocol === 'srt' ? srtPort : rtmpPort}
+          onCopy={() =>
+            onCopy(protocol === 'srt' ? srtPort : rtmpPort, 'guide-port')
+          }
+          flashing={copiedFlash === 'guide-port'}
+        />
+        {protocol === 'srt' ? (
+          <SetupRow
+            label="Stream ID"
+            value={streamId}
+            mono
+            onCopy={() => onCopy(streamId, 'guide-streamid')}
+            flashing={copiedFlash === 'guide-streamid'}
+            hint={`Каждая камера — свой ID. Текущий = камера ${slot?.index ?? 1}.`}
+          />
+        ) : (
+          <SetupRow
+            label="Ключ потока"
+            value={rtmpKey || ''}
+            mono
+            obscured={!keyVisible}
+            obscuredText={`${streamPath}/${slot?.index ?? 1}?key=••••••••••••`}
+            onCopy={() => onCopy(rtmpKey, 'guide-rtmpkey')}
+            onReveal={onReveal}
+            flashing={copiedFlash === 'guide-rtmpkey'}
+            hint="Включает в себя путь камеры и passphrase — одной строкой."
+          />
+        )}
+        <SetupRow
+          label={protocol === 'srt' ? 'Passphrase' : 'Пароль'}
+          value={passForCopy}
+          mono
+          obscured={!keyVisible}
+          obscuredText={passDisplay}
+          onCopy={() => onCopy(passForCopy, 'guide-pass')}
+          onReveal={onReveal}
+          flashing={copiedFlash === 'guide-pass'}
+        />
+      </div>
+
+      {/* Setup guides — раскрывающиеся блоки */}
+      <div className="mt-5 pt-5 border-t border-zinc-800/40 space-y-2">
+        <GuideDetails title="Настройка OBS Studio">
+          {protocol === 'srt' ? (
+            <>
+              <GuideStep n={1}>
+                Откройте <em className="text-zinc-200 not-italic">Настройки → Трансляция</em>,
+                служба: <em className="text-zinc-200 not-italic">Настраиваемая</em>
+              </GuideStep>
+              <GuideStep n={2}>
+                <p className="text-sm text-zinc-400 mb-1.5">
+                  В поле <em className="text-zinc-200 not-italic">«Сервер»</em> вставьте полную
+                  ссылку:
+                </p>
+                <FullUrlBlock
+                  value={srtFullUrl}
+                  fallback={`srt://${serverIp || 'IP'}:${srtPort}?streamid=${streamId || 'publish:live/.../N'}&passphrase=••••••••`}
+                  canCopy={!!srtFullUrl && keyVisible}
+                  onReveal={onReveal}
+                  onCopy={() => onCopy(srtFullUrl, 'guide-obs-srt-full')}
+                  flashing={copiedFlash === 'guide-obs-srt-full'}
+                />
+              </GuideStep>
+              <GuideStep n={3}>
+                Поле <em className="text-zinc-200 not-italic">«Ключ потока»</em> оставьте пустым
+              </GuideStep>
+              <GuideStep n={4}>
+                Нажмите <em className="text-zinc-200 not-italic">«Начать трансляцию»</em>
+              </GuideStep>
+            </>
+          ) : (
+            <>
+              <GuideStep n={1}>
+                Откройте <em className="text-zinc-200 not-italic">Настройки → Трансляция</em>,
+                служба: <em className="text-zinc-200 not-italic">Настраиваемая</em>
+              </GuideStep>
+              <GuideStep n={2}>
+                <p className="text-sm text-zinc-400 mb-1.5">
+                  В поле <em className="text-zinc-200 not-italic">«Сервер»</em> вставьте:
+                </p>
+                <FullUrlBlock
+                  value={rtmpServer}
+                  fallback={`rtmp://${serverIp || 'IP'}:${rtmpPort}/live`}
+                  canCopy={!!rtmpServer}
+                  onCopy={() => onCopy(rtmpServer, 'guide-obs-rtmp-server')}
+                  flashing={copiedFlash === 'guide-obs-rtmp-server'}
+                />
+              </GuideStep>
+              <GuideStep n={3}>
+                <p className="text-sm text-zinc-400 mb-1.5">
+                  В поле <em className="text-zinc-200 not-italic">«Ключ потока»</em> вставьте:
+                </p>
+                <FullUrlBlock
+                  value={rtmpKey}
+                  fallback={`${streamPath}/${slot?.index ?? 1}?key=••••••••`}
+                  canCopy={!!rtmpKey && keyVisible}
+                  onReveal={onReveal}
+                  onCopy={() => onCopy(rtmpKey, 'guide-obs-rtmp-key')}
+                  flashing={copiedFlash === 'guide-obs-rtmp-key'}
+                />
+              </GuideStep>
+              <GuideStep n={4}>
+                Нажмите <em className="text-zinc-200 not-italic">«Начать трансляцию»</em>
+              </GuideStep>
+            </>
+          )}
+        </GuideDetails>
+
+        <GuideDetails title="Настройка vMix">
+          {protocol === 'srt' ? (
+            <>
+              <GuideStep n={1}>
+                <em className="text-zinc-200 not-italic">Settings → Outputs / NDI / SRT</em>, нажмите{' '}
+                <em className="text-zinc-200 not-italic">+ Add</em>
+              </GuideStep>
+              <GuideStep n={2}>
+                Тип: <em className="text-zinc-200 not-italic">SRT Caller</em>
+              </GuideStep>
+              <GuideStep n={3}>
+                <p className="text-sm text-zinc-400 mb-1.5">Заполните поля:</p>
+                <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                  <span className="text-zinc-500">Hostname:</span>
+                  <span className="text-zinc-200 font-mono break-all">
+                    {serverIp || 'IP сервера'}
+                  </span>
+                  <span className="text-zinc-500">Port:</span>
+                  <span className="text-zinc-200 font-mono">{srtPort}</span>
+                  <span className="text-zinc-500">Stream ID:</span>
+                  <span className="text-zinc-200 font-mono break-all">{streamId}</span>
+                  <span className="text-zinc-500">Passphrase:</span>
+                  <span className="text-zinc-200 font-mono">{passDisplay}</span>
+                  <span className="text-zinc-500">Latency:</span>
+                  <span className="text-zinc-200 font-mono">200</span>
+                </div>
+              </GuideStep>
+            </>
+          ) : (
+            <>
+              <GuideStep n={1}>
+                <em className="text-zinc-200 not-italic">Settings → Outputs / Streaming</em>,
+                нажмите <em className="text-zinc-200 not-italic">+ Add</em>
+              </GuideStep>
+              <GuideStep n={2}>
+                Тип: <em className="text-zinc-200 not-italic">RTMP Server</em>
+              </GuideStep>
+              <GuideStep n={3}>
+                <p className="text-sm text-zinc-400 mb-1.5">
+                  В поле <em className="text-zinc-200 not-italic">URL</em> вставьте полную ссылку:
+                </p>
+                <FullUrlBlock
+                  value={rtmpFullUrl}
+                  fallback={`rtmp://${serverIp || 'IP'}:${rtmpPort}/live/${streamPath}/${slot?.index ?? 1}?key=••••••••`}
+                  canCopy={!!rtmpFullUrl && keyVisible}
+                  onReveal={onReveal}
+                  onCopy={() => onCopy(rtmpFullUrl, 'guide-vmix-rtmp-full')}
+                  flashing={copiedFlash === 'guide-vmix-rtmp-full'}
+                />
+              </GuideStep>
+              <GuideStep n={4}>
+                Поле <em className="text-zinc-200 not-italic">Stream Key</em> оставьте пустым
+              </GuideStep>
+            </>
+          )}
+        </GuideDetails>
+
+        {protocol === 'srt' && (
+          <GuideDetails title="ffmpeg (для опытных)">
+            <p className="text-sm text-zinc-400 mb-2">
+              Подходит для тест-публикации с файла или web-камеры на Linux/Mac:
+            </p>
+            <FullUrlBlock
+              value={ffmpegSrt}
+              fallback={'ffmpeg -re -i input.mp4 ... -f mpegts "srt://..."'}
+              canCopy={!!ffmpegSrt && keyVisible}
+              onReveal={onReveal}
+              onCopy={() => onCopy(ffmpegSrt, 'guide-ffmpeg')}
+              flashing={copiedFlash === 'guide-ffmpeg'}
+            />
+            <p className="text-xs text-zinc-500 mt-2">
+              Замените <span className="font-mono">input.mp4</span> на свой источник
+              (для web-камеры — <span className="font-mono">-f v4l2 -i /dev/video0</span>).
+            </p>
+          </GuideDetails>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SetupRow({
+  label,
+  value,
+  placeholder,
+  mono,
+  obscured,
+  obscuredText,
+  onCopy,
+  onReveal,
+  flashing,
+  hint,
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  mono?: boolean;
+  obscured?: boolean;
+  obscuredText?: string;
+  onCopy: () => void;
+  onReveal?: () => void;
+  flashing: boolean;
+  hint?: string;
+}) {
+  const showReveal = !!obscured && !!onReveal;
+  const display = obscured ? obscuredText ?? '••••' : value || placeholder || '—';
+  const canCopy = !obscured && !!value;
+  return (
+    <div className="border-b border-zinc-800/40 last:border-b-0">
+      <div className="flex items-center py-2.5 gap-3">
+        <span className="w-24 sm:w-28 shrink-0 text-xs text-zinc-500">{label}</span>
+        <code
+          className={`flex-1 min-w-0 text-sm overflow-x-auto whitespace-nowrap select-text cursor-text ${
+            mono === false ? '' : 'font-mono'
+          } ${value || (!obscured && !!value) ? 'text-zinc-200' : 'text-zinc-500'}`}
+          style={{ scrollbarWidth: 'thin' }}
+        >
+          {display}
+        </code>
+        {showReveal ? (
+          <button
+            onClick={onReveal}
+            className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
+            title="Показать ключ, чтобы скопировать"
+          >
+            <Eye size={12} /> Показать
+          </button>
+        ) : (
+          <button
+            onClick={onCopy}
+            disabled={!canCopy}
+            className={`shrink-0 flex items-center gap-1 px-2.5 py-1 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+              flashing
+                ? 'bg-emerald-500/20 text-emerald-300'
+                : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Copy size={12} />
+            {flashing ? 'Скопировано' : 'Копировать'}
+          </button>
+        )}
+      </div>
+      {hint && <p className="-mt-1.5 mb-2.5 text-[11px] text-zinc-600 pl-[6.5rem]">{hint}</p>}
+    </div>
+  );
+}
+
+function GuideDetails({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="group bg-surface-primary rounded-xl border border-zinc-800/40 overflow-hidden">
+      <summary className="flex items-center gap-2.5 cursor-pointer text-sm font-medium text-zinc-300 hover:text-zinc-100 transition-colors px-4 py-3 [&::-webkit-details-marker]:hidden list-none select-none">
+        <CaretDown
+          size={14}
+          className="text-zinc-500 transition-transform -rotate-90 group-open:rotate-0"
+        />
+        {title}
+      </summary>
+      <div className="px-4 pb-4 space-y-3">{children}</div>
+    </details>
+  );
+}
+
+function GuideStep({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center mt-0.5">
+        {n}
+      </span>
+      <div className="flex-1 min-w-0 text-sm text-zinc-400">{children}</div>
+    </div>
+  );
+}
+
+function FullUrlBlock({
+  value,
+  fallback,
+  canCopy,
+  onReveal,
+  onCopy,
+  flashing,
+}: {
+  value: string;
+  fallback: string;
+  canCopy: boolean;
+  onReveal?: () => void;
+  onCopy: () => void;
+  flashing: boolean;
+}) {
+  const display = canCopy ? value : fallback;
+  return (
+    <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
+      <code
+        className="flex-1 min-w-0 text-sm text-zinc-200 font-mono overflow-x-auto whitespace-nowrap select-text cursor-text"
+        style={{ scrollbarWidth: 'thin' }}
+      >
+        {display}
+      </code>
+      {!canCopy && onReveal ? (
+        <button
+          onClick={onReveal}
+          className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer"
+          title="Показать ключ"
+        >
+          <Eye size={14} />
+        </button>
+      ) : (
+        <button
+          onClick={onCopy}
+          disabled={!canCopy}
+          className={`shrink-0 p-1.5 rounded-md transition-all active:scale-[0.95] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            flashing
+              ? 'bg-emerald-500/20 text-emerald-300'
+              : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200'
+          }`}
+          title="Копировать"
+        >
+          <Copy size={14} />
+        </button>
+      )}
+    </div>
   );
 }
 

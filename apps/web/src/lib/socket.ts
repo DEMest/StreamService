@@ -3,12 +3,18 @@ import { io, Socket } from 'socket.io-client';
 let chatSocket: Socket | null = null;
 let studioSocket: Socket | null = null;
 
+// На проде origin страницы и api совпадают (nginx-edge проксирует /socket.io/
+// в api-контейнер) — base пустой ⇒ io() возьмёт window.location.origin.
+// На тестовом стенде api торчит на отдельном порту (нет nginx) —
+// NEXT_PUBLIC_SOCKET_URL задаёт прямой URL до api.
+const SOCKET_BASE = process.env.NEXT_PUBLIC_SOCKET_URL ?? '';
+
 /**
  * Returns a singleton `/chat` namespace socket. Used by the viewer-side chat UI.
  */
 export function getSocket(): Socket {
   if (!chatSocket) {
-    chatSocket = io('/chat', {
+    chatSocket = io(`${SOCKET_BASE}/chat`, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -33,7 +39,7 @@ export function getSocket(): Socket {
  */
 export function getStudioSocket(onAuthError?: (reason: string) => void): Socket {
   if (!studioSocket) {
-    const socket: Socket = io('/studio', {
+    const socket: Socket = io(`${SOCKET_BASE}/studio`, {
       transports: ['websocket', 'polling'],
       withCredentials: true,
       reconnection: true,

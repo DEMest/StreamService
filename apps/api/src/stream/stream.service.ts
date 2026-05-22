@@ -489,6 +489,9 @@ export class StreamService {
       const wasActive = this.slotState.getActiveSlotIndexes(streamId).length;
       this.slotState.setPublishing(streamId, effectiveSlot, true);
       if (wasActive === 0) {
+        // Auto-recording: при первом publish-слоте если политика auto и запись
+        // была выключена — включим. На manual оставляем как есть.
+        await this.ensureAutoRecording(streamId);
         await this.startBroadcast(streamId);
       }
     } else {
@@ -497,6 +500,48 @@ export class StreamService {
       if (stillActive === 0) {
         await this.endBroadcast(streamId);
       }
+    }
+  }
+
+  /**
+   * Если у Stream'а recordingMode='auto' и запись сейчас выключена — включить
+   * (patch MediaMTX + update БД). Вызывается из handleWebhookInternal при
+   * первом publishing slot'е, до startBroadcast. На manual — no-op.
+   *
+   * Любые ошибки на этом шаге логируются, но не прерывают цепочку — broadcast
+   * должен открыться даже если MediaMTX не ответил на patch.
+   */
+  private async ensureAutoRecording(streamId: string): Promise<void> {
+    try {
+      const s = await this.prisma.stream.findUnique({
+        where: { id: streamId },
+        select: {
+          slug: true,
+          mode: true,
+          slotCount: true,
+          recordingEnabled: true,
+          recordingMode: true,
+          org: { select: { slug: true } },
+        },
+      });
+      if (!s) return;
+      if (s.recordingMode !== 'auto') return;
+      if (s.recordingEnabled) return;
+      await this.mediamtx.setStreamRecording(
+        s.org.slug,
+        s.slug,
+        s.mode as StreamModeValue,
+        s.slotCount,
+        true,
+      );
+      await this.prisma.stream.update({
+        where: { id: streamId },
+        data: { recordingEnabled: true },
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `ensureAutoRecording failed for ${streamId}: ${e?.message ?? e}`,
+      );
     }
   }
 
@@ -567,6 +612,45 @@ export class StreamService {
   async forceStop(orgId: string, streamId: string) {
     await this.loadForOrg(orgId, streamId);
     return this.endBroadcast(streamId);
+  }
+
+  /**
+   * Управление записью Stream'а. Опции независимы:
+   *   - enabled: переключает текущее состояние записи (patches MediaMTX paths)
+   *   - mode: 'auto' | 'manual' — политика автостарта при publish (см. handleWebhook)
+   *
+   * Source of truth — БД (recordingEnabled, recordingMode). MediaMTX `record`
+   * патчится только когда передан enabled. Cross-tenant → 404.
+   */
+  async setRecording(
+    orgId: string,
+    streamId: string,
+    body: { enabled?: boolean; mode?: 'auto' | 'manual' },
+  ) {
+    const stream = await this.loadForOrg(orgId, streamId);
+    if (body.mode && body.mode !== 'auto' && body.mode !== 'manual') {
+      throw new BadRequestException(`Invalid recordingMode: ${body.mode}`);
+    }
+    if (typeof body.enabled === 'boolean') {
+      const org = await this.prisma.organization.findUniqueOrThrow({
+        where: { id: stream.orgId },
+        select: { slug: true },
+      });
+      await this.mediamtx.setStreamRecording(
+        org.slug,
+        stream.slug,
+        stream.mode as StreamModeValue,
+        stream.slotCount,
+        body.enabled,
+      );
+    }
+    const patch: Record<string, unknown> = {};
+    if (typeof body.enabled === 'boolean') patch.recordingEnabled = body.enabled;
+    if (body.mode) patch.recordingMode = body.mode;
+    const updated = Object.keys(patch).length
+      ? await this.prisma.stream.update({ where: { id: streamId }, data: patch })
+      : stream;
+    return this.toDto(updated);
   }
 
   /**
@@ -950,6 +1034,8 @@ export class StreamService {
       previewMode: row.previewMode,
       previewImagePath: row.previewImagePath ?? null,
       isLive: row.isLive,
+      recordingEnabled: row.recordingEnabled,
+      recordingMode: row.recordingMode,
       autoStartMode: row.autoStartMode,
       ingestKeyCreatedAt: row.ingestKeyCreatedAt,
       currentBroadcastId: row.currentBroadcastId ?? null,

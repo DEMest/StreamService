@@ -51,6 +51,8 @@ model Stream {
   previewMode        String        @default("multicam")
   previewImagePath   String?
   isLive             Boolean       @default(false)
+  recordingEnabled   Boolean       @default(true)
+  recordingMode      String        @default("auto") // 'auto' | 'manual'
   autoStartMode      String        @default("public") // 'public' | 'test'
   currentBroadcastId String?       @unique
   createdAt          DateTime      @default(now())
