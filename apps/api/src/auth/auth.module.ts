@@ -9,7 +9,8 @@ import { AuthService } from './auth.service';
       global: true,
       useFactory: () => ({
         secret: process.env.JWT_SECRET ?? 'dev-secret',
-        signOptions: { expiresIn: '8h' },
+        // Дефолтный expiresIn не задаём — access/refresh подписываются с
+        // явными TTL в AuthService (signAccess / signRefresh).
       }),
     }),
   ],

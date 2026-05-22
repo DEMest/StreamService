@@ -83,6 +83,12 @@ services:
         API_UPSTREAM: http://api:3001
         NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL:-http://localhost:3001}
         NEXT_PUBLIC_SERVER_IP: ${NEXT_PUBLIC_SERVER_IP:-localhost}
+        # Порты MediaMTX, проброшенные наружу. Зашиваются в строки SRT/RTMP-вставки
+        # в Studio UI и старом дашборде. NEXT_PUBLIC_* зашиваются в client-bundle
+        # на build-time — после смены значений нужно `docker compose build web`.
+        NEXT_PUBLIC_SRT_PORT: ${MEDIAMTX_SRT_PORT:-8890}
+        NEXT_PUBLIC_RTMP_PORT: ${MEDIAMTX_RTMP_PORT:-1935}
+        NEXT_PUBLIC_HLS_PORT: ${MEDIAMTX_HLS_PORT:-8888}
     container_name: ${COMPOSE_PROJECT_NAME:-streamservice}-web
     ports:
       - "${WEB_PORT:-3000}:3000"
