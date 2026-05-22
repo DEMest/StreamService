@@ -49,8 +49,7 @@ services:
       - uploads_data:/app/uploads
       - hls_data:/hls
     environment:
-      # development -> auth cookie ставится без флага Secure, чтобы работало по http://192.168.0.67:3010
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-production}
       API_PORT: 3001
       DATABASE_URL: postgresql://stream:${POSTGRES_PASSWORD:-streampass}@postgres:5432/streamservice
       JWT_SECRET: ${JWT_SECRET:-changeme-in-production}
@@ -61,6 +60,10 @@ services:
       SUPERADMIN_LOGIN: ${SUPERADMIN_LOGIN:-admin}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-adminpass}
       MEDIAMTX_WEBHOOK_SECRET: ${MEDIAMTX_WEBHOOK_SECRET:-}
+      # Прод (HTTPS) — оставить пустым (тогда secure берётся из NODE_ENV).
+      # Тест-стенд по HTTP — выставить COOKIE_SECURE=false в .env, иначе браузер
+      # не сохранит cookie и /v1/org/me вернёт 401.
+      COOKIE_SECURE: ${COOKIE_SECURE:-}
     depends_on:
       postgres:
         condition: service_healthy

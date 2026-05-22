@@ -5,6 +5,18 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser } from './current-user.decorator';
 import { JwtPayload } from './auth.service';
 
+/**
+ * Флаг Secure для auth cookie. Если задана COOKIE_SECURE — берём её (true/false),
+ * иначе fallback по NODE_ENV (production → secure). На HTTP-тест-стенде нужно
+ * COOKIE_SECURE=false, иначе браузер молча выкинет cookie и /me будет 401.
+ */
+function cookieSecure(): boolean {
+  const v = process.env.COOKIE_SECURE;
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  return process.env.NODE_ENV === 'production';
+}
+
 @Controller('v1/auth')
 export class AuthController {
   constructor(private auth: AuthService) {}
@@ -16,13 +28,12 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.auth.login(body.login, body.password);
-    const cookieOptions = {
+    res.cookie('access_token', result.token, {
       httpOnly: true,
-      sameSite: 'lax' as const,
+      sameSite: 'lax',
       maxAge: 8 * 60 * 60 * 1000,
-      secure: process.env.NODE_ENV === 'production',
-    };
-    res.cookie('access_token', result.token, cookieOptions);
+      secure: cookieSecure(),
+    });
     return { role: result.role, login: result.login, orgId: result.orgId ?? null };
   }
 
@@ -31,8 +42,8 @@ export class AuthController {
   logout(@Res({ passthrough: true }) res: Response) {
     res.clearCookie('access_token', {
       httpOnly: true,
-      sameSite: 'lax' as const,
-      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      secure: cookieSecure(),
     });
     return { ok: true };
   }

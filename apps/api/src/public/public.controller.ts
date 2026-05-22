@@ -26,19 +26,22 @@ export class PublicController {
     return this.pub.getCatalog();
   }
 
+  // ─────────── default Stream орги (slug='') ───────────
+  // Backward-compat: пути без сегмента /streams/<streamSlug>.
+
   @Get('orgs/:orgSlug')
   getOrgWatch(@Param('orgSlug') orgSlug: string, @Query('key') key?: string) {
-    return this.pub.getOrgWatch(orgSlug, key);
+    return this.pub.getOrgWatch(orgSlug, undefined, key);
   }
 
   @Get('orgs/:orgSlug/stream')
   getStreamUrl(@Param('orgSlug') orgSlug: string, @Query('key') key?: string) {
-    return this.pub.getStreamUrl(orgSlug, key);
+    return this.pub.getStreamUrl(orgSlug, undefined, key);
   }
 
   @Get('orgs/:orgSlug/broadcasts')
   getOrgBroadcasts(@Param('orgSlug') orgSlug: string, @Query('key') key?: string) {
-    return this.pub.getOrgBroadcasts(orgSlug, key);
+    return this.pub.getOrgBroadcasts(orgSlug, undefined, key);
   }
 
   @Get('orgs/:orgSlug/thumbnail')
@@ -49,5 +52,66 @@ export class PublicController {
       'Cache-Control': `public, max-age=${maxAge}`,
     });
     res.send(buffer);
+  }
+
+  // ─────────── named Stream орги (slug != '') ───────────
+  // Step 4: orga может иметь несколько Stream'ов помимо default'а; viewer
+  // обращается к ним через явный сегмент /streams/<streamSlug>.
+  // Логика идентична default-варианту — просто прокидывается streamSlug.
+
+  @Get('orgs/:orgSlug/streams/:streamSlug')
+  getNamedOrgWatch(
+    @Param('orgSlug') orgSlug: string,
+    @Param('streamSlug') streamSlug: string,
+    @Query('key') key?: string,
+  ) {
+    return this.pub.getOrgWatch(orgSlug, streamSlug, key);
+  }
+
+  @Get('orgs/:orgSlug/streams/:streamSlug/stream')
+  getNamedStreamUrl(
+    @Param('orgSlug') orgSlug: string,
+    @Param('streamSlug') streamSlug: string,
+    @Query('key') key?: string,
+  ) {
+    return this.pub.getStreamUrl(orgSlug, streamSlug, key);
+  }
+
+  @Get('orgs/:orgSlug/streams/:streamSlug/broadcasts')
+  getNamedOrgBroadcasts(
+    @Param('orgSlug') orgSlug: string,
+    @Param('streamSlug') streamSlug: string,
+    @Query('key') key?: string,
+  ) {
+    return this.pub.getOrgBroadcasts(orgSlug, streamSlug, key);
+  }
+
+  @Get('orgs/:orgSlug/streams/:streamSlug/thumbnail')
+  async getNamedThumbnail(
+    @Param('orgSlug') orgSlug: string,
+    @Param('streamSlug') streamSlug: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, maxAge } = await this.pub.getThumbnail(orgSlug, streamSlug);
+    res.set({
+      'Content-Type': 'image/jpeg',
+      'Cache-Control': `public, max-age=${maxAge}`,
+    });
+    res.send(buffer);
+  }
+
+  // ─────────── Event landing (Step 5, spec §12) ───────────
+
+  /**
+   * GET /v1/public/orgs/:orgSlug/events/:eventSlug — landing-страница Event'а.
+   * Возвращает мета + список публичных Stream'ов Event'а.
+   * 404 — нет орги/Event'а или орга неактивна.
+   */
+  @Get('orgs/:orgSlug/events/:eventSlug')
+  getEventLanding(
+    @Param('orgSlug') orgSlug: string,
+    @Param('eventSlug') eventSlug: string,
+  ) {
+    return this.pub.getEventLanding(orgSlug, eventSlug);
   }
 }

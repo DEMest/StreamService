@@ -32,84 +32,97 @@ model Organization {
 }
 
 model Stream {
-  id                 String   @id @default(cuid())
+  id                 String        @id @default(cuid())
   orgId              String
-  org                Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  slug               String   // unique per org; '' для default-стрима орга
-  name               String   @default("")
+  org                Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  slug               String // unique per org; '' для default-стрима орга
+  name               String        @default("")
   description        String?
-  mode               String   @default("composite") // 'composite' | 'multistream'
-  slotCount          Int      @default(1)
-  slots              Json     @default("[{\"index\":1,\"name\":\"\"}]")
-  slotOrder          Json     @default("[1]")
-  layoutPreset       String   @default("solo")
+  mode               String        @default("composite") // 'composite' | 'multistream'
+  slotCount          Int           @default(1)
+  slots              Json          @default("[{\"index\":1,\"name\":\"\"}]")
+  slotOrder          Json          @default("[1]")
+  layoutPreset       String        @default("solo")
   fallbackLayouts    Json?
-  ingestKey          String   @unique
-  ingestKeyCreatedAt DateTime @default(now())
-  isPublic           Boolean  @default(true)
-  previewKey         String?  @unique
-  previewMode        String   @default("multicam")
+  ingestKey          String        @unique
+  ingestKeyCreatedAt DateTime      @default(now())
+  isPublic           Boolean       @default(true)
+  previewKey         String?       @unique
+  previewMode        String        @default("multicam")
   previewImagePath   String?
-  isLive             Boolean  @default(false)
-  autoStartMode      String   @default("public") // 'public' | 'test'
-  currentBroadcastId String?  @unique
-  createdAt          DateTime @default(now())
+  isLive             Boolean       @default(false)
+  autoStartMode      String        @default("public") // 'public' | 'test'
+  currentBroadcastId String?       @unique
+  createdAt          DateTime      @default(now())
   // Relations
   broadcasts         Broadcast[]
   eventStreams       EventStream[]
+  chatMessages       ChatMessage[]
 
   @@unique([orgId, slug])
 }
 
 model Event {
-  id          String   @id @default(cuid())
-  orgId       String
-  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  slug        String
-  title       String
-  description String?
-  scheduledAt DateTime?
-  startedAt   DateTime?
-  endedAt     DateTime?
-  createdAt   DateTime @default(now())
+  id           String        @id @default(cuid())
+  orgId        String
+  org          Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  slug         String
+  title        String
+  description  String?
+  scheduledAt  DateTime?
+  startedAt    DateTime?
+  endedAt      DateTime?
+  createdAt    DateTime      @default(now())
   // Relations
   eventStreams EventStream[]
   broadcasts   Broadcast[]
+  chatMessages ChatMessage[]
 
   @@unique([orgId, slug])
 }
 
 model EventStream {
-  eventId   String
-  streamId  String
-  addedAt   DateTime @default(now())
-  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  stream    Stream   @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  eventId  String
+  streamId String
+  addedAt  DateTime @default(now())
+  event    Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  stream   Stream   @relation(fields: [streamId], references: [id], onDelete: Cascade)
 
   @@id([eventId, streamId])
 }
 
 model Broadcast {
-  id          String       @id @default(cuid())
+  id          String      @id @default(cuid())
   streamId    String
   eventId     String?
-  stream      Stream       @relation(fields: [streamId], references: [id], onDelete: Cascade)
-  event       Event?       @relation(fields: [eventId], references: [id])
+  stream      Stream      @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  event       Event?      @relation(fields: [eventId], references: [id])
   title       String
   description String?
   startedAt   DateTime
   endedAt     DateTime?
-  createdAt   DateTime     @default(now())
+  createdAt   DateTime    @default(now())
   recordings  Recording[]
 }
 
 model ChatMessage {
-  id        String       @id @default(cuid())
-  orgId     String       // в Step 1 не меняем; рефакторится в Step 5
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id        String        @id @default(cuid())
+  // Step 5: orgId оставлен nullable на время data-migration (заполнения streamId).
+  // После прогона data-script orgId перестаёт использоваться приложением.
+  // Финальный DROP orgId — отдельной миграцией после deploy data-migration.
+  orgId     String?
+  streamId  String?
+  eventId   String?
   nickname  String
   content   String
-  createdAt DateTime     @default(now())
+  createdAt DateTime      @default(now())
+  // Relations
+  org       Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  stream    Stream?       @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  event     Event?        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([streamId, createdAt])
+  @@index([eventId, createdAt])
 }
 
 model Recording {

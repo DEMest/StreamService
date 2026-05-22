@@ -18,34 +18,85 @@ export class RecordingService {
 
   constructor(private prisma: PrismaService) {}
 
-  async onStreamEnded(broadcastId: string, mediamtxPath: string): Promise<void> {
-    const segmentsDir = path.join(RECORDINGS_ROOT, 'live', mediamtxPath);
-
-    if (!fs.existsSync(segmentsDir)) {
-      this.logger.warn(`No recordings directory for ${mediamtxPath}`);
-      return;
-    }
-
-    const files = fs.readdirSync(segmentsDir)
-      .filter(f => f.endsWith('.mp4'))
-      .sort();
-
-    if (files.length === 0) {
-      this.logger.warn(`No recording segments found for ${mediamtxPath}`);
-      return;
-    }
-
+  async onStreamEnded(
+    broadcastId: string,
+    basePath: string,
+    mode: 'composite' | 'multistream' = 'composite',
+    slotCount = 1,
+  ): Promise<void> {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
 
-    // Step 2: single-slot per Stream (slotIndex=1). Multi-slot активируется в Step 3.
-    const recording = await this.prisma.recording.create({
-      data: { broadcastId, slotIndex: 1, status: 'processing', expiresAt },
-    });
+    // Composite: segments lie directly in /recordings/live/<basePath>/.
+    // Multistream: segments per slot in /recordings/live/<basePath>/<n>/.
+    if (mode === 'composite') {
+      const segmentsDir = path.join(RECORDINGS_ROOT, 'live', basePath);
 
-    this.convertRecording(recording.id, mediamtxPath, broadcastId, 1, files, segmentsDir).catch(err => {
-      this.logger.error(`Conversion failed for recording ${recording.id}: ${err.message}`);
-    });
+      if (!fs.existsSync(segmentsDir)) {
+        this.logger.warn(`No recordings directory for ${basePath}`);
+        return;
+      }
+
+      const files = fs.readdirSync(segmentsDir)
+        .filter((f: string) => f.endsWith('.mp4'))
+        .sort();
+
+      if (files.length === 0) {
+        this.logger.warn(`No recording segments found for ${basePath}`);
+        return;
+      }
+
+      const recording = await this.prisma.recording.create({
+        data: { broadcastId, slotIndex: 1, status: 'processing', expiresAt },
+      });
+
+      this.convertRecording(recording.id, basePath, broadcastId, 1, files, segmentsDir, [1]).catch(err => {
+        this.logger.error(`Conversion failed for recording ${recording.id}: ${err.message}`);
+      });
+      return;
+    }
+
+    // Multistream: для каждого slot n=1..slotCount ищем папку <basePath>/<n>/.
+    // Папки без сегментов пропускаем — этот slot не публиковался.
+    const slotJobs: Array<{ slotIndex: number; files: string[]; segmentsDir: string; recordingId: string }> = [];
+    const presentSlots: number[] = [];
+
+    for (let n = 1; n <= slotCount; n++) {
+      const segmentsDir = path.join(RECORDINGS_ROOT, 'live', basePath, String(n));
+      if (!fs.existsSync(segmentsDir)) continue;
+
+      const files = fs.readdirSync(segmentsDir)
+        .filter((f: string) => f.endsWith('.mp4'))
+        .sort();
+      if (files.length === 0) continue;
+
+      const recording = await this.prisma.recording.create({
+        data: { broadcastId, slotIndex: n, status: 'processing', expiresAt },
+      });
+      slotJobs.push({ slotIndex: n, files, segmentsDir, recordingId: recording.id });
+      presentSlots.push(n);
+    }
+
+    if (slotJobs.length === 0) {
+      this.logger.warn(`No multistream segments found for ${basePath} (slotCount=${slotCount})`);
+      return;
+    }
+
+    // Convert каждый slot независимо; master.m3u8 пишется каждым job'ом
+    // одинаковым набором presentSlots — итог корректен независимо от порядка завершения.
+    for (const job of slotJobs) {
+      this.convertRecording(
+        job.recordingId,
+        basePath,
+        broadcastId,
+        job.slotIndex,
+        job.files,
+        job.segmentsDir,
+        presentSlots,
+      ).catch(err => {
+        this.logger.error(`Conversion failed for recording ${job.recordingId}: ${err.message}`);
+      });
+    }
   }
 
   /**
@@ -59,6 +110,7 @@ export class RecordingService {
     slotIndex: number,
     files: string[],
     segmentsDir: string,
+    presentSlots: number[] = [slotIndex],
   ): Promise<void> {
     const broadcastDir = path.join(ARCHIVE_ROOT, mediamtxPath, broadcastId);
     const slotDir = path.join(broadcastDir, `slot-${slotIndex}`);
@@ -91,17 +143,22 @@ export class RecordingService {
       const slotPlaylist = buildHlsVodPlaylist(segments);
       fs.writeFileSync(path.join(slotDir, 'index.m3u8'), slotPlaylist);
 
-      // Step 3: написать master.m3u8 в broadcast-dir
-      const masterPlaylist = buildMasterPlaylist([{
-        slotIndex,
-        bandwidth: 5_000_000,  // approximation; real value не критичен для single-variant
-        resolution: firstWidth && firstHeight ? `${firstWidth}x${firstHeight}` : '1920x1080',
-      }]);
+      // Step 3: написать master.m3u8 в broadcast-dir.
+      // Для composite (presentSlots=[1]) — одна variant.
+      // Для multistream — variants для всех успешно записанных slot'ов.
+      const resolution = firstWidth && firstHeight ? `${firstWidth}x${firstHeight}` : '1920x1080';
+      const masterPlaylist = buildMasterPlaylist(presentSlots.map(n => ({
+        slotIndex: n,
+        bandwidth: 5_000_000,  // approximation; real value не критичен для variant-выбора плеера
+        resolution,
+      })));
       const masterPath = path.join(broadcastDir, 'master.m3u8');
       fs.writeFileSync(masterPath, masterPlaylist);
 
-      // Step 4: финализировать Recording
-      const totalSize = this.getDirSize(broadcastDir);
+      // Step 4: финализировать Recording.
+      // fileSize считаем только по slot-N/ — это «честный» расход данного Recording'а
+      // и избегаем гонок с другими slot-job'ами, пишущими в общий broadcastDir.
+      const totalSize = this.getDirSize(slotDir);
       await this.prisma.recording.update({
         where: { id: recordingId },
         data: {
@@ -115,7 +172,8 @@ export class RecordingService {
       this.logger.log(`Recording ${recordingId} ready (HLS-VOD): ${broadcastDir}`);
     } catch (err: any) {
       this.logger.error(`HLS-VOD conversion failed for ${recordingId}: ${err.message}`);
-      try { fs.rmSync(broadcastDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      // Чистим только свою slot-папку — другие slot'ы того же Broadcast'а могли успешно конвертнуться.
+      try { fs.rmSync(slotDir, { recursive: true, force: true }); } catch { /* ignore */ }
       await this.prisma.recording.update({
         where: { id: recordingId },
         data: { status: 'failed' },
@@ -213,11 +271,16 @@ export class RecordingService {
     for (const rec of failed) {
       if (!rec.broadcast.stream) continue;
       const { stream } = rec.broadcast;
-      const mediamtxPath = stream.slug === '' ? stream.org.slug : `${stream.org.slug}/${stream.slug}`;
-      const segmentsDir = path.join(RECORDINGS_ROOT, 'live', mediamtxPath);
+      const basePath = stream.slug === '' ? stream.org.slug : `${stream.org.slug}/${stream.slug}`;
+      const isMulti = (stream as any).mode === 'multistream';
+      // Composite: сегменты в /recordings/live/<basePath>/.
+      // Multistream: сегменты данного slot'а в /recordings/live/<basePath>/<slotIndex>/.
+      const segmentsDir = isMulti
+        ? path.join(RECORDINGS_ROOT, 'live', basePath, String(rec.slotIndex))
+        : path.join(RECORDINGS_ROOT, 'live', basePath);
 
       if (!fs.existsSync(segmentsDir)) continue;
-      const files = fs.readdirSync(segmentsDir).filter(f => f.endsWith('.mp4')).sort();
+      const files = fs.readdirSync(segmentsDir).filter((f: string) => f.endsWith('.mp4')).sort();
       if (files.length === 0) continue;
 
       await this.prisma.recording.update({
@@ -225,7 +288,15 @@ export class RecordingService {
         data: { status: 'processing' },
       });
 
-      this.convertRecording(rec.id, mediamtxPath, rec.broadcastId, rec.slotIndex, files, segmentsDir).catch(err => {
+      // Для retry собираем actual presentSlots по соседним ready/processing recording'ам
+      // того же broadcast'а — чтобы master.m3u8 ссылался на все slot'ы, не только на этот.
+      const sibling = await this.prisma.recording.findMany({
+        where: { broadcastId: rec.broadcastId },
+        select: { slotIndex: true },
+      });
+      const presentSlots = sibling.map((s: { slotIndex: number }) => s.slotIndex).sort((a, b) => a - b);
+
+      this.convertRecording(rec.id, basePath, rec.broadcastId, rec.slotIndex, files, segmentsDir, presentSlots).catch(err => {
         this.logger.error(`Retry conversion failed for ${rec.id}: ${err.message}`);
       });
     }
@@ -249,7 +320,7 @@ export class RecordingService {
     for (const dir of broadcastDirs) {
       const broadcastId = path.basename(dir);
       const recording = await this.prisma.recording.findFirst({
-        where: { broadcastId, status: 'ready' },
+        where: { broadcastId },
       });
       if (recording) continue;
       try {
