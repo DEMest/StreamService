@@ -1,4 +1,4 @@
-import { Controller, Get, Logger, Param, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Logger, Param, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { RecordingService } from './recording.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -8,6 +8,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtPayload } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
@@ -23,6 +24,8 @@ export class RecordingController {
     private prisma: PrismaService,
   ) {}
 
+  // ─────────── archive HLS: default Stream ───────────
+
   @Get('v1/public/orgs/:orgSlug/broadcasts/:broadcastId/recording/hls/*')
   async serveHls(
     @Param('orgSlug') orgSlug: string,
@@ -31,11 +34,49 @@ export class RecordingController {
     @Res() res: Response,
   ) {
     this.logger.log(`serveHls: orgSlug=${orgSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
+    await this.serveArchiveHlsImpl(orgSlug, '', broadcastId, wildcard, res);
+  }
 
+  // ─────────── archive HLS: named Stream ───────────
+  // Step 4: каждый Stream орги имеет свой набор broadcast'ов. URL архивного
+  // HLS включает явный /streams/<streamSlug>/ префикс, чтобы matching shape
+  // совпадал с live HLS URL'ом (см. ниже).
+
+  @Get('v1/public/orgs/:orgSlug/streams/:streamSlug/broadcasts/:broadcastId/recording/hls/*')
+  async serveHlsNamed(
+    @Param('orgSlug') orgSlug: string,
+    @Param('streamSlug') streamSlug: string,
+    @Param('broadcastId') broadcastId: string,
+    @Param('0') wildcard: string,
+    @Res() res: Response,
+  ) {
+    this.logger.log(`serveHlsNamed: orgSlug=${orgSlug} streamSlug=${streamSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
+    await this.serveArchiveHlsImpl(orgSlug, streamSlug, broadcastId, wildcard, res);
+  }
+
+  /**
+   * Общая реализация archive HLS под default и named Stream.
+   *
+   * Lookup broadcast'а делается через stream { slug: streamSlug, org: { slug: orgSlug } }
+   * (для default streamSlug='' попадает в этот же фильтр, потому что у каждой
+   * orgi всегда есть Stream с slug='').
+   *
+   * Расположение файлов на диске не зависит от streamSlug — оно определяется
+   * через `getRecordingDir(broadcastId)`, который читает broadcast.streamId
+   * и собирает путь сам. Поэтому единственная вещь, на которую влияет
+   * streamSlug — это запрос к БД (фильтр по nested Stream).
+   */
+  private async serveArchiveHlsImpl(
+    orgSlug: string,
+    streamSlug: string,
+    broadcastId: string,
+    wildcard: string,
+    res: Response,
+  ) {
     const broadcast = await this.prisma.broadcast.findFirst({
       where: {
         id: broadcastId,
-        stream: { slug: '', org: { slug: orgSlug, isActive: true } },
+        stream: { slug: streamSlug, org: { slug: orgSlug, isActive: true } },
       },
     });
     if (!broadcast) {
@@ -61,7 +102,7 @@ export class RecordingController {
 
     // Path traversal protection
     const resolved = path.resolve(recordingDir, relativePath);
-    if (!resolved.startsWith(recordingDir)) {
+    if (resolved !== recordingDir && !resolved.startsWith(recordingDir + path.sep)) {
       res.status(403).json({ message: 'Forbidden' });
       return;
     }
@@ -103,23 +144,75 @@ export class RecordingController {
     }
   }
 
+  // ─────────── live HLS: default Stream ───────────
+
   @Get('v1/public/orgs/:orgSlug/live/hls/*')
   async serveLiveHls(
     @Param('orgSlug') orgSlug: string,
     @Param('0') wildcard: string,
+    @Query('key') key: string | undefined,
     @Res() res: Response,
   ) {
     this.logger.log(`serveLiveHls: orgSlug=${orgSlug} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
+    await this.serveLiveHlsImpl(orgSlug, '', wildcard, key, res);
+  }
 
-    const org = await this.prisma.organization.findFirst({
-      where: { slug: orgSlug, isActive: true },
+  // ─────────── live HLS: named Stream ───────────
+  // Step 4: HLS-output для named Stream'ов лежит под /hls/live/<orgSlug>/<streamSlug>/...
+  // (соответствует MediaMTX path 'live/<orgSlug>/<streamSlug>' для composite
+  // или 'live/<orgSlug>/<streamSlug>/<n>' для multistream).
+
+  @Get('v1/public/orgs/:orgSlug/streams/:streamSlug/live/hls/*')
+  async serveLiveHlsNamed(
+    @Param('orgSlug') orgSlug: string,
+    @Param('streamSlug') streamSlug: string,
+    @Param('0') wildcard: string,
+    @Query('key') key: string | undefined,
+    @Res() res: Response,
+  ) {
+    this.logger.log(`serveLiveHlsNamed: orgSlug=${orgSlug} streamSlug=${streamSlug} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
+    await this.serveLiveHlsImpl(orgSlug, streamSlug, wildcard, key, res);
+  }
+
+  /**
+   * Общая реализация live HLS-проксирования с диска (named + default).
+   *
+   * Lookup Stream'а — `{ slug: streamSlug, org: { slug: orgSlug, isActive: true } }`.
+   * Для default streamSlug='' попадает в этот же фильтр (у орги всегда есть
+   * default Stream).
+   *
+   * liveDir =
+   *   default → /hls/live/<orgSlug>
+   *   named   → /hls/live/<orgSlug>/<streamSlug>
+   *
+   * Внутри liveDir файлы расположены по правилам MediaMTX: для composite —
+   * master.m3u8 + сегменты; для multistream — подпапки <n>/index.m3u8 +
+   * сегменты на каждый slot.
+   */
+  private async serveLiveHlsImpl(
+    orgSlug: string,
+    streamSlug: string,
+    wildcard: string,
+    key: string | undefined,
+    res: Response,
+  ) {
+    const stream = await this.prisma.stream.findFirst({
+      where: { slug: streamSlug, org: { slug: orgSlug, isActive: true } },
+      select: { isPublic: true, previewKey: true },
     });
-    if (!org) {
-      res.status(404).json({ message: 'Organization not found' });
+    if (!stream) {
+      res.status(404).json({ message: 'Stream not found' });
+      return;
+    }
+    if (!stream.isPublic && stream.previewKey !== key) {
+      res.status(404).json({ message: 'Stream not found' });
       return;
     }
 
-    const liveDir = path.join(HLS_LIVE_ROOT, orgSlug);
+    const liveDir =
+      streamSlug === ''
+        ? path.resolve(path.join(HLS_LIVE_ROOT, orgSlug))
+        : path.resolve(path.join(HLS_LIVE_ROOT, orgSlug, streamSlug));
 
     let relativePath = decodeURIComponent(wildcard ?? '');
     relativePath = relativePath.split('?')[0];
@@ -135,7 +228,7 @@ export class RecordingController {
     }
 
     const resolved = path.resolve(liveDir, relativePath);
-    if (!resolved.startsWith(path.resolve(liveDir))) {
+    if (resolved !== liveDir && !resolved.startsWith(liveDir + path.sep)) {
       res.status(403).json({ message: 'Forbidden' });
       return;
     }
@@ -211,7 +304,7 @@ export class RecordingController {
       return;
     }
 
-    const listFile = path.join(slotDir, `_download_${randomBytes(8).toString('hex')}.txt`);
+    const listFile = path.join(os.tmpdir(), `_download_${randomBytes(8).toString('hex')}.txt`);
     const listContent = segments.map(f => `file '${path.join(slotDir, f).replace(/'/g, "'\\''")}'`).join('\n');
     fs.writeFileSync(listFile, listContent);
 
@@ -228,12 +321,21 @@ export class RecordingController {
       'pipe:1',
     ]);
 
+    res.on('close', () => {
+      if (!ff.killed) ff.kill('SIGKILL');
+      fs.unlink(listFile, () => { /* ignore */ });
+    });
+    res.req.on('aborted', () => {
+      if (!ff.killed) ff.kill('SIGKILL');
+      fs.unlink(listFile, () => { /* ignore */ });
+    });
+
     let stderr = '';
     ff.stderr.on('data', chunk => { stderr += chunk.toString(); });
     ff.stdout.pipe(res);
 
     ff.on('exit', (code) => {
-      try { fs.unlinkSync(listFile); } catch { /* ignore */ }
+      fs.unlink(listFile, () => { /* ignore */ });
       if (code !== 0) {
         console.error(`ffmpeg exit ${code}: ${stderr.slice(-500)}`);
         if (!res.headersSent) {
@@ -245,7 +347,7 @@ export class RecordingController {
     });
 
     ff.on('error', err => {
-      try { fs.unlinkSync(listFile); } catch { /* ignore */ }
+      fs.unlink(listFile, () => { /* ignore */ });
       if (!res.headersSent) {
         res.status(500).json({ message: `ffmpeg error: ${err.message}` });
       } else {

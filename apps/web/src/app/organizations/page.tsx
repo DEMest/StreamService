@@ -6,15 +6,16 @@ import { api } from '@/lib/api';
 import { Header } from '@/components/Header';
 import { OrgCard, SkeletonCard } from '@/components/OrgCard';
 import { fadeUp, staggerContainer, cardFadeUp } from '@/lib/motion';
-import type { CatalogOrg } from '@/lib/types';
+import type { CatalogItem } from '@/lib/types';
 import { Buildings } from '@phosphor-icons/react';
 
 export default function OrganizationsPage() {
-  const { data: orgs, isLoading } = useQuery({
+  const { data: items, isLoading } = useQuery({
     queryKey: ['catalog'],
-    queryFn: () => api.get<CatalogOrg[]>('/v1/public/orgs'),
+    queryFn: () => api.get<CatalogItem[]>('/v1/public/orgs'),
     refetchInterval: 30_000,
   });
+  const orgs = items;
 
   const [thumbKey, setThumbKey] = useState(() => Date.now());
   useEffect(() => {
@@ -47,11 +48,18 @@ export default function OrganizationsPage() {
 
           {orgs && orgs.length > 0 && (
             <motion.div variants={staggerContainer} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-              {orgs.map((org) => (
-                <motion.div key={org.slug} variants={cardFadeUp}>
-                  <OrgCard org={org} thumbKey={thumbKey} />
-                </motion.div>
-              ))}
+              {orgs.map((item) => {
+                // key зависит от типа карточки (discriminated union).
+                const key =
+                  item.type === 'event'
+                    ? `event:${item.orgSlug}/${item.eventSlug}`
+                    : `stream:${item.orgSlug}/${item.streamSlug}`;
+                return (
+                  <motion.div key={key} variants={cardFadeUp}>
+                    <OrgCard org={item} thumbKey={thumbKey} />
+                  </motion.div>
+                );
+              })}
             </motion.div>
           )}
         </motion.section>

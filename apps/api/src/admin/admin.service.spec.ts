@@ -17,7 +17,12 @@ const mockPrisma = {
     findMany: jest.fn(),
   },
 };
-const mockMediamtx = { addPath: jest.fn(), deletePath: jest.fn() };
+const mockMediamtx = {
+  addPath: jest.fn(),
+  deletePath: jest.fn(),
+  addStreamPaths: jest.fn(),
+  deleteStreamPaths: jest.fn(),
+};
 
 describe('AdminService', () => {
   let service: AdminService;
@@ -34,14 +39,15 @@ describe('AdminService', () => {
     service = module.get(AdminService);
   });
 
-  it('creates org with generated ingestKey and calls mediamtx.addPath', async () => {
+  it('creates org with generated ingestKey and registers default Stream paths', async () => {
     mockPrisma.organization.create.mockResolvedValue({
       id: '1', slug: 'club', name: 'Club', isActive: true, createdAt: new Date(),
     });
     mockPrisma.stream.create.mockResolvedValue({ id: 's1' });
     const result = await service.createOrg({ slug: 'club', name: 'Club', password: 'pass' });
     expect(result.slug).toBe('club');
-    expect(mockMediamtx.addPath).toHaveBeenCalledWith('club', expect.any(String));
+    // default Stream → composite, slotCount=1 → один путь 'live/club'
+    expect(mockMediamtx.addStreamPaths).toHaveBeenCalledWith('club', '', 'composite', 1, expect.any(String));
   });
 
   it('creates Org with a default Stream (slug=\'\', mode=composite)', async () => {
@@ -62,12 +68,26 @@ describe('AdminService', () => {
         ingestKey: expect.any(String),
       }),
     }));
-    expect(mockMediamtx.addPath).toHaveBeenCalledWith('club', expect.any(String));
+    expect(mockMediamtx.addStreamPaths).toHaveBeenCalledWith('club', '', 'composite', 1, expect.any(String));
   });
 
   it('throws NotFoundException when deleting non-existent org', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue(null);
     const p2025 = Object.assign(new Error('Not found'), { code: 'P2025' });
     mockPrisma.organization.delete.mockRejectedValue(p2025);
     await expect(service.deleteOrg('ghost')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('deletes all stream paths of org when deleting org', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      streams: [
+        { slug: '', mode: 'composite', slotCount: 1 },
+        { slug: 'tournament', mode: 'multistream', slotCount: 3 },
+      ],
+    });
+    mockPrisma.organization.delete.mockResolvedValue({});
+    await service.deleteOrg('club');
+    expect(mockMediamtx.deleteStreamPaths).toHaveBeenCalledWith('club', '', 'composite', 1);
+    expect(mockMediamtx.deleteStreamPaths).toHaveBeenCalledWith('club', 'tournament', 'multistream', 3);
   });
 });

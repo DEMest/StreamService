@@ -7,13 +7,13 @@ import { api } from '@/lib/api';
 import { Header } from '@/components/Header';
 import { OrgCard, SkeletonCard } from '@/components/OrgCard';
 import { fadeUp, staggerContainer, cardFadeUp } from '@/lib/motion';
-import type { CatalogOrg } from '@/lib/types';
+import type { CatalogItem } from '@/lib/types';
 import { Broadcast, TelevisionSimple } from '@phosphor-icons/react';
 
 export default function StreamsPage() {
-  const { data: orgs, isLoading } = useQuery({
+  const { data: items, isLoading } = useQuery({
     queryKey: ['catalog'],
-    queryFn: () => api.get<CatalogOrg[]>('/v1/public/orgs'),
+    queryFn: () => api.get<CatalogItem[]>('/v1/public/orgs'),
     refetchInterval: 30_000,
   });
 
@@ -23,7 +23,14 @@ export default function StreamsPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const live = orgs?.filter((o) => o.isLive) ?? [];
+  // Step 5: каталог теперь возвращает discriminated union.
+  // На странице «Трансляции» показываем только live-сущности:
+  //   - Event-карточки (по определению все «активные» — startedAt && !endedAt
+  //     с ≥2 live-public Stream'ами — см. PublicService.getCatalog),
+  //   - live Stream-карточки.
+  const live = (items ?? []).filter((it) =>
+    it.type === 'event' ? true : it.isLive,
+  );
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-surface-primary text-zinc-200">
@@ -54,11 +61,20 @@ export default function StreamsPage() {
 
           {live.length > 0 && (
             <motion.div variants={staggerContainer} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-              {live.map((org) => (
-                <motion.div key={org.slug} variants={cardFadeUp}>
-                  <OrgCard org={org} thumbKey={thumbKey} />
-                </motion.div>
-              ))}
+              {live.map((item) => {
+                // key — стабилен для каждого типа карточки:
+                //   stream → orgSlug+streamSlug (одна орга, несколько Stream'ов)
+                //   event  → orgSlug+eventSlug  (одна орга, несколько Event'ов)
+                const key =
+                  item.type === 'event'
+                    ? `event:${item.orgSlug}/${item.eventSlug}`
+                    : `stream:${item.orgSlug}/${item.streamSlug}`;
+                return (
+                  <motion.div key={key} variants={cardFadeUp}>
+                    <OrgCard org={item} thumbKey={thumbKey} />
+                  </motion.div>
+                );
+              })}
             </motion.div>
           )}
         </motion.section>

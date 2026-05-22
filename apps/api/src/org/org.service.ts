@@ -79,11 +79,21 @@ export class OrgService {
       select: { slug: true },
     });
     if (!org) throw new NotFoundException('Organization not found');
+    // Step 5: clears default Stream scope (+ legacy orgId-сообщения как
+    // backward-compat). Endpoint POST /v1/org/chat/clear оставлен для текущего
+    // фронта; per-Stream clear будет добавлен отдельным route'ом.
     const result = await this.chatService.clearMessages(orgId);
     this.chatGateway.broadcastChatCleared(org.slug);
     return { ok: true, ...result };
   }
 
+  /**
+   * @deprecated Step 3+ — используйте StreamController PATCH /v1/org/streams/:id.
+   * Этот wrapper делегирует stream-уровневые поля в StreamService.updateSettings
+   * (для default Stream орги), а chatTtlMinutes/chatEnabled — на Organization.
+   * Сохранён для backward-compat существующего frontend'а до его переписывания
+   * на per-Stream API.
+   */
   async updateStreamSettings(
     orgId: string,
     data: {
