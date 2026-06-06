@@ -8,12 +8,20 @@ interface Message { id: string; nickname: string; content: string; createdAt: st
 
 interface Props {
   orgSlug: string;
+  /**
+   * Named Stream slug. Пустая строка/undefined ⇒ default Stream орги
+   * (backward-compat). Каждый Stream имеет изолированную чат-комнату
+   * (room key = `org:<orgSlug>:stream:<streamSlug | 'default'>`),
+   * поэтому viewer-count и сообщения не пересекаются между Stream'ами
+   * одной орги.
+   */
+  streamSlug?: string;
   onViewersChange?: (count: number) => void;
   authorName?: string;
   authLoading?: boolean;
 }
 
-export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Props) {
+export function Chat({ orgSlug, streamSlug, onViewersChange, authorName, authLoading }: Props) {
   const [nickname, setNickname] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -35,7 +43,7 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
     const socket = getSocket();
 
     function join() {
-      socket.emit('join', { orgSlug });
+      socket.emit('join', { orgSlug, streamSlug: streamSlug ?? '' });
     }
 
     join();
@@ -71,7 +79,7 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
       socket.off('chat_enabled', onEnabled);
       socket.off('chat_cleared', onCleared);
     };
-  }, [orgSlug]);
+  }, [orgSlug, streamSlug]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
@@ -87,7 +95,7 @@ export function Chat({ orgSlug, onViewersChange, authorName, authLoading }: Prop
   function sendMessage(content: string, nick: string) {
     const tempId = `_tmp_${Date.now()}`;
     setMessages((prev) => [...prev, { id: tempId, nickname: nick, content, createdAt: new Date().toISOString() }]);
-    getSocket().emit('message', { orgSlug, nickname: nick, content });
+    getSocket().emit('message', { orgSlug, streamSlug: streamSlug ?? '', nickname: nick, content });
   }
 
   function handleNicknameConfirm(name: string) {

@@ -37,14 +37,26 @@ export class AdminService implements OnModuleInit {
       console.error('❌ Ошибка при создании суперпользователя', error);
     }
 
-    // Восстановить пути в MediaMTX для всех существующих организаций
+    // Восстановить пути в MediaMTX для всех Stream'ов.
+    // Для composite Stream — один путь; для multistream — N путей по slotCount.
     try {
-      const orgs = await this.prisma.organization.findMany({
-        select: { slug: true, ingestKey: true },
+      const streams = await this.prisma.stream.findMany({
+        select: {
+          slug: true, mode: true, slotCount: true, ingestKey: true,
+          org: { select: { slug: true } },
+        },
       });
-      await Promise.all(orgs.map((org) => this.mediamtx.addPath(org.slug, org.ingestKey)));
-      if (orgs.length > 0) {
-        console.log(`✅ Восстановлено ${orgs.length} путей в MediaMTX`);
+      await Promise.all(streams.map((s) =>
+        this.mediamtx.addStreamPaths(
+          s.org.slug,
+          s.slug,
+          s.mode as 'composite' | 'multistream',
+          s.slotCount,
+          s.ingestKey,
+        ),
+      ));
+      if (streams.length > 0) {
+        console.log(`✅ Восстановлено путей для ${streams.length} Stream'ов в MediaMTX`);
       }
     } catch (error) {
       console.error('❌ Ошибка при восстановлении путей MediaMTX', error);
@@ -60,10 +72,30 @@ export class AdminService implements OnModuleInit {
     const passwordHash = await bcrypt.hash(data.password, 10);
     try {
       const org = await this.prisma.organization.create({
-        data: { slug: data.slug, name: data.name, passwordHash, ingestKey },
+        data: { slug: data.slug, name: data.name, passwordHash },
         select: { id: true, slug: true, name: true, isActive: true, createdAt: true },
       });
-      await this.mediamtx.addPath(data.slug, ingestKey);
+
+      // Создать default Stream сразу
+      await this.prisma.stream.create({
+        data: {
+          orgId: org.id,
+          slug: '',
+          mode: 'composite',
+          slotCount: 1,
+          slots: [{ index: 1, name: '' }],
+          slotOrder: [1],
+          layoutPreset: 'solo',
+          name: '',
+          ingestKey,
+          isPublic: true,
+          previewMode: 'multicam',
+          autoStartMode: 'public',
+        },
+      });
+
+      // Default Stream — composite, slotCount=1 → один путь 'live/<orgSlug>'
+      await this.mediamtx.addStreamPaths(data.slug, '', 'composite', 1, ingestKey);
       return org;
     } catch (e: any) {
       if (e.code === 'P2002') throw new ConflictException(`Slug '${data.slug}' already taken`);
@@ -92,13 +124,32 @@ export class AdminService implements OnModuleInit {
   }
 
   async deleteOrg(slug: string) {
+    // Сначала прочитать конфиг всех Stream'ов орги, чтобы знать какие пути удалять в MediaMTX.
+    // (После delete каскадом Stream'ы исчезнут — будет поздно.)
+    const org = await this.prisma.organization.findUnique({
+      where: { slug },
+      select: {
+        streams: { select: { slug: true, mode: true, slotCount: true } },
+      },
+    });
+
     try {
       await this.prisma.organization.delete({ where: { slug } });
     } catch (e: any) {
       if (e.code === 'P2025') throw new NotFoundException(`Org '${slug}' not found`);
       throw e;
     }
-    await this.mediamtx.deletePath(slug);
+
+    if (org?.streams) {
+      await Promise.all(org.streams.map((s) =>
+        this.mediamtx.deleteStreamPaths(
+          slug,
+          s.slug,
+          s.mode as 'composite' | 'multistream',
+          s.slotCount,
+        ),
+      ));
+    }
     return { ok: true };
   }
 }

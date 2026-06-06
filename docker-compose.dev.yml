@@ -1,0 +1,60 @@
+# Локальная dev-обвязка: только сервисы которые НЕ запускаются через pnpm.
+# API и Web поднимаются вручную через `pnpm dev` в apps/api и apps/web.
+#
+# Запуск:
+#   docker compose -f docker-compose.dev.yml up -d
+# Стоп:
+#   docker compose -f docker-compose.dev.yml down
+# Логи:
+#   docker compose -f docker-compose.dev.yml logs -f
+#
+# Файл в .gitignore — не коммитится.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: streamservice-postgres-dev
+    environment:
+      POSTGRES_DB: streamservice
+      POSTGRES_USER: stream
+      POSTGRES_PASSWORD: streampass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stream -d streamservice"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  mediamtx:
+    build:
+      context: ./infra/mediamtx
+      dockerfile: Dockerfile
+    container_name: streamservice-mediamtx-dev
+    ports:
+      - "8890:8890/udp"   # SRT
+      - "1935:1935/tcp"   # RTMP
+      - "8888:8888"       # HLS-out
+      - "9997:9997"       # MediaMTX API
+    environment:
+      MEDIAMTX_WEBHOOK_SECRET: ""
+      # Override hardcoded api:3001 → host.docker.internal:3001 (API runs on host in dev)
+      API_BASE_URL: "http://host.docker.internal:3001"
+      MTX_AUTHHTTPADDRESS: "http://host.docker.internal:3001/v1/internal/mediamtx/auth"
+    volumes:
+      - ./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro
+      - recordings_data:/recordings
+      - hls_data:/hls
+    extra_hosts:
+      # Чтобы mediamtx внутри контейнера мог достучаться до API на хосте
+      # (webhook auth/publish/unpublish идут с mediamtx → api:3001)
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  recordings_data:
+  hls_data:
