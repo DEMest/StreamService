@@ -20,6 +20,7 @@ build/
 .claude/
 AGENTS.md
 docs/superpowers/
+.superpowers/
 *.suo
 *.ntvs*
 *.njsproj
@@ -40,5 +41,3 @@ pnpm-debug.log*
 package-lock.json
 yarn.lock
 AGENTS.md
-
-docker-compose.yml

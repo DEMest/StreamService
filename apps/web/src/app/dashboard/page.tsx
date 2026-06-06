@@ -1,9 +1,26 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { DashboardLayout } from '@/components/DashboardLayout';
-import { Broadcast, Gear, ImageSquare, Archive, Copy, Eye, EyeSlash, ArrowsClockwise, PencilSimple, DownloadSimple, Trash, VideoCamera, Upload, CaretDown } from '@phosphor-icons/react';
+import { EventsSection } from '@/components/dashboard/EventsSection';
+import { RecordingControl, type RecordingMode } from '@/components/dashboard/RecordingControl';
+import { Broadcast, Gear, ImageSquare, Archive, Copy, Eye, EyeSlash, ArrowsClockwise, PencilSimple, DownloadSimple, Trash, VideoCamera, Upload, CaretDown, ArrowRight, Stack, Plus, DotsThreeVertical, X, Warning } from '@phosphor-icons/react';
+
+interface OrgStreamSummary {
+  id: string;
+  slug: string;
+  name: string;
+  mode: 'composite' | 'multistream';
+  slotCount: number;
+  isLive: boolean;
+}
+
+type StreamMode = 'composite' | 'multistream';
+
+const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 interface OrgProfile {
   id: string;
@@ -48,9 +65,15 @@ const inputClasses = 'w-full px-3 py-2 bg-surface-primary border border-zinc-700
 
 export default function DashboardPage() {
   const qc = useQueryClient();
+  const router = useRouter();
   const [keyVisible, setKeyVisible] = useState(false);
   const [protocol, setProtocol] = useState<'srt' | 'rtmp'>('srt');
   const [editingBroadcast, setEditingBroadcast] = useState<{ id: string; title: string; description: string } | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<OrgStreamSummary | null>(null);
+  const [renameTarget, setRenameTarget] = useState<OrgStreamSummary | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const defaultSectionRef = useRef<HTMLDivElement | null>(null);
 
   const { data: profile } = useQuery({
     queryKey: ['org-profile', keyVisible],
@@ -62,6 +85,81 @@ export default function DashboardPage() {
     queryKey: ['org-broadcasts'],
     queryFn: () => api.get<BroadcastItem[]>('/v1/org/broadcasts'),
   });
+
+  // Все Stream'ы орги (default + named). Default — slug='', управляется
+  // секциями ниже на этой же странице. Named — карточки с переходом в Studio
+  // или удалением через [⋮]-меню.
+  const { data: streamsList } = useQuery({
+    queryKey: ['org-streams-list'],
+    queryFn: () => api.get<OrgStreamSummary[]>('/v1/org/streams'),
+    refetchInterval: 30_000,
+  });
+
+  // ID default-стрима (slug='') нужен для toggle записи дефолтного композитного
+  // стрима. У орги всегда ровно один такой Stream (создаётся при заведении орги).
+  const defaultStreamId = streamsList?.find((s) => s.slug === '')?.id;
+
+  const { data: defaultStream } = useQuery({
+    queryKey: ['org-stream', defaultStreamId],
+    queryFn: () =>
+      api.get<{ id: string; recordingEnabled: boolean; recordingMode: RecordingMode }>(
+        `/v1/org/streams/${defaultStreamId}`,
+      ),
+    enabled: !!defaultStreamId,
+    refetchInterval: 15_000,
+  });
+
+  const patchDefaultRecording = useMutation({
+    mutationFn: (patch: { enabled?: boolean; mode?: RecordingMode }) =>
+      api.patch(`/v1/org/streams/${defaultStreamId}/recording`, patch),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['org-stream', defaultStreamId] }),
+  });
+
+  // Сортируем: default первый, потом по имени.
+  const sortedStreams = [...(streamsList ?? [])].sort((a, b) => {
+    if (a.slug === '' && b.slug !== '') return -1;
+    if (a.slug !== '' && b.slug === '') return 1;
+    return (a.name || a.slug).localeCompare(b.name || b.slug, 'ru');
+  });
+
+  const createStreamMutation = useMutation({
+    mutationFn: (data: { slug: string; name?: string; mode: StreamMode; slotCount: number }) =>
+      api.post<OrgStreamSummary>('/v1/org/streams', data),
+    onSuccess: (created) => {
+      qc.invalidateQueries({ queryKey: ['org-streams-list'] });
+      setCreateOpen(false);
+      // Multistream — сразу в Studio. Composite — остаёмся на дашборде.
+      if (created.mode === 'multistream') {
+        router.push(`/dashboard/streams/${created.id}/studio`);
+      }
+    },
+  });
+
+  const deleteStreamMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/v1/org/streams/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['org-streams-list'] });
+      setDeleteTarget(null);
+    },
+  });
+
+  const renameStreamMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      api.patch(`/v1/org/streams/${id}`, { name }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['org-streams-list'] });
+      setRenameTarget(null);
+    },
+  });
+
+  // Клик вне меню — закрыть.
+  useEffect(() => {
+    if (!menuFor) return;
+    const onDocClick = () => setMenuFor(null);
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, [menuFor]);
 
   const rotateMutation = useMutation({
     mutationFn: () => api.post('/v1/org/ingest-key/rotate'),
@@ -109,14 +207,16 @@ export default function DashboardPage() {
   });
 
   const serverIp = process.env.NEXT_PUBLIC_SERVER_IP ?? '';
+  const srtPort = process.env.NEXT_PUBLIC_SRT_PORT ?? '8890';
+  const rtmpPort = process.env.NEXT_PUBLIC_RTMP_PORT ?? '1935';
   const streamId = `publish:live/${profile?.slug}`;
-  const srtServer = serverIp ? `${serverIp}:8890` : '';
-  const rtmpServer = serverIp ? `rtmp://${serverIp}:1935/live` : '';
+  const srtServer = serverIp ? `${serverIp}:${srtPort}` : '';
+  const rtmpServer = serverIp ? `rtmp://${serverIp}:${rtmpPort}/live` : '';
   const srtFullUrl = serverIp && profile?.ingestKey
-    ? `srt://${serverIp}:8890?streamid=publish:live/${profile.slug}&passphrase=${profile.ingestKey}`
+    ? `srt://${serverIp}:${srtPort}?streamid=publish:live/${profile.slug}&passphrase=${profile.ingestKey}`
     : '';
   const rtmpFullUrl = serverIp && profile?.ingestKey
-    ? `rtmp://${serverIp}:1935/live/${profile.slug}?key=${profile.ingestKey}`
+    ? `rtmp://${serverIp}:${rtmpPort}/live/${profile.slug}?key=${profile.ingestKey}`
     : '';
 
   function copyText(text: string) {
@@ -158,12 +258,170 @@ export default function DashboardPage() {
       <div className="max-w-[920px] mx-auto px-6 py-8 space-y-5">
         <h1 className="text-xl font-semibold text-zinc-50 tracking-tight">{profile?.name} — Панель управления</h1>
 
+        {/* Streams catalog — все Stream'ы орги: default + named (composite/multistream) */}
+        <section className="bg-surface-elevated border border-zinc-800/50 rounded-xl p-5">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h2 className="flex items-center gap-2 text-base font-medium text-zinc-300">
+              <Stack size={18} weight="fill" className="text-brand" />
+              Мои стримы
+              <span className="ml-1 text-xs text-zinc-600 font-mono tabular-nums">
+                {sortedStreams.length}
+              </span>
+            </h2>
+            <button
+              onClick={() => setCreateOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand hover:bg-brand-hover text-white text-xs font-medium rounded-md transition-all active:scale-[0.98] cursor-pointer"
+            >
+              <Plus size={14} weight="bold" />
+              Новый стрим
+            </button>
+          </div>
+
+          {sortedStreams.length === 0 ? (
+            <div className="flex flex-col items-center py-8 gap-2 opacity-40">
+              <VideoCamera size={32} weight="thin" className="text-zinc-600" />
+              <p className="text-zinc-500 text-sm">Стримы не настроены</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {sortedStreams.map((s) => {
+                const isDefault = s.slug === '';
+                const isMultistream = s.mode === 'multistream';
+                const targetHref = isDefault
+                  ? '#default-stream-config'
+                  : `/dashboard/streams/${s.id}/studio`;
+                return (
+                  <div
+                    key={s.id}
+                    className="relative flex flex-col gap-2.5 p-4 rounded-xl bg-surface-primary border border-zinc-800/60 hover:border-zinc-700 transition-colors"
+                  >
+                    {/* Header row: name + menu */}
+                    <div className="flex items-start justify-between gap-2 min-w-0">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-zinc-100 truncate">
+                          {isDefault ? 'Default' : s.name?.trim() || s.slug}
+                        </div>
+                        <div className="text-[11px] text-zinc-500 font-mono truncate">
+                          /{s.slug || 'default'}
+                        </div>
+                      </div>
+                      {!isDefault && (
+                        <div className="relative shrink-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenuFor(menuFor === s.id ? null : s.id);
+                            }}
+                            aria-label="Меню стрима"
+                            className="p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
+                          >
+                            <DotsThreeVertical size={16} weight="bold" />
+                          </button>
+                          {menuFor === s.id && (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              className="absolute right-0 top-full mt-1 z-20 min-w-[160px] py-1 bg-surface-elevated border border-zinc-700 rounded-lg shadow-xl"
+                            >
+                              <button
+                                onClick={() => {
+                                  setRenameTarget(s);
+                                  setMenuFor(null);
+                                }}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer text-left"
+                              >
+                                <PencilSimple size={12} />
+                                Переименовать
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setDeleteTarget(s);
+                                  setMenuFor(null);
+                                }}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer text-left"
+                              >
+                                <Trash size={12} />
+                                Удалить
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Badges row */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-zinc-800 border border-zinc-700/50 text-[10px] text-zinc-400 font-mono uppercase tracking-wider">
+                        {isMultistream ? `${s.slotCount} cams` : 'composite'}
+                      </span>
+                      {s.isLive ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-medium">
+                          <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                          LIVE
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-zinc-800/60 border border-zinc-700/40 text-zinc-500 text-[10px] font-medium">
+                          <span className="w-1 h-1 rounded-full bg-zinc-600" />
+                          OFF
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Action */}
+                    {isDefault ? (
+                      <button
+                        onClick={() => {
+                          defaultSectionRef.current?.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'start',
+                          });
+                        }}
+                        className="mt-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded-md transition-all active:scale-[0.98] cursor-pointer"
+                      >
+                        Открыть
+                        <ArrowRight size={12} weight="bold" />
+                      </button>
+                    ) : (
+                      <Link
+                        href={targetHref}
+                        className="mt-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-brand/20 hover:bg-brand/30 text-brand text-xs font-medium rounded-md transition-all active:scale-[0.98] no-underline"
+                      >
+                        {isMultistream ? 'Studio' : 'Открыть'}
+                        <ArrowRight size={12} weight="bold" />
+                      </Link>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* TODO Step 5+: для named composite Stream'а нужен отдельный
+              /dashboard/streams/[id]/page.tsx — упрощённый дашборд для конкретного
+              Stream'а (URL/key/settings/archive). Пока ссылка ведёт в Studio,
+              откуда composite Stream редиректится обратно на /dashboard. */}
+        </section>
+
+        {/* Events — Step 5: группирующая сущность над Stream'ами */}
+        <EventsSection />
+
+        {/* Anchor — секции ниже относятся к default Stream'у орги */}
+        <div ref={defaultSectionRef} id="default-stream-config" />
+
         {/* Stream Parameters */}
         <section className="bg-surface-elevated border border-zinc-800/50 rounded-xl p-5">
-          <h2 className="flex items-center gap-2 text-base font-medium text-zinc-300 mb-4">
-            <Broadcast size={18} className="text-brand" weight="fill" />
-            Параметры трансляции
-          </h2>
+          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            <h2 className="flex items-center gap-2 text-base font-medium text-zinc-300">
+              <Broadcast size={18} className="text-brand" weight="fill" />
+              Параметры трансляции
+            </h2>
+            <RecordingControl
+              enabled={defaultStream?.recordingEnabled ?? false}
+              mode={defaultStream?.recordingMode ?? 'auto'}
+              onPatch={(p) => patchDefaultRecording.mutate(p)}
+              pending={patchDefaultRecording.isPending}
+              available={!!defaultStreamId}
+            />
+          </div>
 
           {/* Protocol tabs */}
           <div className="flex gap-1 mb-4 bg-surface-primary rounded-lg p-1">
@@ -196,8 +454,8 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
                   <span className="w-28 shrink-0 text-xs text-zinc-500">Порт</span>
-                  <span className="flex-1 font-mono text-sm text-zinc-300">8890</span>
-                  <button onClick={() => copyText('8890')} className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer">
+                  <span className="flex-1 font-mono text-sm text-zinc-300">{srtPort}</span>
+                  <button onClick={() => copyText(srtPort)} className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer">
                     <Copy size={12} /> Копировать
                   </button>
                 </div>
@@ -283,7 +541,7 @@ export default function DashboardPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-zinc-400 mb-1.5">В поле <span className="text-zinc-200">«Сервер»</span> вставьте полную ссылку:</p>
                         <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
-                          <code className="flex-1 text-sm text-zinc-200 font-mono break-all">{srtFullUrl || `srt://${serverIp || 'IP'}:8890?streamid=${streamId}&passphrase=\u2022\u2022\u2022`}</code>
+                          <code className="flex-1 text-sm text-zinc-200 font-mono break-all">{srtFullUrl || `srt://${serverIp || 'IP'}:${srtPort}?streamid=${streamId}&passphrase=\u2022\u2022\u2022`}</code>
                           {srtFullUrl && (
                             <button onClick={() => copyText(srtFullUrl)} className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer" title="Копировать">
                               <Copy size={14} />
@@ -313,7 +571,7 @@ export default function DashboardPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-zinc-400 mb-1.5">В поле <span className="text-zinc-200">«Сервер»</span> вставьте:</p>
                         <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
-                          <code className="flex-1 text-sm text-zinc-200 font-mono">{rtmpServer || `rtmp://${serverIp || 'IP'}:1935/live`}</code>
+                          <code className="flex-1 text-sm text-zinc-200 font-mono">{rtmpServer || `rtmp://${serverIp || 'IP'}:${rtmpPort}/live`}</code>
                           {serverIp && (
                             <button onClick={() => copyText(rtmpServer)} className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer" title="Копировать">
                               <Copy size={14} />
@@ -370,7 +628,7 @@ export default function DashboardPage() {
                           <span className="text-zinc-500">Hostname:</span>
                           <span className="text-zinc-200 font-mono">{serverIp || 'IP сервера'}</span>
                           <span className="text-zinc-500">Port:</span>
-                          <span className="text-zinc-200 font-mono">8890</span>
+                          <span className="text-zinc-200 font-mono">{srtPort}</span>
                           <span className="text-zinc-500">Stream ID:</span>
                           <span className="text-zinc-200 font-mono break-all">{streamId}</span>
                           <span className="text-zinc-500">Passphrase:</span>
@@ -396,7 +654,7 @@ export default function DashboardPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-zinc-400 mb-1.5">В поле <span className="text-zinc-200">URL</span> вставьте полную ссылку:</p>
                         <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
-                          <code className="flex-1 text-sm text-zinc-200 font-mono break-all">{rtmpFullUrl || `rtmp://${serverIp || 'IP'}:1935/live/${profile?.slug ?? 'slug'}?key=\u2022\u2022\u2022`}</code>
+                          <code className="flex-1 text-sm text-zinc-200 font-mono break-all">{rtmpFullUrl || `rtmp://${serverIp || 'IP'}:${rtmpPort}/live/${profile?.slug ?? 'slug'}?key=\u2022\u2022\u2022`}</code>
                           {rtmpFullUrl && (
                             <button onClick={() => copyText(rtmpFullUrl)} className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer" title="Копировать">
                               <Copy size={14} />
@@ -701,6 +959,379 @@ export default function DashboardPage() {
           </div>
         </section>
       </div>
+
+      {createOpen && (
+        <CreateStreamModal
+          onClose={() => setCreateOpen(false)}
+          existingSlugs={sortedStreams.map((s) => s.slug)}
+          onSubmit={(payload) => createStreamMutation.mutate(payload)}
+          isSubmitting={createStreamMutation.isPending}
+          errorMessage={createStreamMutation.error?.message ?? null}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteStreamModal
+          stream={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={() => deleteStreamMutation.mutate(deleteTarget.id)}
+          isSubmitting={deleteStreamMutation.isPending}
+          errorMessage={deleteStreamMutation.error?.message ?? null}
+        />
+      )}
+
+      {renameTarget && (
+        <RenameStreamModal
+          stream={renameTarget}
+          onClose={() => setRenameTarget(null)}
+          onSubmit={(name) => renameStreamMutation.mutate({ id: renameTarget.id, name })}
+          isSubmitting={renameStreamMutation.isPending}
+          errorMessage={renameStreamMutation.error?.message ?? null}
+        />
+      )}
     </DashboardLayout>
+  );
+}
+
+// ─── Modals ────────────────────────────────────────────────────────────────
+
+interface ModalShellProps {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  widthClass?: string;
+}
+
+function ModalShell({ title, onClose, children, widthClass = 'max-w-md' }: ModalShellProps) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`w-full ${widthClass} bg-surface-elevated border border-zinc-800 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden`}
+      >
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-zinc-800/60">
+          <h3 className="text-base font-semibold text-zinc-100 tracking-tight">{title}</h3>
+          <button
+            onClick={onClose}
+            aria-label="Закрыть"
+            className="p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
+          >
+            <X size={16} weight="bold" />
+          </button>
+        </div>
+        <div className="p-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+interface CreateStreamModalProps {
+  onClose: () => void;
+  existingSlugs: string[];
+  onSubmit: (payload: { slug: string; name?: string; mode: StreamMode; slotCount: number }) => void;
+  isSubmitting: boolean;
+  errorMessage: string | null;
+}
+
+function CreateStreamModal({ onClose, existingSlugs, onSubmit, isSubmitting, errorMessage }: CreateStreamModalProps) {
+  const [slug, setSlug] = useState('');
+  const [name, setName] = useState('');
+  const [mode, setMode] = useState<StreamMode>('composite');
+  const [slotCount, setSlotCount] = useState(2);
+
+  const trimmedSlug = slug.trim().toLowerCase();
+  const slugFormatValid = SLUG_REGEX.test(trimmedSlug);
+  const slugDuplicate = existingSlugs.includes(trimmedSlug);
+  const slugError = !trimmedSlug
+    ? null
+    : !slugFormatValid
+      ? 'Только латинские буквы, цифры и дефисы (например: court-b)'
+      : slugDuplicate
+        ? 'Такой slug уже занят'
+        : null;
+
+  const canSubmit = trimmedSlug.length > 0 && !slugError && !isSubmitting;
+
+  // Серверная ошибка по сообщению — распознаём 409 от других.
+  const conflict = errorMessage?.toLowerCase().includes('already taken');
+  const visibleError = conflict ? 'Slug уже занят в этой организации' : errorMessage;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) return;
+    onSubmit({
+      slug: trimmedSlug,
+      name: name.trim() || undefined,
+      mode,
+      slotCount: mode === 'multistream' ? slotCount : 1,
+    });
+  }
+
+  return (
+    <ModalShell title="Новый стрим" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs text-zinc-500">Slug (часть URL)</label>
+          <input
+            autoFocus
+            value={slug}
+            onChange={(e) => setSlug(e.target.value)}
+            placeholder="court-b"
+            className={inputClasses}
+            disabled={isSubmitting}
+          />
+          {slugError ? (
+            <p className="text-xs text-red-400">{slugError}</p>
+          ) : (
+            <p className="text-xs text-zinc-600">
+              URL стрима будет: <span className="font-mono text-zinc-500">/{trimmedSlug || 'slug'}</span>
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs text-zinc-500">Название (необязательно)</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Корт B"
+            className={inputClasses}
+            disabled={isSubmitting}
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs text-zinc-500">Тип стрима</label>
+          <div className="grid grid-cols-2 gap-2">
+            <label
+              className={`flex flex-col gap-1 p-3 rounded-lg border cursor-pointer transition-colors ${
+                mode === 'composite'
+                  ? 'border-brand bg-brand/10'
+                  : 'border-zinc-800 bg-surface-primary hover:border-zinc-700'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="mode"
+                  value="composite"
+                  checked={mode === 'composite'}
+                  onChange={() => setMode('composite')}
+                  className="accent-brand"
+                  disabled={isSubmitting}
+                />
+                <span className="text-sm text-zinc-200 font-medium">Composite</span>
+              </div>
+              <p className="text-[11px] text-zinc-500 leading-snug">
+                Один SRT-поток, до 4 камер в кадре (vMix)
+              </p>
+            </label>
+            <label
+              className={`flex flex-col gap-1 p-3 rounded-lg border cursor-pointer transition-colors ${
+                mode === 'multistream'
+                  ? 'border-brand bg-brand/10'
+                  : 'border-zinc-800 bg-surface-primary hover:border-zinc-700'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="mode"
+                  value="multistream"
+                  checked={mode === 'multistream'}
+                  onChange={() => setMode('multistream')}
+                  className="accent-brand"
+                  disabled={isSubmitting}
+                />
+                <span className="text-sm text-zinc-200 font-medium">Multistream</span>
+              </div>
+              <p className="text-[11px] text-zinc-500 leading-snug">
+                Отдельные потоки на камеру, раскладка в Studio
+              </p>
+            </label>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs text-zinc-500">
+            Количество камер{mode === 'composite' && <span className="text-zinc-600"> (фиксировано для composite)</span>}
+          </label>
+          <div className="grid grid-cols-4 gap-2">
+            {[1, 2, 3, 4].map((n) => {
+              const disabled = mode === 'composite' ? n !== 1 : false;
+              const active = mode === 'composite' ? n === 1 : slotCount === n;
+              return (
+                <button
+                  type="button"
+                  key={n}
+                  disabled={disabled || isSubmitting}
+                  onClick={() => setSlotCount(n)}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-all cursor-pointer disabled:cursor-not-allowed ${
+                    active
+                      ? 'bg-brand text-white'
+                      : disabled
+                        ? 'bg-surface-primary text-zinc-700 border border-zinc-800/40'
+                        : 'bg-surface-primary text-zinc-400 hover:text-zinc-200 border border-zinc-800/40'
+                  }`}
+                >
+                  {n}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {visibleError && !conflict && (
+          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs">
+            <Warning size={14} className="shrink-0 mt-0.5" weight="fill" />
+            <span>{visibleError}</span>
+          </div>
+        )}
+
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            Отмена
+          </button>
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-sm font-medium rounded-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSubmitting ? 'Создание…' : 'Создать'}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
+
+interface DeleteStreamModalProps {
+  stream: OrgStreamSummary;
+  onClose: () => void;
+  onConfirm: () => void;
+  isSubmitting: boolean;
+  errorMessage: string | null;
+}
+
+function DeleteStreamModal({ stream, onClose, onConfirm, isSubmitting, errorMessage }: DeleteStreamModalProps) {
+  return (
+    <ModalShell title="Удалить стрим?" onClose={onClose}>
+      <div className="flex flex-col gap-4">
+        <div className="flex items-start gap-3 p-3 rounded-lg bg-red-500/10 border border-red-500/30">
+          <Warning size={18} weight="fill" className="shrink-0 text-red-400 mt-0.5" />
+          <div className="text-sm text-zinc-200">
+            Стрим{' '}
+            <span className="font-semibold">«{stream.name?.trim() || stream.slug}»</span>{' '}
+            и все его записи будут удалены без возможности восстановления.
+          </div>
+        </div>
+
+        {errorMessage && (
+          <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs">
+            {errorMessage}
+          </div>
+        )}
+
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={isSubmitting}
+            className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
+          >
+            {isSubmitting ? 'Удаление…' : 'Удалить'}
+          </button>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+interface RenameStreamModalProps {
+  stream: OrgStreamSummary;
+  onClose: () => void;
+  onSubmit: (name: string) => void;
+  isSubmitting: boolean;
+  errorMessage: string | null;
+}
+
+function RenameStreamModal({ stream, onClose, onSubmit, isSubmitting, errorMessage }: RenameStreamModalProps) {
+  const [name, setName] = useState(stream.name ?? '');
+  const trimmed = name.trim();
+  const canSubmit = trimmed.length > 0 && trimmed !== stream.name && !isSubmitting;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) return;
+    onSubmit(trimmed);
+  }
+
+  return (
+    <ModalShell title="Переименовать стрим" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs text-zinc-500">Название</label>
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className={inputClasses}
+            placeholder={stream.slug}
+            disabled={isSubmitting}
+          />
+          <p className="text-xs text-zinc-600">
+            Slug <span className="font-mono text-zinc-500">/{stream.slug}</span> не меняется.
+          </p>
+        </div>
+
+        {errorMessage && (
+          <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs">
+            {errorMessage}
+          </div>
+        )}
+
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            Отмена
+          </button>
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-sm font-medium rounded-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSubmitting ? 'Сохранение…' : 'Сохранить'}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
   );
 }

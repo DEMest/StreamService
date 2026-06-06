@@ -10,6 +10,9 @@ import { PublicModule } from './public/public.module';
 import { ChatModule } from './chat/chat.module';
 import { RecordingModule } from './recording/recording.module';
 import { ThumbnailModule } from './thumbnail/thumbnail.module';
+import { StreamModule } from './stream/stream.module';
+import { StudioModule } from './studio/studio.module';
+import { EventModule } from './event/event.module';
 
 @Module({
   imports: [
@@ -23,6 +26,9 @@ import { ThumbnailModule } from './thumbnail/thumbnail.module';
     ChatModule,
     RecordingModule,
     ThumbnailModule,
+    StreamModule,
+    StudioModule,
+    EventModule,
   ],
   controllers: [HealthController],
 })

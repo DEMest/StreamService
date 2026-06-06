@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { Header } from '@/components/Header';
 import { fadeUp, staggerContainer, cardFadeUp } from '@/lib/motion';
-import type { CatalogOrg } from '@/lib/types';
+import type { CatalogItem, CatalogStreamCard } from '@/lib/types';
 import { API_BASE } from '@/lib/types';
 import { Monitor, TelevisionSimple, Play, CalendarBlank, Clock } from '@phosphor-icons/react';
 
@@ -24,9 +24,16 @@ interface BroadcastItem {
   };
 }
 
+/**
+ * Запись + контекст Stream'а, к которому она относится. Так как один Stream
+ * — атомарная единица архива (broadcasts хранятся per-Stream), здесь хранятся
+ * `orgSlug`, `streamSlug` и человекочитаемые имена для отображения.
+ */
 interface BroadcastWithOrg extends BroadcastItem {
   orgSlug: string;
+  streamSlug: string;
   orgName: string;
+  streamName: string;
 }
 
 function formatTime(seconds: number): string {
@@ -44,10 +51,25 @@ function formatDate(iso: string): string {
 
 function ArchiveCard({ broadcast }: { broadcast: BroadcastWithOrg }) {
   const [imgError, setImgError] = useState(false);
-  const thumbUrl = `${API_BASE}/v1/public/orgs/${broadcast.orgSlug}/thumbnail`;
+
+  // URL'ы зависят от того, default Stream или named.
+  const isNamed = broadcast.streamSlug !== '';
+  const thumbPath = isNamed
+    ? `/v1/public/orgs/${broadcast.orgSlug}/streams/${broadcast.streamSlug}/thumbnail`
+    : `/v1/public/orgs/${broadcast.orgSlug}/thumbnail`;
+  const archivePath = isNamed
+    ? `/watch/${broadcast.orgSlug}/${broadcast.streamSlug}/archive`
+    : `/watch/${broadcast.orgSlug}/archive`;
+  const thumbUrl = `${API_BASE}${thumbPath}`;
+
+  // Подпись «организация · стрим»: если у named-Stream'а имя совпадает с
+  // именем орги — не дублируем.
+  const sourceLabel = broadcast.streamName && broadcast.streamName !== broadcast.orgName
+    ? `${broadcast.orgName} · ${broadcast.streamName}`
+    : broadcast.orgName;
 
   return (
-    <Link href={`/watch/${broadcast.orgSlug}/archive`} className="no-underline group">
+    <Link href={archivePath} className="no-underline group">
       <article className="rounded-xl overflow-hidden bg-surface-elevated border border-zinc-800/50 hover:border-zinc-700 hover:shadow-lg hover:shadow-black/20 transition-all duration-200 active:scale-[0.99]">
         <div className="relative aspect-video bg-zinc-900 overflow-hidden">
           {!imgError ? (
@@ -82,7 +104,7 @@ function ArchiveCard({ broadcast }: { broadcast: BroadcastWithOrg }) {
             {broadcast.title}
           </p>
           <div className="flex items-center gap-2 mt-1.5">
-            <span className="text-xs text-brand font-medium truncate">{broadcast.orgName}</span>
+            <span className="text-xs text-brand font-medium truncate">{sourceLabel}</span>
             <span className="text-zinc-700">·</span>
             <span className="text-xs text-zinc-500 flex items-center gap-1 shrink-0">
               <CalendarBlank size={10} />
@@ -111,24 +133,70 @@ function ArchiveSkeleton() {
 }
 
 export default function ArchivePage() {
-  const { data: orgs, isLoading: orgsLoading } = useQuery({
+  const { data: items, isLoading: orgsLoading } = useQuery({
     queryKey: ['catalog'],
-    queryFn: () => api.get<CatalogOrg[]>('/v1/public/orgs'),
+    queryFn: () => api.get<CatalogItem[]>('/v1/public/orgs'),
   });
 
-  const orgSlugs = useMemo(() => orgs?.map(o => o.slug) ?? [], [orgs]);
+  // Архив строится поверх Stream'ов (broadcasts хранятся per-Stream).
+  //
+  // Karen H3: Event-карточка прячет свои public Stream'ы из standalone-секции
+  // каталога — но их broadcasts всё ещё нужно показать в архиве. Backend
+  // в Event-карточке отдаёт `consumedStreams[]` (см. CatalogEventCard) — это
+  // CatalogStreamCard-подобные DTO для всех public Stream'ов Event'а
+  // (live + offline). Archive объединяет видимые stream-карточки каталога с
+  // консумированными Event'ами Stream'ами.
+  const orgs = useMemo<CatalogStreamCard[]>(() => {
+    const visible = (items ?? []).filter(
+      (it): it is CatalogStreamCard => it.type === 'stream',
+    );
+    const consumed = (items ?? [])
+      .filter((it): it is Extract<typeof it, { type: 'event' }> => it.type === 'event')
+      .flatMap((ev) => ev.consumedStreams ?? []);
+    // Дедупликация по (orgSlug/streamSlug) на случай если backend случайно
+    // продублирует Stream и в standalone, и в consumed (инвариант — этого
+    // не должно быть, но защищаемся).
+    const seen = new Set<string>();
+    const merged: CatalogStreamCard[] = [];
+    for (const s of [...visible, ...consumed]) {
+      const key = `${s.orgSlug}/${s.streamSlug}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(s);
+    }
+    return merged;
+  }, [items]);
+
+  // Stable cache-key — список «orgSlug/streamSlug» строк, иначе query-key
+  // меняется по ссылке `orgs` каждый refetch.
+  const streamKeys = useMemo(
+    () => orgs.map(o => `${o.orgSlug}/${o.streamSlug}`).join(','),
+    [orgs],
+  );
 
   const { data: allBroadcasts, isLoading: broadcastsLoading } = useQuery({
-    queryKey: ['all-broadcasts', orgSlugs],
+    queryKey: ['all-broadcasts', streamKeys],
     queryFn: async () => {
-      if (!orgs?.length) return [];
+      if (!orgs.length) return [];
+      // Fetch broadcasts per Stream (default или named) — endpoint выбирается
+      // по streamSlug; для default ('') это `/orgs/<o>/broadcasts`, для named
+      // — `/orgs/<o>/streams/<s>/broadcasts`.
       const results = await Promise.all(
         orgs.map(async (org) => {
+          const path = org.streamSlug === ''
+            ? `/v1/public/orgs/${org.orgSlug}/broadcasts`
+            : `/v1/public/orgs/${org.orgSlug}/streams/${org.streamSlug}/broadcasts`;
           try {
-            const broadcasts = await api.get<BroadcastItem[]>(`/v1/public/orgs/${org.slug}/broadcasts`);
+            const broadcasts = await api.get<BroadcastItem[]>(path);
             return broadcasts
               .filter(b => b.recording?.status === 'ready')
-              .map(b => ({ ...b, orgSlug: org.slug, orgName: org.name }));
+              .map(b => ({
+                ...b,
+                orgSlug: org.orgSlug,
+                streamSlug: org.streamSlug,
+                orgName: org.orgName,
+                streamName: org.streamName,
+              }));
           } catch {
             return [];
           }
@@ -136,7 +204,7 @@ export default function ArchivePage() {
       );
       return results.flat().sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
     },
-    enabled: !!orgs?.length,
+    enabled: orgs.length > 0,
   });
 
   const isLoading = orgsLoading || broadcastsLoading;
@@ -167,7 +235,7 @@ export default function ArchivePage() {
           {allBroadcasts && allBroadcasts.length > 0 && (
             <motion.div variants={staggerContainer} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
               {allBroadcasts.map((b) => (
-                <motion.div key={b.id} variants={cardFadeUp}>
+                <motion.div key={`${b.orgSlug}/${b.streamSlug}/${b.id}`} variants={cardFadeUp}>
                   <ArchiveCard broadcast={b} />
                 </motion.div>
               ))}

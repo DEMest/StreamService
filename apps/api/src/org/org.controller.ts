@@ -18,11 +18,20 @@ export class OrgController {
     return this.org.getProfile(user.orgId!, reveal === 'true');
   }
 
+  /**
+   * @deprecated Используйте POST /v1/org/streams/:id/rotate-key.
+   * Алиас оставлен для backward-compat — переадресует на default Stream орги.
+   */
   @Post('ingest-key/rotate')
   rotateKey(@CurrentUser() user: JwtPayload) {
     return this.org.rotateKey(user.orgId!, user.orgSlug!);
   }
 
+  /**
+   * @deprecated Используйте PATCH /v1/org/streams/:id для stream-полей.
+   * Алиас оставлен для backward-compat — фронт пока шлёт сюда (chatTtlMinutes/chatEnabled
+   * всё ещё уровня Organization, переедет в Step 5).
+   */
   @Patch('stream')
   updateStreamSettings(
     @CurrentUser() user: JwtPayload,
