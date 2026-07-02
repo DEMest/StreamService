@@ -12,7 +12,8 @@
     "prisma:seed": "ts-node ../../prisma/seed.ts",
     "prisma:push": "dotenv -e ../../.env -- prisma db push",
     "prisma:migrate-data:populate-streams": "dotenv -e ../../.env -- ts-node ../../prisma/data/001-populate-streams.ts",
-    "prisma:migrate-data:chat-to-stream": "dotenv -e ../../.env -- ts-node ../../prisma/data/002-chat-migrate-to-stream.ts"
+    "prisma:migrate-data:chat-to-stream": "dotenv -e ../../.env -- ts-node ../../prisma/data/002-chat-migrate-to-stream.ts",
+    "prisma:migrate-data:backfill-default-slug": "dotenv -e ../../.env -- ts-node ../../prisma/data/003-backfill-default-stream-slug.ts"
   },
   "prisma": {
     "schema": "../../prisma/schema.prisma"

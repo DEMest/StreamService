@@ -1,3 +1,11 @@
+jest.mock('sharp', () => {
+  return jest.fn(() => ({
+    resize: jest.fn().mockReturnThis(),
+    jpeg: jest.fn().mockReturnThis(),
+    toFile: jest.fn().mockResolvedValue(undefined),
+  }));
+});
+
 import { Test } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -12,9 +20,11 @@ import { StreamService } from './stream.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
+import { ChatService } from '../chat/chat.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { JwtPayload } from '../auth/auth.service';
+import { promises as fsPromises } from 'fs';
 
 /**
  * Тесты идут «снаружи» через контроллер, но сам JwtAuthGuard / RolesGuard не
@@ -52,6 +62,7 @@ const mockMediamtx = {
 };
 
 const mockRecording = { onStreamEnded: jest.fn().mockResolvedValue(undefined) };
+const mockChatService = { clearMessagesByStream: jest.fn() };
 
 const orgAdmin: JwtPayload = {
   sub: 'u1',
@@ -65,6 +76,11 @@ describe('StreamController', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // spy on fs.promises methods individually (not jest.mock('fs', ...)) —
+    // сохраняет реальный fs для остальной инфраструктуры, см. паттерн в
+    // recording.service.spec.ts.
+    jest.spyOn(fsPromises, 'mkdir').mockResolvedValue(undefined as any);
+    jest.spyOn(fsPromises, 'unlink').mockResolvedValue(undefined as any);
     const module = await Test.createTestingModule({
       controllers: [StreamController],
       providers: [
@@ -72,6 +88,7 @@ describe('StreamController', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: MediamtxService, useValue: mockMediamtx },
         { provide: RecordingService, useValue: mockRecording },
+        { provide: ChatService, useValue: mockChatService },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -517,19 +534,6 @@ describe('StreamController', () => {
       expect(mockPrisma.stream.delete).toHaveBeenCalledWith({ where: { id: 'st-1' } });
     });
 
-    it('rejects deletion of default Stream (slug="") with 400', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({
-        id: 'st-default', orgId: 'org-1', slug: '',
-        ingestKey: 'k', previewKey: null,
-        org: { slug: 'club' },
-      });
-
-      await expect(controller.remove(orgAdmin, 'st-default'))
-        .rejects.toBeInstanceOf(BadRequestException);
-      expect(mockMediamtx.deleteStreamPaths).not.toHaveBeenCalled();
-      expect(mockPrisma.stream.delete).not.toHaveBeenCalled();
-    });
-
     it('returns 404 when stream belongs to another org', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue(null);
       await expect(controller.remove(orgAdmin, 'st-foreign'))
@@ -592,6 +596,108 @@ describe('StreamController', () => {
       expect(mockMediamtx.deleteStreamPaths).toHaveBeenCalled();
       // Prisma delete всё равно выполнен.
       expect(mockPrisma.stream.delete).toHaveBeenCalledWith({ where: { id: 'st-1' } });
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // POST /:id/preview
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('POST /:id/preview', () => {
+    const fakeFile = (overrides: any = {}) => ({
+      fieldname: 'file', originalname: 'preview.jpg', encoding: '7bit',
+      mimetype: 'image/jpeg', buffer: Buffer.from('fake-image-bytes'), size: 17,
+      ...overrides,
+    }) as Express.Multer.File;
+
+    it('uploads preview and returns previewImagePath', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        id: 'st-1', orgId: 'org-1', slug: '',
+        org: { slug: 'club' },
+      });
+      mockPrisma.stream.update.mockResolvedValue({});
+
+      const r = await controller.uploadPreview(orgAdmin, 'st-1', fakeFile());
+
+      expect(r).toEqual({ ok: true, previewImagePath: 'previews/st-1.jpg' });
+      expect(mockPrisma.stream.update).toHaveBeenCalledWith({
+        where: { id: 'st-1' },
+        data: { previewImagePath: 'previews/st-1.jpg' },
+      });
+    });
+
+    it('rejects when no file uploaded (400)', () => {
+      // uploadPreview validates synchronously (throws directly, not a rejected Promise).
+      expect(() => controller.uploadPreview(orgAdmin, 'st-1', undefined as any))
+        .toThrow(BadRequestException);
+      expect(mockPrisma.stream.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects unsupported mimetype (400)', () => {
+      expect(() =>
+        controller.uploadPreview(orgAdmin, 'st-1', fakeFile({ mimetype: 'application/pdf' })),
+      ).toThrow(BadRequestException);
+      expect(mockPrisma.stream.update).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 for cross-tenant stream', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(null);
+      await expect(controller.uploadPreview(orgAdmin, 'st-foreign', fakeFile()))
+        .rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // DELETE /:id/preview
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('DELETE /:id/preview', () => {
+    it('deletes preview and clears previewImagePath', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        id: 'st-1', orgId: 'org-1', slug: '',
+        org: { slug: 'club' },
+      });
+      mockPrisma.stream.update.mockResolvedValue({});
+
+      const r = await controller.deletePreview(orgAdmin, 'st-1');
+
+      expect(r).toEqual({ ok: true });
+      expect(mockPrisma.stream.update).toHaveBeenCalledWith({
+        where: { id: 'st-1' },
+        data: { previewImagePath: null },
+      });
+    });
+
+    it('returns 404 for cross-tenant stream', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(null);
+      await expect(controller.deletePreview(orgAdmin, 'st-foreign'))
+        .rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // POST /:id/chat/clear
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('POST /:id/chat/clear', () => {
+    it('delegates to chatService.clearMessagesByStream(id)', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        id: 'st-1', orgId: 'org-1', slug: '',
+        org: { slug: 'club' },
+      });
+      mockChatService.clearMessagesByStream.mockResolvedValue({ deleted: 5 });
+
+      const r = await controller.clearChat(orgAdmin, 'st-1');
+
+      expect(mockChatService.clearMessagesByStream).toHaveBeenCalledWith('st-1');
+      expect(r).toEqual({ deleted: 5 });
+    });
+
+    it('returns 404 for cross-tenant stream', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(null);
+      await expect(controller.clearChat(orgAdmin, 'st-foreign'))
+        .rejects.toBeInstanceOf(NotFoundException);
+      expect(mockChatService.clearMessagesByStream).not.toHaveBeenCalled();
     });
   });
 });

@@ -19,6 +19,8 @@ import {
   VideoCamera,
   CaretLeft,
   ArrowRight,
+  ImageSquare,
+  Upload,
 } from '@phosphor-icons/react';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -31,6 +33,8 @@ interface StreamDetail {
   isPublic: boolean;
   previewKey?: string;
   previewMode: string;
+  feedMode: 'single' | 'composite';
+  previewImagePath?: string | null;
   isLive: boolean;
   ingestKey?: string;
   ingestKeyCreatedAt?: string;
@@ -129,7 +133,7 @@ export default function StreamDetailPage() {
   });
 
   const updateStream = useMutation({
-    mutationFn: (patch: Partial<Pick<StreamDetail, 'name' | 'description' | 'isPublic' | 'previewMode'>>) =>
+    mutationFn: (patch: Partial<Pick<StreamDetail, 'name' | 'description' | 'isPublic' | 'previewMode' | 'feedMode'>>) =>
       api.patch(`/v1/org/streams/${id}`, patch),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream-detail', id] }),
   });
@@ -143,6 +147,30 @@ export default function StreamDetailPage() {
   const deleteBroadcast = useMutation({
     mutationFn: (bid: string) => api.delete(`/v1/org/broadcasts/${bid}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream-broadcasts', id] }),
+  });
+
+  const uploadPreview = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/org/streams/${id}/preview`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      return res.json();
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream-detail', id] }),
+  });
+
+  const deletePreview = useMutation({
+    mutationFn: () => api.delete(`/v1/org/streams/${id}/preview`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream-detail', id] }),
+  });
+
+  const clearChat = useMutation({
+    mutationFn: () => api.post(`/v1/org/streams/${id}/chat/clear`),
   });
 
   // ── Derived ingest URLs ──
@@ -511,6 +539,89 @@ export default function StreamDetailPage() {
                 <option value="cam4">Камера 4 (нижний правый)</option>
               </select>
             </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-zinc-500">Формат трансляции</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => updateStream.mutate({ feedMode: 'composite' })}
+                  className={`flex flex-col gap-1 p-3 rounded-lg border text-left cursor-pointer transition-colors ${
+                    stream.feedMode === 'composite' ? 'border-brand bg-brand/10' : 'border-zinc-800 bg-surface-primary hover:border-zinc-700'
+                  }`}
+                >
+                  <span className="text-sm text-zinc-200 font-medium">Composite</span>
+                  <span className="text-[11px] text-zinc-500 leading-snug">Единый кадр с несколькими камерами (vMix), зритель кропает квадранты</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateStream.mutate({ feedMode: 'single' })}
+                  className={`flex flex-col gap-1 p-3 rounded-lg border text-left cursor-pointer transition-colors ${
+                    stream.feedMode === 'single' ? 'border-brand bg-brand/10' : 'border-zinc-800 bg-surface-primary hover:border-zinc-700'
+                  }`}
+                >
+                  <span className="text-sm text-zinc-200 font-medium">Single</span>
+                  <span className="text-[11px] text-zinc-500 leading-snug">Одна камера целиком, для холста-компоновки на стороне зрителя</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-zinc-800/40">
+              <span className="text-xs text-zinc-500">Удалить все сообщения чата этого стрима</span>
+              <button
+                onClick={() => {
+                  if (clearChat.isPending) return;
+                  if (confirm('Удалить все сообщения чата этого стрима? Действие необратимо.')) clearChat.mutate();
+                }}
+                disabled={clearChat.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-zinc-100 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Trash size={12} />
+                {clearChat.isPending ? 'Очистка...' : 'Очистить чат'}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* Section: Preview image */}
+        <section className="bg-surface-elevated border border-zinc-800/50 rounded-xl p-5">
+          <h2 className="flex items-center gap-2 text-base font-medium text-zinc-300 mb-4">
+            <ImageSquare size={18} className="text-zinc-400" />
+            Статичное превью (когда стрим не идёт)
+          </h2>
+          <div className="flex flex-col gap-4">
+            {stream.previewImagePath ? (
+              <div className="flex items-center gap-4">
+                <img
+                  src={`${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/public/orgs/${orgSlug}/streams/${streamSlug}/thumbnail?t=${Date.now()}`}
+                  alt="Текущее превью"
+                  className="w-40 aspect-video object-cover rounded-lg border border-zinc-700"
+                />
+                <button
+                  onClick={() => { if (confirm('Удалить превью?')) deletePreview.mutate(); }}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-red-900/30 hover:bg-red-900/60 text-red-400 hover:text-red-300 text-xs rounded-lg transition-all active:scale-[0.98] cursor-pointer"
+                >
+                  <Trash size={12} /> Удалить
+                </button>
+              </div>
+            ) : (
+              <p className="text-zinc-600 text-xs">Не установлено</p>
+            )}
+            <label className="flex items-center gap-2 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-lg transition-all cursor-pointer w-fit">
+              <Upload size={14} />
+              Загрузить изображение
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) uploadPreview.mutate(file);
+                  e.target.value = '';
+                }}
+                className="hidden"
+              />
+            </label>
+            {uploadPreview.isPending && <p className="text-zinc-500 text-xs">Загрузка...</p>}
           </div>
         </section>
 

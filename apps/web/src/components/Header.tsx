@@ -4,7 +4,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/lib/api';
-import { Broadcast, SignIn, SignOut, Monitor, List, X } from '@phosphor-icons/react';
+import { Broadcast, SignIn, SignOut, Monitor, List, X, Buildings } from '@phosphor-icons/react';
 
 interface Me { sub: string; role: string; orgSlug?: string }
 
@@ -76,13 +76,23 @@ export function Header() {
                   Моя страница
                 </Link>
               )}
-              <Link
-                href="/dashboard"
-                className="flex items-center gap-1.5 bg-brand hover:bg-brand-hover text-white no-underline text-sm font-medium px-3 py-1.5 rounded-lg transition-all duration-200 active:scale-[0.98]"
-              >
-                <Broadcast size={16} weight="fill" />
-                Студия
-              </Link>
+              {me.role === 'superadmin' ? (
+                <Link
+                  href="/admin"
+                  className="flex items-center gap-1.5 bg-brand hover:bg-brand-hover text-white no-underline text-sm font-medium px-3 py-1.5 rounded-lg transition-all duration-200 active:scale-[0.98]"
+                >
+                  <Buildings size={16} weight="fill" />
+                  Организации
+                </Link>
+              ) : (
+                <Link
+                  href="/dashboard"
+                  className="flex items-center gap-1.5 bg-brand hover:bg-brand-hover text-white no-underline text-sm font-medium px-3 py-1.5 rounded-lg transition-all duration-200 active:scale-[0.98]"
+                >
+                  <Broadcast size={16} weight="fill" />
+                  Студия
+                </Link>
+              )}
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 bg-transparent border border-zinc-800 px-3 py-1.5 rounded-lg text-sm transition-all duration-200 hover:border-zinc-700 hover:bg-zinc-800/50 active:scale-[0.98] cursor-pointer"
@@ -139,10 +149,17 @@ export function Header() {
                       <Monitor size={16} /> Моя страница
                     </Link>
                   )}
-                  <Link href="/dashboard" onClick={() => setMenuOpen(false)}
-                    className="flex items-center gap-2 px-4 py-3 text-brand no-underline text-sm font-medium rounded-lg hover:bg-brand/10 transition-colors">
-                    <Broadcast size={16} weight="fill" /> Студия
-                  </Link>
+                  {me.role === 'superadmin' ? (
+                    <Link href="/admin" onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-2 px-4 py-3 text-brand no-underline text-sm font-medium rounded-lg hover:bg-brand/10 transition-colors">
+                      <Buildings size={16} weight="fill" /> Организации
+                    </Link>
+                  ) : (
+                    <Link href="/dashboard" onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-2 px-4 py-3 text-brand no-underline text-sm font-medium rounded-lg hover:bg-brand/10 transition-colors">
+                      <Broadcast size={16} weight="fill" /> Студия
+                    </Link>
+                  )}
                   <button onClick={() => { handleLogout(); setMenuOpen(false); }}
                     className="flex items-center gap-2 px-4 py-3 text-zinc-500 hover:text-zinc-300 bg-transparent border-none text-sm rounded-lg hover:bg-zinc-800/40 transition-colors cursor-pointer text-left w-full">
                     <SignOut size={16} /> Выйти

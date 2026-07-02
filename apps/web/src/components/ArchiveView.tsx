@@ -44,40 +44,25 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '/api';
 
 interface ArchiveViewProps {
   orgSlug: string;
-  /**
-   * Named Stream slug. Empty string '' / undefined ⇒ default Stream орги
-   * (backward-compat: путь `/watch/<orgSlug>/archive`).
-   */
-  streamSlug?: string;
+  streamSlug: string;
 }
 
 /**
- * Универсальный archive-компонент: рендерит список broadcast'ов и плеер
- * recording'а для default Stream'а и для named Stream'а.
+ * Archive-компонент конкретного Stream'а: рендерит список broadcast'ов и
+ * плеер recording'а для Stream'а `<orgSlug>/<streamSlug>`.
  *
- * Различия сводятся к URL'ам endpoint'ов:
- *   default ('')   → /v1/public/orgs/<org>/broadcasts
- *                  → /api/v1/public/orgs/<org>/broadcasts/<id>/recording/hls/master.m3u8
- *                  → /v1/public/orgs/<org>/thumbnail
- *   named  (foo)   → /v1/public/orgs/<org>/streams/<stream>/broadcasts
- *                  → /api/v1/public/orgs/<org>/streams/<stream>/broadcasts/<id>/recording/hls/master.m3u8
- *                  → /v1/public/orgs/<org>/streams/<stream>/thumbnail
+ * URL'ы endpoint'ов:
+ *   /v1/public/orgs/<org>/streams/<stream>/broadcasts
+ *   /api/v1/public/orgs/<org>/streams/<stream>/broadcasts/<id>/recording/hls/master.m3u8
+ *   /v1/public/orgs/<org>/streams/<stream>/thumbnail
  *
- * Кнопка «← к стриму» ведёт на соответствующую watch-страницу:
- *   default ('')   → /watch/<org>
- *   named  (foo)   → /watch/<org>/<stream>
+ * Кнопка «← к стриму» ведёт на watch-страницу `/watch/<org>/<stream>`.
  */
 export function ArchiveView({ orgSlug, streamSlug }: ArchiveViewProps) {
-  const sSlug = streamSlug && streamSlug.length > 0 ? streamSlug : '';
-  const isNamed = sSlug !== '';
-  const apiBasePath = isNamed
-    ? `/v1/public/orgs/${orgSlug}/streams/${sSlug}`
-    : `/v1/public/orgs/${orgSlug}`;
+  const apiBasePath = `/v1/public/orgs/${orgSlug}/streams/${streamSlug}`;
   // Recording playback URL формируется RecordingController'ом — он живёт под
-  // `/api/v1/public/orgs/<org>[/streams/<stream>]/broadcasts/<id>/recording/hls/*`.
-  const recordingBasePath = isNamed
-    ? `/api/v1/public/orgs/${orgSlug}/streams/${sSlug}`
-    : `/api/v1/public/orgs/${orgSlug}`;
+  // `/api/v1/public/orgs/<org>/streams/<stream>/broadcasts/<id>/recording/hls/*`.
+  const recordingBasePath = `/api/v1/public/orgs/${orgSlug}/streams/${streamSlug}`;
 
   const searchParams = useSearchParams();
   const previewKey = searchParams.get('key') ?? undefined;
@@ -104,7 +89,7 @@ export function ArchiveView({ orgSlug, streamSlug }: ArchiveViewProps) {
     : `${apiBasePath}/broadcasts`;
 
   const { data: broadcasts, isLoading } = useQuery({
-    queryKey: ['broadcasts', orgSlug, sSlug, previewKey],
+    queryKey: ['broadcasts', orgSlug, streamSlug, previewKey],
     queryFn: () => api.get<BroadcastItem[]>(url),
     // Пока есть хоть одна processing-запись — поллим каждые 5 сек, чтобы карточка
     // обновилась как только конвертация завершится.
@@ -119,10 +104,7 @@ export function ArchiveView({ orgSlug, streamSlug }: ArchiveViewProps) {
     ? `${recordingBasePath}/broadcasts/${selectedId}/recording/hls/master.m3u8`
     : null;
 
-  // Линк на watch — для default это `/watch/<org>`, для named — `/watch/<org>/<stream>`.
-  const watchBasePath = isNamed
-    ? `/watch/${orgSlug}/${sSlug}`
-    : `/watch/${orgSlug}`;
+  const watchBasePath = `/watch/${orgSlug}/${streamSlug}`;
   const watchLink = previewKey ? `${watchBasePath}?key=${previewKey}` : watchBasePath;
   const thumbUrl = `${API_BASE}${apiBasePath}/thumbnail`;
 

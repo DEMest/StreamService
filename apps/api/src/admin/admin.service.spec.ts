@@ -2,7 +2,7 @@ import { Test } from '@nestjs/testing';
 import { AdminService } from './admin.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 
 const mockPrisma = {
   organization: {
@@ -39,33 +39,29 @@ describe('AdminService', () => {
     service = module.get(AdminService);
   });
 
-  it('creates org with generated ingestKey and registers default Stream paths', async () => {
+  it('creates org with name defaulted to slug (login)', async () => {
     mockPrisma.organization.create.mockResolvedValue({
-      id: '1', slug: 'club', name: 'Club', isActive: true, createdAt: new Date(),
+      id: '1', slug: 'club', name: 'club', isActive: true, createdAt: new Date(),
     });
-    mockPrisma.stream.create.mockResolvedValue({ id: 's1' });
-    const result = await service.createOrg({ slug: 'club', name: 'Club', password: 'pass' });
+    const result = await service.createOrg({ slug: 'club', password: 'pass' });
     expect(result.slug).toBe('club');
-    // default Stream → один путь 'live/club'
-    expect(mockMediamtx.addStreamPaths).toHaveBeenCalledWith('club', '', expect.any(String));
+    expect(mockPrisma.organization.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ slug: 'club', name: 'club' }),
+    }));
+    // Stream'ы больше не создаются автоматически при создании орги (Task 2).
+    expect(mockPrisma.stream.create).not.toHaveBeenCalled();
   });
 
-  it('creates Org with a default Stream (slug=\'\', mode=composite)', async () => {
-    mockPrisma.organization.create.mockResolvedValue({
-      id: 'o1', slug: 'club', name: 'Club', isActive: true, createdAt: new Date(),
-    });
-    mockPrisma.stream.create.mockResolvedValue({ id: 's1' });
+  it('throws ConflictException when slug already taken', async () => {
+    const p2002 = Object.assign(new Error('Unique constraint'), { code: 'P2002' });
+    mockPrisma.organization.create.mockRejectedValue(p2002);
+    await expect(service.createOrg({ slug: 'club', password: 'pass' })).rejects.toBeInstanceOf(ConflictException);
+  });
 
-    await service.createOrg({ slug: 'club', name: 'Club', password: 'p' });
-
-    expect(mockPrisma.stream.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        orgId: 'o1',
-        slug: '',
-        ingestKey: expect.any(String),
-      }),
-    }));
-    expect(mockMediamtx.addStreamPaths).toHaveBeenCalledWith('club', '', expect.any(String));
+  it('throws ConflictException when renaming org to an already-taken name', async () => {
+    const p2002 = Object.assign(new Error('Unique constraint'), { code: 'P2002' });
+    mockPrisma.organization.update.mockRejectedValue(p2002);
+    await expect(service.updateOrg('club', { name: 'taken' })).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('throws NotFoundException when deleting non-existent org', async () => {

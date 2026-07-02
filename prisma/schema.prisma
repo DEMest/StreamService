@@ -18,7 +18,7 @@ model User {
 model Organization {
   id             String        @id @default(cuid())
   slug           String        @unique
-  name           String
+  name           String        @unique
   description    String?
   passwordHash   String
   isActive       Boolean       @default(true)
@@ -34,7 +34,7 @@ model Stream {
   id                 String        @id @default(cuid())
   orgId              String
   org                Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  slug               String // unique per org; '' для default-стрима орга
+  slug               String // unique per org; обязателен, непустой
   name               String        @default("")
   description        String?
   ingestKey          String        @unique
@@ -42,6 +42,7 @@ model Stream {
   isPublic           Boolean       @default(true)
   previewKey         String?       @unique
   previewMode        String        @default("multicam")
+  feedMode           String        @default("composite") // 'single' | 'composite'
   previewImagePath   String?
   isLive             Boolean       @default(false)
   recordingEnabled   Boolean       @default(true)

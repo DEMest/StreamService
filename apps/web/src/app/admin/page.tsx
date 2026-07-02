@@ -10,7 +10,7 @@ interface Org { id: string; slug: string; name: string; isActive: boolean; creat
 
 export default function AdminPage() {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ slug: '', name: '', password: '' });
+  const [form, setForm] = useState({ slug: '', password: '' });
   const [showCreate, setShowCreate] = useState(false);
 
   const { data: orgs } = useQuery({
@@ -20,7 +20,7 @@ export default function AdminPage() {
 
   const createMutation = useMutation({
     mutationFn: (data: typeof form) => api.post('/v1/admin/orgs', data),
-    onSuccess: () => { setForm({ slug: '', name: '', password: '' }); setShowCreate(false); qc.invalidateQueries({ queryKey: ['admin-orgs'] }); },
+    onSuccess: () => { setForm({ slug: '', password: '' }); setShowCreate(false); qc.invalidateQueries({ queryKey: ['admin-orgs'] }); },
   });
 
   const toggleMutation = useMutation({
@@ -62,10 +62,12 @@ export default function AdminPage() {
             onSubmit={(e) => { e.preventDefault(); createMutation.mutate(form); }}
             className="bg-surface-elevated border border-zinc-800 rounded-xl p-5 mb-6 flex flex-col gap-4"
           >
-            <h2 className="text-base font-medium text-zinc-200">Новая организация</h2>
+            <div>
+              <h2 className="text-base font-medium text-zinc-200">Новая организация</h2>
+              <p className="text-xs text-zinc-500 mt-1">Название по умолчанию совпадает с логином — организация сможет поменять его в своём дашборде.</p>
+            </div>
             {[
-              { key: 'slug' as const, placeholder: 'Slug (логин, URL)', label: 'Slug' },
-              { key: 'name' as const, placeholder: 'Название организации', label: 'Название' },
+              { key: 'slug' as const, placeholder: 'Логин для входа', label: 'Логин' },
               { key: 'password' as const, placeholder: 'Пароль для входа', label: 'Пароль' },
             ].map(({ key, placeholder, label }) => (
               <div key={key} className="flex flex-col gap-1.5">

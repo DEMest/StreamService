@@ -1,24 +1,17 @@
 /**
- * Карточка каталога (backend: `GET /v1/public/orgs`).
- * Один Stream = одна карточка. Ссылка → `/watch/<orgSlug>[/streamSlug]`.
+ * Карточка каталога (backend: `GET /v1/public/orgs`) — одна на орг.
+ * Ссылка → `/watch/<orgSlug>` (обзор орги).
  */
-export interface CatalogStreamCard {
+export interface CatalogOrgCard {
   orgSlug: string;
   orgName: string;
-  streamSlug: string;
-  streamName: string;
-  isLive: boolean;
+  liveCount: number;
   previewMode: string;
   hasCustomPreview: boolean;
+  /** slug репрезентативного Stream'а для построения per-stream thumbnail URL; null — нет публичных Stream'ов. */
+  representativeStreamSlug: string | null;
 }
 
-export type CatalogItem = CatalogStreamCard;
-
-/**
- * @deprecated — legacy-имя для CatalogStreamCard. Сохранено для обратной
- * совместимости с уже импортирующими модулями (`OrgCard.tsx`); новый код
- * должен использовать `CatalogStreamCard` или `CatalogItem`.
- */
-export type CatalogOrg = CatalogStreamCard;
+export type CatalogItem = CatalogOrgCard;
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '/api';

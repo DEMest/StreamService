@@ -9,7 +9,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
+import { ChatService } from '../chat/chat.service';
 import { randomBytes } from 'crypto';
+import * as sharp from 'sharp';
+import { promises as fsPromises } from 'fs';
+import { join } from 'path';
 
 const VALID_PREVIEW_MODES = ['multicam', 'cam1', 'cam2', 'cam3', 'cam4'];
 
@@ -45,8 +49,7 @@ const RESERVED_STREAM_SLUGS = new Set([
  * Правила:
  *   - длина 1..32
  *   - lowercase letters/digits, разделитель `-` (но не в начале/конце и без двойных)
- *   - пустой slug запрещён (зарезервирован под default Stream орги, создаваемый
- *     админом через admin.createOrg).
+ *   - пустой slug запрещён.
  *   - slug не из {@link RESERVED_STREAM_SLUGS} — иначе frontend/backend
  *     не сможет резолвить путь до dynamic-роута Stream'а.
  *   - чисто-числовой slug запрещён — во избежание неоднозначных числовых
@@ -60,9 +63,7 @@ export function validateStreamSlug(input: unknown): string {
   }
   const slug = input.trim();
   if (slug === '') {
-    throw new BadRequestException(
-      'slug must not be empty (empty slug is reserved for the default Stream)',
-    );
+    throw new BadRequestException('slug must not be empty');
   }
   if (slug.length > STREAM_SLUG_MAX_LEN) {
     throw new BadRequestException(`slug too long (max ${STREAM_SLUG_MAX_LEN} chars)`);
@@ -78,9 +79,7 @@ export function validateStreamSlug(input: unknown): string {
     );
   }
   if (/^\d+$/.test(slug)) {
-    throw new BadRequestException(
-      'slug must not be purely numeric',
-    );
+    throw new BadRequestException('slug must not be purely numeric');
   }
   return slug;
 }
@@ -96,6 +95,7 @@ export interface UpdateStreamConfigInput {
   description?: string;
   isPublic?: boolean;
   previewMode?: string;
+  feedMode?: 'single' | 'composite';
   autoStartMode?: 'public' | 'test';
 }
 
@@ -110,6 +110,7 @@ const STREAM_DTO_FIELDS = {
   isPublic: true,
   previewKey: true,
   previewMode: true,
+  feedMode: true,
   previewImagePath: true,
   isLive: true,
   autoStartMode: true,
@@ -159,15 +160,8 @@ export class StreamService {
     private prisma: PrismaService,
     private mediamtx: MediamtxService,
     private recording: RecordingService,
+    private chatService: ChatService,
   ) {}
-
-  async getDefaultStream(orgId: string) {
-    const stream = await this.prisma.stream.findUnique({
-      where: { orgId_slug: { orgId, slug: '' } },
-    });
-    if (!stream) throw new NotFoundException('Default Stream not found for org');
-    return stream;
-  }
 
   async getStreamWithOrg(streamId: string) {
     const stream = await this.prisma.stream.findUnique({
@@ -509,8 +503,7 @@ export class StreamService {
    * POST /v1/org/streams — создать новый Stream внутри орги.
    *
    * Slug должен быть непустым и уникальным per orgId (БД-ограничение
-   * `@@unique([orgId, slug])`). Default Stream (slug='') создаётся только через
-   * admin.createOrg при заведении орги — здесь явно блокируется
+   * `@@unique([orgId, slug])`) — пустой slug блокируется
    * {@link validateStreamSlug}.
    *
    * Атомарность:
@@ -588,8 +581,6 @@ export class StreamService {
    *
    * Защиты:
    *   - cross-tenant → 404 ({@link loadForOrg}).
-   *   - default Stream (slug='') → 400. Default-стрим удаляется только каскадом
-   *     через admin.deleteOrg вместе с орги — это инвариант данных.
    *
    * Атомарность:
    *   1. MediaMTX deleteStreamPaths (best-effort, идемпотентно).
@@ -602,11 +593,6 @@ export class StreamService {
    */
   async deleteForOrg(orgId: string, streamId: string) {
     const stream = await this.loadForOrg(orgId, streamId);
-    if (stream.slug === '') {
-      throw new BadRequestException(
-        'Default Stream cannot be deleted; it is removed when the organization is deleted',
-      );
-    }
 
     // Не удаляем Stream пока он в live-режиме: иначе на лету пропадут
     // MediaMTX-пути под активным publish'ем (vMix получит ошибку), а зрители
@@ -649,6 +635,9 @@ export class StreamService {
         `Invalid previewMode. Allowed: ${VALID_PREVIEW_MODES.join(', ')}`,
       );
     }
+    if (body.feedMode !== undefined && body.feedMode !== 'single' && body.feedMode !== 'composite') {
+      throw new BadRequestException('feedMode must be "single" or "composite"');
+    }
     if (body.autoStartMode !== undefined && body.autoStartMode !== 'public' && body.autoStartMode !== 'test') {
       throw new BadRequestException('autoStartMode must be "public" or "test"');
     }
@@ -657,6 +646,7 @@ export class StreamService {
     if (body.name !== undefined) updateData.name = body.name;
     if (body.description !== undefined) updateData.description = body.description;
     if (body.previewMode !== undefined) updateData.previewMode = body.previewMode;
+    if (body.feedMode !== undefined) updateData.feedMode = body.feedMode;
     if (body.autoStartMode !== undefined) updateData.autoStartMode = body.autoStartMode;
 
     if (body.isPublic === false) {
@@ -678,6 +668,56 @@ export class StreamService {
     return this.toDto(updated);
   }
 
+  private getPreviewUploadsDir(): string {
+    return join(process.cwd(), 'uploads', 'previews');
+  }
+
+  /**
+   * Загрузка статичного превью Stream'а (показывается когда Stream offline).
+   * Файл именуется по Stream.id (не по slug — slug можно поменять переименованием,
+   * id стабилен). Cross-tenant → 404.
+   */
+  async uploadPreviewForOrg(orgId: string, streamId: string, fileBuffer: Buffer): Promise<{ ok: true; previewImagePath: string }> {
+    await this.loadForOrg(orgId, streamId);
+    const dir = this.getPreviewUploadsDir();
+    await fsPromises.mkdir(dir, { recursive: true });
+
+    const filename = `${streamId}.jpg`;
+    const filePath = join(dir, filename);
+
+    await sharp(fileBuffer)
+      .resize(640, 360, { fit: 'cover' })
+      .jpeg({ quality: 80 })
+      .toFile(filePath);
+
+    const relativePath = `previews/${filename}`;
+    await this.prisma.stream.update({
+      where: { id: streamId },
+      data: { previewImagePath: relativePath },
+    });
+
+    return { ok: true, previewImagePath: relativePath };
+  }
+
+  async deletePreviewForOrg(orgId: string, streamId: string): Promise<{ ok: true }> {
+    await this.loadForOrg(orgId, streamId);
+    const filePath = join(this.getPreviewUploadsDir(), `${streamId}.jpg`);
+    await fsPromises.unlink(filePath).catch(() => {});
+    await this.prisma.stream.update({
+      where: { id: streamId },
+      data: { previewImagePath: null },
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Очистить чат конкретного Stream'а. Cross-tenant → 404.
+   */
+  async clearChatForOrg(orgId: string, streamId: string) {
+    await this.loadForOrg(orgId, streamId);
+    return this.chatService.clearMessagesByStream(streamId);
+  }
+
   /**
    * Нормализация row в DTO. ingestKey пропускается, если reveal=false.
    */
@@ -690,6 +730,7 @@ export class StreamService {
       isPublic: row.isPublic,
       previewKey: row.previewKey,
       previewMode: row.previewMode,
+      feedMode: row.feedMode,
       previewImagePath: row.previewImagePath ?? null,
       isLive: row.isLive,
       recordingEnabled: row.recordingEnabled,

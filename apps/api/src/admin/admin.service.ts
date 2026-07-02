@@ -1,7 +1,6 @@
 import { ConflictException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
-import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -56,34 +55,18 @@ export class AdminService implements OnModuleInit {
     }
   }
 
-  private generateIngestKey(): string {
-    return randomBytes(18).toString('base64url');
-  }
-
-  async createOrg(data: { slug: string; name: string; password: string }) {
-    const ingestKey = this.generateIngestKey();
+  /**
+   * Название организации по умолчанию равно логину (slug) — орга сможет
+   * поменять его на человекочитаемое из дашборда (PATCH /v1/org/settings),
+   * с проверкой на уникальность.
+   */
+  async createOrg(data: { slug: string; password: string }) {
     const passwordHash = await bcrypt.hash(data.password, 10);
     try {
       const org = await this.prisma.organization.create({
-        data: { slug: data.slug, name: data.name, passwordHash },
+        data: { slug: data.slug, name: data.slug, passwordHash },
         select: { id: true, slug: true, name: true, isActive: true, createdAt: true },
       });
-
-      // Создать default Stream сразу
-      await this.prisma.stream.create({
-        data: {
-          orgId: org.id,
-          slug: '',
-          name: '',
-          ingestKey,
-          isPublic: true,
-          previewMode: 'multicam',
-          autoStartMode: 'public',
-        },
-      });
-
-      // Default Stream → один путь 'live/<orgSlug>'
-      await this.mediamtx.addStreamPaths(data.slug, '', ingestKey);
       return org;
     } catch (e: any) {
       if (e.code === 'P2002') throw new ConflictException(`Slug '${data.slug}' already taken`);
@@ -107,6 +90,7 @@ export class AdminService implements OnModuleInit {
       });
     } catch (e: any) {
       if (e.code === 'P2025') throw new NotFoundException(`Org '${slug}' not found`);
+      if (e.code === 'P2002') throw new ConflictException(`Name '${data.name}' already taken`);
       throw e;
     }
   }

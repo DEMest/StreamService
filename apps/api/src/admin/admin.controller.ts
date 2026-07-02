@@ -15,7 +15,7 @@ export class AdminController {
   ) {}
 
   @Post('orgs')
-  createOrg(@Body() body: { slug: string; name: string; password: string }) {
+  createOrg(@Body() body: { slug: string; password: string }) {
     return this.admin.createOrg(body);
   }
 

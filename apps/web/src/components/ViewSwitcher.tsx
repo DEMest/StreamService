@@ -16,12 +16,18 @@ const COMPOSITE_MODES: { key: CompositeViewMode; label: string }[] = [
 type Props = {
   mode: CompositeViewMode;
   onChange: (mode: CompositeViewMode) => void;
+  /** 'single' — Stream это одна камера целиком, кроп по квадрантам не показывается. */
+  feedMode?: 'single' | 'composite';
 };
 
-export default function ViewSwitcher({ mode, onChange }: Props) {
+export default function ViewSwitcher({ mode, onChange, feedMode = 'composite' }: Props) {
+  const options = feedMode === 'single'
+    ? COMPOSITE_MODES.filter((m) => m.key === 'multicam')
+    : COMPOSITE_MODES;
+
   return (
     <div className="flex flex-col gap-1.5">
-      {COMPOSITE_MODES.map((m) => {
+      {options.map((m) => {
         const active = mode === m.key;
         return (
           <button
@@ -39,7 +45,7 @@ export default function ViewSwitcher({ mode, onChange }: Props) {
             ) : (
               <VideoCamera size={16} weight={active ? 'fill' : 'regular'} />
             )}
-            {m.label}
+            {m.key === 'multicam' && feedMode === 'single' ? 'Весь кадр' : m.label}
           </button>
         );
       })}
