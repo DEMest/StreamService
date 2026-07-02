@@ -23,14 +23,8 @@ export default function StreamsPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Step 5: каталог теперь возвращает discriminated union.
-  // На странице «Трансляции» показываем только live-сущности:
-  //   - Event-карточки (по определению все «активные» — startedAt && !endedAt
-  //     с ≥2 live-public Stream'ами — см. PublicService.getCatalog),
-  //   - live Stream-карточки.
-  const live = (items ?? []).filter((it) =>
-    it.type === 'event' ? true : it.isLive,
-  );
+  // На странице «Трансляции» показываем только live Stream-карточки.
+  const live = (items ?? []).filter((it) => it.isLive);
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-surface-primary text-zinc-200">
@@ -62,13 +56,7 @@ export default function StreamsPage() {
           {live.length > 0 && (
             <motion.div variants={staggerContainer} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
               {live.map((item) => {
-                // key — стабилен для каждого типа карточки:
-                //   stream → orgSlug+streamSlug (одна орга, несколько Stream'ов)
-                //   event  → orgSlug+eventSlug  (одна орга, несколько Event'ов)
-                const key =
-                  item.type === 'event'
-                    ? `event:${item.orgSlug}/${item.eventSlug}`
-                    : `stream:${item.orgSlug}/${item.streamSlug}`;
+                const key = `${item.orgSlug}/${item.streamSlug}`;
                 return (
                   <motion.div key={key} variants={cardFadeUp}>
                     <OrgCard org={item} thumbKey={thumbKey} />

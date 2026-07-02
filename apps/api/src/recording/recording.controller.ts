@@ -159,8 +159,7 @@ export class RecordingController {
 
   // ─────────── live HLS: named Stream ───────────
   // Step 4: HLS-output для named Stream'ов лежит под /hls/live/<orgSlug>/<streamSlug>/...
-  // (соответствует MediaMTX path 'live/<orgSlug>/<streamSlug>' для composite
-  // или 'live/<orgSlug>/<streamSlug>/<n>' для multistream).
+  // (соответствует MediaMTX path 'live/<orgSlug>/<streamSlug>').
 
   @Get('v1/public/orgs/:orgSlug/streams/:streamSlug/live/hls/*')
   async serveLiveHlsNamed(
@@ -185,9 +184,7 @@ export class RecordingController {
    *   default → /hls/live/<orgSlug>
    *   named   → /hls/live/<orgSlug>/<streamSlug>
    *
-   * Внутри liveDir файлы расположены по правилам MediaMTX: для composite —
-   * master.m3u8 + сегменты; для multistream — подпапки <n>/index.m3u8 +
-   * сегменты на каждый slot.
+   * Внутри liveDir файлы расположены по правилам FFmpeg/HLS: master.m3u8 + сегменты.
    */
   private async serveLiveHlsImpl(
     orgSlug: string,

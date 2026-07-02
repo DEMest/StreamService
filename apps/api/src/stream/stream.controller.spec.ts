@@ -12,7 +12,6 @@ import { StreamService } from './stream.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
-import { SlotStateService } from './slot-state.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { JwtPayload } from '../auth/auth.service';
@@ -36,6 +35,7 @@ const mockPrisma = {
   broadcast: {
     create: jest.fn(),
     update: jest.fn(),
+    findMany: jest.fn(),
   },
   organization: {
     findUnique: jest.fn(),
@@ -46,17 +46,12 @@ const mockMediamtx = {
   addStreamPaths: jest.fn(),
   replaceStreamPaths: jest.fn(),
   deleteStreamPaths: jest.fn(),
-  updateStreamPaths: jest.fn(),
   addPath: jest.fn(),
   patchPath: jest.fn(),
   deletePath: jest.fn(),
 };
 
 const mockRecording = { onStreamEnded: jest.fn().mockResolvedValue(undefined) };
-const mockSlotState = {
-  getActiveSlotIndexes: jest.fn().mockReturnValue([]),
-  setPublishing: jest.fn(),
-};
 
 const orgAdmin: JwtPayload = {
   sub: 'u1',
@@ -77,7 +72,6 @@ describe('StreamController', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: MediamtxService, useValue: mockMediamtx },
         { provide: RecordingService, useValue: mockRecording },
-        { provide: SlotStateService, useValue: mockSlotState },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -93,20 +87,21 @@ describe('StreamController', () => {
   // ────────────────────────────────────────────────────────────────────────
 
   describe('GET /:id', () => {
-    it('returns DTO without ingestKey by default', async () => {
+    it('returns DTO without ingestKey by default, with recordingEnabled/recordingMode', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({
         id: 'st-1', orgId: 'org-1', slug: '', name: 'Main',
-        description: null, mode: 'composite', slotCount: 1,
-        slots: [{ index: 1, name: '' }], slotOrder: [1],
-        layoutPreset: 'solo', fallbackLayouts: null,
+        description: null,
         ingestKey: 'secret-key', ingestKeyCreatedAt: new Date(),
         isPublic: true, previewKey: null, previewMode: 'multicam',
         previewImagePath: null, isLive: false, autoStartMode: 'public',
         currentBroadcastId: null, createdAt: new Date(),
+        recordingEnabled: false, recordingMode: 'manual',
       });
       const r = await controller.getById(orgAdmin, 'st-1', undefined);
       expect(r.id).toBe('st-1');
       expect((r as any).ingestKey).toBeUndefined();
+      expect((r as any).recordingEnabled).toBe(false);
+      expect((r as any).recordingMode).toBe('manual');
       expect(mockPrisma.stream.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'st-1', orgId: 'org-1' } }),
       );
@@ -115,13 +110,12 @@ describe('StreamController', () => {
     it('returns ingestKey when reveal=true', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({
         id: 'st-1', orgId: 'org-1', slug: '', name: 'Main',
-        description: null, mode: 'composite', slotCount: 1,
-        slots: [{ index: 1, name: '' }], slotOrder: [1],
-        layoutPreset: 'solo', fallbackLayouts: null,
+        description: null,
         ingestKey: 'secret-key', ingestKeyCreatedAt: new Date(),
         isPublic: true, previewKey: null, previewMode: 'multicam',
         previewImagePath: null, isLive: false, autoStartMode: 'public',
         currentBroadcastId: null, createdAt: new Date(),
+        recordingEnabled: false, recordingMode: 'manual',
       });
       const r = await controller.getById(orgAdmin, 'st-1', 'true');
       expect((r as any).ingestKey).toBe('secret-key');
@@ -144,9 +138,6 @@ describe('StreamController', () => {
       mockPrisma.stream.findMany.mockResolvedValue([
         {
           id: 'st-1', slug: '', name: 'Main', description: null,
-          mode: 'composite', slotCount: 1,
-          slots: [{ index: 1, name: '' }], slotOrder: [1],
-          layoutPreset: 'solo', fallbackLayouts: null,
           isPublic: true, previewKey: null, previewMode: 'multicam',
           previewImagePath: null, isLive: false, autoStartMode: 'public',
           ingestKeyCreatedAt: new Date(), currentBroadcastId: null, createdAt: new Date(),
@@ -168,100 +159,12 @@ describe('StreamController', () => {
   describe('PATCH /:id — validation', () => {
     const compositeRow = {
       id: 'st-1', orgId: 'org-1', slug: '', name: 'Main',
-      mode: 'composite', slotCount: 1,
-      slots: [{ index: 1, name: '' }], slotOrder: [1],
-      layoutPreset: 'solo', fallbackLayouts: null,
       ingestKey: 'key', ingestKeyCreatedAt: new Date(),
       isPublic: true, previewKey: null, previewMode: 'multicam',
       previewImagePath: null, isLive: false, autoStartMode: 'public',
       currentBroadcastId: null, createdAt: new Date(),
       org: { slug: 'club' },
     };
-
-    it('rejects mode=composite with slotCount>1', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue(compositeRow);
-      await expect(
-        controller.update(orgAdmin, 'st-1', { mode: 'composite', slotCount: 2 } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(mockPrisma.stream.update).not.toHaveBeenCalled();
-    });
-
-    it('rejects mode=multistream with slotCount out of [1..4]', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue(compositeRow);
-      await expect(
-        controller.update(orgAdmin, 'st-1', { mode: 'multistream', slotCount: 5 } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('rejects layoutPreset that mismatches slotCount', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({
-        ...compositeRow, mode: 'multistream', slotCount: 2,
-      });
-      await expect(
-        controller.update(orgAdmin, 'st-1', { layoutPreset: 'grid-2x2' } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('rejects unknown layoutPreset', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue(compositeRow);
-      await expect(
-        controller.update(orgAdmin, 'st-1', { layoutPreset: 'nope-not-real' } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('rejects fallbackLayouts entry with mismatched slotCount', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue(compositeRow);
-      await expect(
-        controller.update(orgAdmin, 'st-1', {
-          fallbackLayouts: { 2: 'grid-2x2' },
-        } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('rejects slots[] of wrong length', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({
-        ...compositeRow, mode: 'multistream', slotCount: 2,
-      });
-      await expect(
-        controller.update(orgAdmin, 'st-1', {
-          slots: [{ index: 1 }],
-        } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('rejects slots[] with duplicate indices', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({
-        ...compositeRow, mode: 'multistream', slotCount: 2,
-      });
-      await expect(
-        controller.update(orgAdmin, 'st-1', {
-          slots: [{ index: 1 }, { index: 1 }],
-        } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('rejects slots[] with multiple isAudioSource=true', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({
-        ...compositeRow, mode: 'multistream', slotCount: 2,
-      });
-      await expect(
-        controller.update(orgAdmin, 'st-1', {
-          slots: [
-            { index: 1, isAudioSource: true },
-            { index: 2, isAudioSource: true },
-          ],
-        } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('rejects slotOrder that is not a permutation', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({
-        ...compositeRow, mode: 'multistream', slotCount: 2,
-      });
-      await expect(
-        controller.update(orgAdmin, 'st-1', { slotOrder: [1, 1] } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
 
     it('rejects invalid previewMode', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue(compositeRow);
@@ -279,74 +182,37 @@ describe('StreamController', () => {
       await expect(
         controller.update(orgAdmin, 'st-foreign', { name: 'new' }),
       ).rejects.toBeInstanceOf(NotFoundException);
-      expect(mockMediamtx.updateStreamPaths).not.toHaveBeenCalled();
+      expect(mockMediamtx.replaceStreamPaths).not.toHaveBeenCalled();
       expect(mockPrisma.stream.update).not.toHaveBeenCalled();
     });
   });
 
   describe('PATCH /:id — side-effects', () => {
-    it('calls mediamtx.updateStreamPaths when mode/slotCount changed', async () => {
+    it('does NOT touch MediaMTX paths on cosmetic PATCH', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({
-        id: 'st-1', orgId: 'org-1', slug: '', mode: 'composite', slotCount: 1,
-        ingestKey: 'key-x', previewKey: null,
-        org: { slug: 'club' },
-      });
-      mockPrisma.stream.update.mockResolvedValue({
-        id: 'st-1', slug: '', name: 'Main', description: null,
-        mode: 'multistream', slotCount: 4,
-        slots: [{ index: 1 }, { index: 2 }, { index: 3 }, { index: 4 }],
-        slotOrder: [1, 2, 3, 4], layoutPreset: 'grid-2x2', fallbackLayouts: null,
-        ingestKey: 'key-x', ingestKeyCreatedAt: new Date(),
-        isPublic: true, previewKey: null, previewMode: 'multicam',
-        previewImagePath: null, isLive: false, autoStartMode: 'public',
-        currentBroadcastId: null, createdAt: new Date(),
-      });
-
-      await controller.update(orgAdmin, 'st-1', {
-        mode: 'multistream',
-        slotCount: 4,
-        slots: [{ index: 1 }, { index: 2 }, { index: 3 }, { index: 4 }],
-        slotOrder: [1, 2, 3, 4],
-        layoutPreset: 'grid-2x2',
-      } as any);
-
-      expect(mockMediamtx.updateStreamPaths).toHaveBeenCalledWith(
-        'club', '', 'composite', 'multistream', 1, 4, 'key-x',
-      );
-      expect(mockPrisma.stream.update).toHaveBeenCalled();
-    });
-
-    it('does NOT call mediamtx.updateStreamPaths when only cosmetic fields change', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({
-        id: 'st-1', orgId: 'org-1', slug: '', mode: 'composite', slotCount: 1,
+        id: 'st-1', orgId: 'org-1', slug: '',
         ingestKey: 'key-x', previewKey: null,
         org: { slug: 'club' },
       });
       mockPrisma.stream.update.mockResolvedValue({
         id: 'st-1', slug: '', name: 'Renamed', description: null,
-        mode: 'composite', slotCount: 1,
-        slots: [{ index: 1 }], slotOrder: [1],
-        layoutPreset: 'solo', fallbackLayouts: null,
         ingestKey: 'key-x', ingestKeyCreatedAt: new Date(),
         isPublic: true, previewKey: null, previewMode: 'multicam',
         previewImagePath: null, isLive: false, autoStartMode: 'public',
         currentBroadcastId: null, createdAt: new Date(),
       });
       await controller.update(orgAdmin, 'st-1', { name: 'Renamed' });
-      expect(mockMediamtx.updateStreamPaths).not.toHaveBeenCalled();
+      expect(mockMediamtx.replaceStreamPaths).not.toHaveBeenCalled();
     });
 
     it('generates previewKey when isPublic switches to false', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({
-        id: 'st-1', orgId: 'org-1', slug: '', mode: 'composite', slotCount: 1,
+        id: 'st-1', orgId: 'org-1', slug: '',
         ingestKey: 'key-x', previewKey: null,
         org: { slug: 'club' },
       });
       mockPrisma.stream.update.mockImplementation(({ data }) => Promise.resolve({
         id: 'st-1', slug: '', name: 'Main', description: null,
-        mode: 'composite', slotCount: 1,
-        slots: [{ index: 1 }], slotOrder: [1],
-        layoutPreset: 'solo', fallbackLayouts: null,
         ingestKey: 'key-x', ingestKeyCreatedAt: new Date(),
         isPublic: false, previewKey: data.previewKey,
         previewMode: 'multicam', previewImagePath: null,
@@ -369,13 +235,13 @@ describe('StreamController', () => {
     it('generates new ingestKey and calls mediamtx.replaceStreamPaths', async () => {
       // findFirst (loadForOrg) — для tenant-check.
       mockPrisma.stream.findFirst.mockResolvedValue({
-        id: 'st-1', orgId: 'org-1', slug: '', mode: 'composite', slotCount: 1,
+        id: 'st-1', orgId: 'org-1', slug: '',
         ingestKey: 'old', previewKey: null,
         org: { slug: 'club' },
       });
       // findUnique (rotateKey → getStreamWithOrg) — основная загрузка.
       mockPrisma.stream.findUnique.mockResolvedValue({
-        id: 'st-1', orgId: 'org-1', slug: '', mode: 'composite', slotCount: 1,
+        id: 'st-1', orgId: 'org-1', slug: '',
         org: { slug: 'club' },
       });
       mockPrisma.stream.update.mockResolvedValue({
@@ -385,7 +251,7 @@ describe('StreamController', () => {
       const r = await controller.rotateKey(orgAdmin, 'st-1');
       expect(r.ingestKey).toBe('new-key');
       expect(mockMediamtx.replaceStreamPaths).toHaveBeenCalledWith(
-        'club', '', 'composite', 1, expect.any(String),
+        'club', '', expect.any(String),
       );
     });
 
@@ -405,13 +271,12 @@ describe('StreamController', () => {
     it('returns alreadyOff:true when no active broadcast', async () => {
       // loadForOrg (tenant check)
       mockPrisma.stream.findFirst.mockResolvedValue({
-        id: 'st-1', orgId: 'org-1', slug: '', mode: 'composite', slotCount: 1,
+        id: 'st-1', orgId: 'org-1', slug: '',
         org: { slug: 'club' }, ingestKey: 'k',
       });
       // endBroadcast → findUnique returns isLive=false
       mockPrisma.stream.findUnique.mockResolvedValue({
         id: 'st-1', orgId: 'org-1', slug: '', isLive: false, currentBroadcastId: null,
-        mode: 'composite', slotCount: 1,
         org: { slug: 'club' },
       });
       const r = await controller.stop(orgAdmin, 'st-1');
@@ -421,12 +286,11 @@ describe('StreamController', () => {
 
     it('closes active broadcast when stream is live', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({
-        id: 'st-1', orgId: 'org-1', slug: '', mode: 'composite', slotCount: 1,
+        id: 'st-1', orgId: 'org-1', slug: '',
         org: { slug: 'club' }, ingestKey: 'k',
       });
       mockPrisma.stream.findUnique.mockResolvedValue({
         id: 'st-1', orgId: 'org-1', slug: '', isLive: true, currentBroadcastId: 'b-1',
-        mode: 'composite', slotCount: 1,
         org: { slug: 'club' },
       });
       mockPrisma.broadcast.update.mockResolvedValue({});
@@ -448,6 +312,46 @@ describe('StreamController', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────────
+  // GET /:id/broadcasts
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('GET /:id/broadcasts', () => {
+    it('delegates to listBroadcastsForOrg(user.orgId, id)', async () => {
+      // loadForOrg (tenant check)
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        id: 'st-1', orgId: 'org-1', slug: '',
+        org: { slug: 'club' }, ingestKey: 'k',
+      });
+      const now = new Date();
+      mockPrisma.broadcast.findMany.mockResolvedValue([
+        {
+          id: 'b1', title: 'B1', description: null,
+          startedAt: now, endedAt: now,
+          recordings: [{ id: 'r1', status: 'ready', fileSize: 512, duration: 1800 }],
+        },
+      ]);
+
+      const result = await controller.listBroadcasts(orgAdmin, 'st-1');
+
+      expect(mockPrisma.broadcast.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { streamId: 'st-1', endedAt: { not: null } },
+        }),
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0].recording).toEqual({ id: 'r1', status: 'ready', fileSize: 512, duration: 1800 });
+      expect((result[0] as any).recordings).toBeUndefined();
+    });
+
+    it('returns 404 for cross-tenant stream', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(null);
+      await expect(controller.listBroadcasts(orgAdmin, 'st-foreign'))
+        .rejects.toBeInstanceOf(NotFoundException);
+      expect(mockPrisma.broadcast.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
   // POST /  (create)
   // ────────────────────────────────────────────────────────────────────────
 
@@ -455,9 +359,6 @@ describe('StreamController', () => {
     /** Полный row для toDto после prisma.stream.create — без сюрпризов в полях. */
     const createdRow = (overrides: any = {}) => ({
       id: 'st-new', slug: 'cam-a', name: 'cam-a', description: null,
-      mode: 'composite', slotCount: 1,
-      slots: [{ index: 1, name: '' }], slotOrder: [1],
-      layoutPreset: 'solo', fallbackLayouts: null,
       ingestKey: 'gen-key', ingestKeyCreatedAt: new Date(),
       isPublic: true, previewKey: null, previewMode: 'multicam',
       previewImagePath: null, isLive: false, autoStartMode: 'public',
@@ -465,7 +366,7 @@ describe('StreamController', () => {
       ...overrides,
     });
 
-    it('creates a new Stream with defaults (mode=composite, slotCount=1)', async () => {
+    it('creates a new Stream with defaults', async () => {
       mockPrisma.organization.findUnique.mockResolvedValue({ slug: 'club' });
       mockPrisma.stream.create.mockResolvedValue(createdRow());
 
@@ -474,17 +375,13 @@ describe('StreamController', () => {
       // DTO без ingestKey.
       expect(r.id).toBe('st-new');
       expect(r.slug).toBe('cam-a');
-      expect(r.mode).toBe('composite');
-      expect(r.slotCount).toBe(1);
       expect((r as any).ingestKey).toBeUndefined();
 
       // Prisma create вызван с правильным набором полей.
       expect(mockPrisma.stream.create).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({
           orgId: 'org-1', slug: 'cam-a', name: 'cam-a',
-          mode: 'composite', slotCount: 1,
-          slots: [{ index: 1, name: '' }], slotOrder: [1],
-          layoutPreset: 'solo', isPublic: true,
+          isPublic: true,
           previewMode: 'multicam', autoStartMode: 'public',
           ingestKey: expect.any(String),
         }),
@@ -492,7 +389,7 @@ describe('StreamController', () => {
 
       // MediaMTX путь зарегистрирован с тем же ingestKey что в БД.
       expect(mockMediamtx.addStreamPaths).toHaveBeenCalledWith(
-        'club', 'cam-a', 'composite', 1, expect.any(String),
+        'club', 'cam-a', expect.any(String),
       );
     });
 
@@ -505,29 +402,6 @@ describe('StreamController', () => {
       expect(mockPrisma.stream.create).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({ name: 'Main Camera' }),
       }));
-    });
-
-    it('creates multistream Stream with slotCount=4 and grid-2x2 default layout', async () => {
-      mockPrisma.organization.findUnique.mockResolvedValue({ slug: 'club' });
-      mockPrisma.stream.create.mockResolvedValue(createdRow({
-        mode: 'multistream', slotCount: 4,
-        slots: [{ index: 1, name: '' }, { index: 2, name: '' }, { index: 3, name: '' }, { index: 4, name: '' }],
-        slotOrder: [1, 2, 3, 4], layoutPreset: 'grid-2x2',
-      }));
-
-      await controller.create(orgAdmin, {
-        slug: 'cam-a', mode: 'multistream', slotCount: 4,
-      } as any);
-
-      expect(mockPrisma.stream.create).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({
-          mode: 'multistream', slotCount: 4,
-          layoutPreset: 'grid-2x2',
-        }),
-      }));
-      expect(mockMediamtx.addStreamPaths).toHaveBeenCalledWith(
-        'club', 'cam-a', 'multistream', 4, expect.any(String),
-      );
     });
 
     it('rejects empty slug with BadRequestException', async () => {
@@ -572,9 +446,8 @@ describe('StreamController', () => {
     });
 
     // ─── Numeric slug guard (Karen H1) ──────────────────────────────────────
-    // Чисто-числовой slug перехватывается resolvePathToStream'ом как slot
-    // (live/<org>/<n>), поэтому такой Stream станет недоступен по своему пути
-    // если в орге есть хоть один multistream Stream с slotCount ≥ N.
+    // Чисто-числовой slug перехватывается resolvePathToStream'ом как slot-путь
+    // (live/<org>/<n>), поэтому такой Stream становится недоступен по своему пути.
     it.each(['1', '2', '42', '007'])(
       'rejects purely numeric slug %p with 400',
       async (numericSlug) => {
@@ -589,19 +462,6 @@ describe('StreamController', () => {
       mockPrisma.stream.create.mockResolvedValue(createdRow({ slug: 'cam-1' }));
       await controller.create(orgAdmin, { slug: 'cam-1' } as any);
       expect(mockPrisma.stream.create).toHaveBeenCalled();
-    });
-
-    it('rejects mode=composite with slotCount>1', async () => {
-      await expect(
-        controller.create(orgAdmin, { slug: 'cam-a', mode: 'composite', slotCount: 2 } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(mockPrisma.stream.create).not.toHaveBeenCalled();
-    });
-
-    it('rejects slotCount out of [1..4]', async () => {
-      await expect(
-        controller.create(orgAdmin, { slug: 'cam-a', mode: 'multistream', slotCount: 5 } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('returns 409 (ConflictException) when slug duplicates within org (P2002)', async () => {
@@ -644,7 +504,6 @@ describe('StreamController', () => {
     it('deletes Stream and calls mediamtx.deleteStreamPaths', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({
         id: 'st-1', orgId: 'org-1', slug: 'cam-a',
-        mode: 'composite', slotCount: 1,
         ingestKey: 'k', previewKey: null,
         org: { slug: 'club' },
       });
@@ -653,7 +512,7 @@ describe('StreamController', () => {
       const r = await controller.remove(orgAdmin, 'st-1');
       expect(r).toEqual({ ok: true });
       expect(mockMediamtx.deleteStreamPaths).toHaveBeenCalledWith(
-        'club', 'cam-a', 'composite', 1,
+        'club', 'cam-a',
       );
       expect(mockPrisma.stream.delete).toHaveBeenCalledWith({ where: { id: 'st-1' } });
     });
@@ -661,7 +520,6 @@ describe('StreamController', () => {
     it('rejects deletion of default Stream (slug="") with 400', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({
         id: 'st-default', orgId: 'org-1', slug: '',
-        mode: 'composite', slotCount: 1,
         ingestKey: 'k', previewKey: null,
         org: { slug: 'club' },
       });
@@ -687,7 +545,6 @@ describe('StreamController', () => {
     it('rejects deletion when stream is currently live (409)', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({
         id: 'st-live', orgId: 'org-1', slug: 'cam-a',
-        mode: 'composite', slotCount: 1,
         ingestKey: 'k', previewKey: null,
         isLive: true, currentBroadcastId: 'b-active',
         org: { slug: 'club' },
@@ -711,7 +568,6 @@ describe('StreamController', () => {
     it('rejects deletion when broadcast id is still attached (409 even if isLive flag stale)', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({
         id: 'st-stuck', orgId: 'org-1', slug: 'cam-a',
-        mode: 'composite', slotCount: 1,
         ingestKey: 'k', previewKey: null,
         isLive: false, currentBroadcastId: 'b-still-here',
         org: { slug: 'club' },
@@ -724,7 +580,6 @@ describe('StreamController', () => {
     it('continues Prisma delete even when mediamtx.deleteStreamPaths fails (log warn)', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({
         id: 'st-1', orgId: 'org-1', slug: 'cam-a',
-        mode: 'multistream', slotCount: 2,
         ingestKey: 'k', previewKey: null,
         org: { slug: 'club' },
       });

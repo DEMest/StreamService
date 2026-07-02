@@ -37,23 +37,16 @@ export class AdminService implements OnModuleInit {
       console.error('❌ Ошибка при создании суперпользователя', error);
     }
 
-    // Восстановить пути в MediaMTX для всех Stream'ов.
-    // Для composite Stream — один путь; для multistream — N путей по slotCount.
+    // Восстановить путь в MediaMTX для каждого Stream'а.
     try {
       const streams = await this.prisma.stream.findMany({
         select: {
-          slug: true, mode: true, slotCount: true, ingestKey: true,
+          slug: true, ingestKey: true,
           org: { select: { slug: true } },
         },
       });
       await Promise.all(streams.map((s) =>
-        this.mediamtx.addStreamPaths(
-          s.org.slug,
-          s.slug,
-          s.mode as 'composite' | 'multistream',
-          s.slotCount,
-          s.ingestKey,
-        ),
+        this.mediamtx.addStreamPaths(s.org.slug, s.slug, s.ingestKey),
       ));
       if (streams.length > 0) {
         console.log(`✅ Восстановлено путей для ${streams.length} Stream'ов в MediaMTX`);
@@ -81,11 +74,6 @@ export class AdminService implements OnModuleInit {
         data: {
           orgId: org.id,
           slug: '',
-          mode: 'composite',
-          slotCount: 1,
-          slots: [{ index: 1, name: '' }],
-          slotOrder: [1],
-          layoutPreset: 'solo',
           name: '',
           ingestKey,
           isPublic: true,
@@ -94,8 +82,8 @@ export class AdminService implements OnModuleInit {
         },
       });
 
-      // Default Stream — composite, slotCount=1 → один путь 'live/<orgSlug>'
-      await this.mediamtx.addStreamPaths(data.slug, '', 'composite', 1, ingestKey);
+      // Default Stream → один путь 'live/<orgSlug>'
+      await this.mediamtx.addStreamPaths(data.slug, '', ingestKey);
       return org;
     } catch (e: any) {
       if (e.code === 'P2002') throw new ConflictException(`Slug '${data.slug}' already taken`);
@@ -129,7 +117,7 @@ export class AdminService implements OnModuleInit {
     const org = await this.prisma.organization.findUnique({
       where: { slug },
       select: {
-        streams: { select: { slug: true, mode: true, slotCount: true } },
+        streams: { select: { slug: true } },
       },
     });
 
@@ -142,12 +130,7 @@ export class AdminService implements OnModuleInit {
 
     if (org?.streams) {
       await Promise.all(org.streams.map((s) =>
-        this.mediamtx.deleteStreamPaths(
-          slug,
-          s.slug,
-          s.mode as 'composite' | 'multistream',
-          s.slotCount,
-        ),
+        this.mediamtx.deleteStreamPaths(slug, s.slug),
       ));
     }
     return { ok: true };

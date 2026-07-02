@@ -27,7 +27,6 @@ model Organization {
   createdAt      DateTime      @default(now())
   // Relations
   streams        Stream[]
-  events         Event[]
   messages       ChatMessage[]
 }
 
@@ -38,12 +37,6 @@ model Stream {
   slug               String // unique per org; '' для default-стрима орга
   name               String        @default("")
   description        String?
-  mode               String        @default("composite") // 'composite' | 'multistream'
-  slotCount          Int           @default(1)
-  slots              Json          @default("[{\"index\":1,\"name\":\"\"}]")
-  slotOrder          Json          @default("[1]")
-  layoutPreset       String        @default("solo")
-  fallbackLayouts    Json?
   ingestKey          String        @unique
   ingestKeyCreatedAt DateTime      @default(now())
   isPublic           Boolean       @default(true)
@@ -58,47 +51,15 @@ model Stream {
   createdAt          DateTime      @default(now())
   // Relations
   broadcasts         Broadcast[]
-  eventStreams       EventStream[]
   chatMessages       ChatMessage[]
 
   @@unique([orgId, slug])
 }
 
-model Event {
-  id           String        @id @default(cuid())
-  orgId        String
-  org          Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  slug         String
-  title        String
-  description  String?
-  scheduledAt  DateTime?
-  startedAt    DateTime?
-  endedAt      DateTime?
-  createdAt    DateTime      @default(now())
-  // Relations
-  eventStreams EventStream[]
-  broadcasts   Broadcast[]
-  chatMessages ChatMessage[]
-
-  @@unique([orgId, slug])
-}
-
-model EventStream {
-  eventId  String
-  streamId String
-  addedAt  DateTime @default(now())
-  event    Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  stream   Stream   @relation(fields: [streamId], references: [id], onDelete: Cascade)
-
-  @@id([eventId, streamId])
-}
-
 model Broadcast {
   id          String      @id @default(cuid())
   streamId    String
-  eventId     String?
   stream      Stream      @relation(fields: [streamId], references: [id], onDelete: Cascade)
-  event       Event?      @relation(fields: [eventId], references: [id])
   title       String
   description String?
   startedAt   DateTime
@@ -114,17 +75,14 @@ model ChatMessage {
   // Финальный DROP orgId — отдельной миграцией после deploy data-migration.
   orgId     String?
   streamId  String?
-  eventId   String?
   nickname  String
   content   String
   createdAt DateTime      @default(now())
   // Relations
   org       Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   stream    Stream?       @relation(fields: [streamId], references: [id], onDelete: Cascade)
-  event     Event?        @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
   @@index([streamId, createdAt])
-  @@index([eventId, createdAt])
 }
 
 model Recording {

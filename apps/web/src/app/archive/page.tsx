@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { Header } from '@/components/Header';
 import { fadeUp, staggerContainer, cardFadeUp } from '@/lib/motion';
-import type { CatalogItem, CatalogStreamCard } from '@/lib/types';
+import type { CatalogItem } from '@/lib/types';
 import { API_BASE } from '@/lib/types';
 import { Monitor, TelevisionSimple, Play, CalendarBlank, Clock } from '@phosphor-icons/react';
 
@@ -139,33 +139,7 @@ export default function ArchivePage() {
   });
 
   // Архив строится поверх Stream'ов (broadcasts хранятся per-Stream).
-  //
-  // Karen H3: Event-карточка прячет свои public Stream'ы из standalone-секции
-  // каталога — но их broadcasts всё ещё нужно показать в архиве. Backend
-  // в Event-карточке отдаёт `consumedStreams[]` (см. CatalogEventCard) — это
-  // CatalogStreamCard-подобные DTO для всех public Stream'ов Event'а
-  // (live + offline). Archive объединяет видимые stream-карточки каталога с
-  // консумированными Event'ами Stream'ами.
-  const orgs = useMemo<CatalogStreamCard[]>(() => {
-    const visible = (items ?? []).filter(
-      (it): it is CatalogStreamCard => it.type === 'stream',
-    );
-    const consumed = (items ?? [])
-      .filter((it): it is Extract<typeof it, { type: 'event' }> => it.type === 'event')
-      .flatMap((ev) => ev.consumedStreams ?? []);
-    // Дедупликация по (orgSlug/streamSlug) на случай если backend случайно
-    // продублирует Stream и в standalone, и в consumed (инвариант — этого
-    // не должно быть, но защищаемся).
-    const seen = new Set<string>();
-    const merged: CatalogStreamCard[] = [];
-    for (const s of [...visible, ...consumed]) {
-      const key = `${s.orgSlug}/${s.streamSlug}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      merged.push(s);
-    }
-    return merged;
-  }, [items]);
+  const orgs = items ?? [];
 
   // Stable cache-key — список «orgSlug/streamSlug» строк, иначе query-key
   // меняется по ссылке `orgs` каждый refetch.

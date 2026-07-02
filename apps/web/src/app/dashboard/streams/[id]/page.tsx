@@ -1,0 +1,581 @@
+'use client';
+import { useParams } from 'next/navigation';
+import { useState } from 'react';
+import Link from 'next/link';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { DashboardLayout } from '@/components/DashboardLayout';
+import { RecordingControl, type RecordingMode } from '@/components/dashboard/RecordingControl';
+import {
+  Broadcast,
+  Gear,
+  Archive,
+  Copy,
+  Eye,
+  EyeSlash,
+  ArrowsClockwise,
+  DownloadSimple,
+  Trash,
+  VideoCamera,
+  CaretLeft,
+  ArrowRight,
+} from '@phosphor-icons/react';
+
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+interface StreamDetail {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string;
+  isPublic: boolean;
+  previewKey?: string;
+  previewMode: string;
+  isLive: boolean;
+  ingestKey?: string;
+  ingestKeyCreatedAt?: string;
+  recordingEnabled: boolean;
+  recordingMode: RecordingMode;
+}
+
+interface OrgProfile {
+  id: string;
+  slug: string;
+  name: string;
+}
+
+interface BroadcastItem {
+  id: string;
+  title: string;
+  description?: string;
+  startedAt: string;
+  endedAt?: string;
+  recording?: {
+    id: string;
+    status: string;
+    fileSize?: number;
+    duration?: number;
+  };
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const inputClasses =
+  'w-full px-3 py-2 bg-surface-primary border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-brand focus:ring-1 focus:ring-brand/30 outline-none transition-colors';
+
+function copyText(text: string) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).catch(() => legacyCopy(text));
+  } else {
+    legacyCopy(text);
+  }
+}
+
+function legacyCopy(text: string) {
+  const el = document.createElement('textarea');
+  el.value = text;
+  el.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(el);
+  el.focus();
+  el.select();
+  document.execCommand('copy');
+  document.body.removeChild(el);
+}
+
+function formatTime(seconds: number): string {
+  if (!seconds || !isFinite(seconds)) return '';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────────
+
+export default function StreamDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const qc = useQueryClient();
+  const [keyVisible, setKeyVisible] = useState(false);
+  const [protocol, setProtocol] = useState<'srt' | 'rtmp'>('srt');
+
+  // ── Queries ──
+
+  const { data: stream, isLoading: streamLoading } = useQuery({
+    queryKey: ['org-stream-detail', id, keyVisible],
+    queryFn: () =>
+      api.get<StreamDetail>(`/v1/org/streams/${id}${keyVisible ? '?reveal=true' : ''}`),
+    refetchInterval: 10_000,
+  });
+
+  const { data: broadcasts } = useQuery({
+    queryKey: ['org-stream-broadcasts', id],
+    queryFn: () => api.get<BroadcastItem[]>(`/v1/org/streams/${id}/broadcasts`),
+  });
+
+  const { data: profile, isLoading: profileLoading } = useQuery({
+    queryKey: ['org-profile'],
+    queryFn: () => api.get<OrgProfile>('/v1/org/me'),
+  });
+
+  // ── Mutations ──
+
+  const rotateKey = useMutation({
+    mutationFn: () => api.post(`/v1/org/streams/${id}/rotate-key`),
+    onSuccess: () => {
+      setKeyVisible(true);
+      qc.invalidateQueries({ queryKey: ['org-stream-detail', id] });
+    },
+  });
+
+  const updateStream = useMutation({
+    mutationFn: (patch: Partial<Pick<StreamDetail, 'name' | 'description' | 'isPublic' | 'previewMode'>>) =>
+      api.patch(`/v1/org/streams/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream-detail', id] }),
+  });
+
+  const patchRecording = useMutation({
+    mutationFn: (patch: { enabled?: boolean; mode?: RecordingMode }) =>
+      api.patch(`/v1/org/streams/${id}/recording`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream-detail', id] }),
+  });
+
+  const deleteBroadcast = useMutation({
+    mutationFn: (bid: string) => api.delete(`/v1/org/broadcasts/${bid}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream-broadcasts', id] }),
+  });
+
+  // ── Derived ingest URLs ──
+
+  const serverIp = process.env.NEXT_PUBLIC_SERVER_IP ?? '';
+  const srtPort = process.env.NEXT_PUBLIC_SRT_PORT ?? '8890';
+  const rtmpPort = process.env.NEXT_PUBLIC_RTMP_PORT ?? '1935';
+  const orgSlug = profile?.slug ?? '';
+  const streamSlug = stream?.slug ?? '';
+
+  const srtStreamId = `publish:live/${orgSlug}/${streamSlug}`;
+  const srtFullUrl =
+    serverIp && stream?.ingestKey
+      ? `srt://${serverIp}:${srtPort}?streamid=${srtStreamId}&passphrase=${stream.ingestKey}`
+      : '';
+  const rtmpServer = serverIp ? `rtmp://${serverIp}:${rtmpPort}/live` : '';
+  const rtmpStreamKey = `${orgSlug}/${streamSlug}?key=${stream?.ingestKey ?? ''}`;
+  const rtmpFullUrl =
+    serverIp && stream?.ingestKey
+      ? `rtmp://${serverIp}:${rtmpPort}/live/${orgSlug}/${streamSlug}?key=${stream.ingestKey}`
+      : '';
+
+  // ── Loading / 404 ──
+
+  if (streamLoading || profileLoading) {
+    return (
+      <DashboardLayout>
+        <div className="max-w-[920px] mx-auto px-6 py-8 text-zinc-500 text-sm">Загрузка...</div>
+      </DashboardLayout>
+    );
+  }
+
+  if (!stream) {
+    return (
+      <DashboardLayout>
+        <div className="max-w-[920px] mx-auto px-6 py-8 space-y-3">
+          <p className="text-zinc-400 text-sm">Стрим не найден.</p>
+          <Link href="/dashboard" className="text-brand text-sm hover:underline">
+            ← Вернуться на панель
+          </Link>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  return (
+    <DashboardLayout>
+      <div className="max-w-[920px] mx-auto px-6 py-8 space-y-5">
+
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex flex-col gap-1">
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors no-underline mb-1"
+            >
+              <CaretLeft size={12} weight="bold" />
+              К панели
+            </Link>
+            <h1 className="text-xl font-semibold text-zinc-50 tracking-tight flex items-center gap-2.5">
+              {stream.name?.trim() || stream.slug}
+              {stream.isLive && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-medium">
+                  <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                  LIVE
+                </span>
+              )}
+            </h1>
+            <span className="text-xs text-zinc-500 font-mono">/{stream.slug}</span>
+          </div>
+          {orgSlug && streamSlug && (
+            <Link
+              href={`/watch/${orgSlug}/${streamSlug}`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded-md transition-all active:scale-[0.98] no-underline"
+            >
+              Смотреть
+              <ArrowRight size={12} weight="bold" />
+            </Link>
+          )}
+        </div>
+
+        {/* Section: Broadcast Parameters */}
+        <section className="bg-surface-elevated border border-zinc-800/50 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            <h2 className="flex items-center gap-2 text-base font-medium text-zinc-300">
+              <Broadcast size={18} className="text-brand" weight="fill" />
+              Параметры трансляции
+            </h2>
+            <RecordingControl
+              enabled={stream.recordingEnabled}
+              mode={stream.recordingMode}
+              onPatch={(p) => patchRecording.mutate(p)}
+              pending={patchRecording.isPending}
+              available={true}
+            />
+          </div>
+
+          {/* Protocol tabs */}
+          <div className="flex gap-1 mb-4 bg-surface-primary rounded-lg p-1">
+            {(['srt', 'rtmp'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setProtocol(p)}
+                className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
+                  protocol === p ? 'bg-brand text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                {p.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-col">
+            {protocol === 'srt' ? (
+              <>
+                <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
+                  <span className="w-28 shrink-0 text-xs text-zinc-500">Сервер</span>
+                  <span className="flex-1 font-mono text-sm text-zinc-300">
+                    {serverIp || <span className="text-zinc-600">Задайте NEXT_PUBLIC_SERVER_IP</span>}
+                  </span>
+                  {serverIp && (
+                    <button
+                      onClick={() => copyText(serverIp)}
+                      className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
+                    >
+                      <Copy size={12} /> Копировать
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
+                  <span className="w-28 shrink-0 text-xs text-zinc-500">Порт</span>
+                  <span className="flex-1 font-mono text-sm text-zinc-300">{srtPort}</span>
+                  <button
+                    onClick={() => copyText(srtPort)}
+                    className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
+                  >
+                    <Copy size={12} /> Копировать
+                  </button>
+                </div>
+                <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
+                  <span className="w-28 shrink-0 text-xs text-zinc-500">Stream ID</span>
+                  <span className="flex-1 font-mono text-sm text-zinc-300 break-all">{srtStreamId}</span>
+                  <button
+                    onClick={() => copyText(srtStreamId)}
+                    className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
+                  >
+                    <Copy size={12} /> Копировать
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
+                  <span className="w-28 shrink-0 text-xs text-zinc-500">Сервер</span>
+                  <span className="flex-1 font-mono text-sm text-zinc-300">
+                    {rtmpServer || <span className="text-zinc-600">Задайте NEXT_PUBLIC_SERVER_IP</span>}
+                  </span>
+                  {rtmpServer && (
+                    <button
+                      onClick={() => copyText(rtmpServer)}
+                      className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
+                    >
+                      <Copy size={12} /> Копировать
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
+                  <span className="w-28 shrink-0 text-xs text-zinc-500">Порт</span>
+                  <span className="flex-1 font-mono text-sm text-zinc-300">{rtmpPort}</span>
+                  <button
+                    onClick={() => copyText(rtmpPort)}
+                    className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
+                  >
+                    <Copy size={12} /> Копировать
+                  </button>
+                </div>
+                <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
+                  <span className="w-28 shrink-0 text-xs text-zinc-500">Ключ потока</span>
+                  <span className="flex-1 font-mono text-sm text-zinc-300 break-all">
+                    {keyVisible
+                      ? rtmpStreamKey
+                      : `${orgSlug}/${streamSlug}?key=••••••••`}
+                  </span>
+                  {keyVisible && (
+                    <button
+                      onClick={() => copyText(rtmpStreamKey)}
+                      className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
+                    >
+                      <Copy size={12} /> Копировать
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Passphrase row */}
+            <div className="flex items-center py-3 gap-3">
+              <span className="w-28 shrink-0 text-xs text-zinc-500">
+                {protocol === 'srt' ? 'Passphrase' : 'Пароль'}
+              </span>
+              <span className="flex-1 font-mono text-sm text-zinc-300">
+                {keyVisible
+                  ? stream.ingestKey
+                  : '••••••••••••••••••'}
+              </span>
+              <div className="shrink-0 flex gap-1.5 flex-wrap justify-end">
+                {keyVisible && stream.ingestKey && (
+                  <button
+                    onClick={() => copyText(stream.ingestKey!)}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
+                  >
+                    <Copy size={12} /> Копировать
+                  </button>
+                )}
+                <button
+                  onClick={() => setKeyVisible((v) => !v)}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
+                >
+                  {keyVisible ? (
+                    <>
+                      <EyeSlash size={12} /> Скрыть
+                    </>
+                  ) : (
+                    <>
+                      <Eye size={12} /> Показать
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm('Сгенерировать новый ключ? Текущий стрим будет прерван.'))
+                      rotateKey.mutate();
+                  }}
+                  disabled={rotateKey.isPending}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-brand hover:bg-brand-hover text-white text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                >
+                  <ArrowsClockwise size={12} /> Сменить
+                </button>
+              </div>
+            </div>
+
+            {/* Full URL hint */}
+            {protocol === 'srt' && (
+              <div className="pt-3 border-t border-zinc-800/40">
+                <p className="text-xs text-zinc-500 mb-1.5">Полная ссылка для OBS (поле «Сервер»):</p>
+                <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
+                  <code className="flex-1 text-xs text-zinc-300 font-mono break-all">
+                    {srtFullUrl ||
+                      `srt://${serverIp || 'IP'}:${srtPort}?streamid=${srtStreamId}&passphrase=•••`}
+                  </code>
+                  {srtFullUrl && (
+                    <button
+                      onClick={() => copyText(srtFullUrl)}
+                      className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer"
+                      title="Копировать"
+                    >
+                      <Copy size={14} />
+                    </button>
+                  )}
+                </div>
+                {!keyVisible && (
+                  <p className="text-xs text-zinc-600 mt-1">Покажите ключ, чтобы скопировать ссылку</p>
+                )}
+              </div>
+            )}
+            {protocol === 'rtmp' && (
+              <div className="pt-3 border-t border-zinc-800/40">
+                <p className="text-xs text-zinc-500 mb-1.5">Полная ссылка для vMix (поле «URL»):</p>
+                <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
+                  <code className="flex-1 text-xs text-zinc-300 font-mono break-all">
+                    {rtmpFullUrl ||
+                      `rtmp://${serverIp || 'IP'}:${rtmpPort}/live/${orgSlug}/${streamSlug}?key=•••`}
+                  </code>
+                  {rtmpFullUrl && (
+                    <button
+                      onClick={() => copyText(rtmpFullUrl)}
+                      className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-all active:scale-[0.95] cursor-pointer"
+                      title="Копировать"
+                    >
+                      <Copy size={14} />
+                    </button>
+                  )}
+                </div>
+                {!keyVisible && (
+                  <p className="text-xs text-zinc-600 mt-1">Покажите ключ, чтобы скопировать ссылку</p>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Section: Stream Settings */}
+        <section className="bg-surface-elevated border border-zinc-800/50 rounded-xl p-5">
+          <h2 className="flex items-center gap-2 text-base font-medium text-zinc-300 mb-4">
+            <Gear size={18} className="text-zinc-400" />
+            Настройки стрима
+          </h2>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-zinc-500">Название</label>
+              <input
+                key={stream.name}
+                defaultValue={stream.name ?? ''}
+                onBlur={(e) => {
+                  if (e.target.value !== stream.name) {
+                    updateStream.mutate({ name: e.target.value });
+                  }
+                }}
+                className={inputClasses}
+                placeholder="Название трансляции"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-zinc-500">Описание</label>
+              <textarea
+                key={stream.description}
+                defaultValue={stream.description ?? ''}
+                onBlur={(e) => {
+                  if (e.target.value !== (stream.description ?? '')) {
+                    updateStream.mutate({ description: e.target.value || undefined });
+                  }
+                }}
+                rows={2}
+                className={`${inputClasses} resize-y min-h-[60px]`}
+                placeholder="Описание (необязательно)"
+              />
+            </div>
+
+            <div className="flex gap-4 flex-wrap items-center">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={stream.isPublic}
+                  onChange={(e) => updateStream.mutate({ isPublic: e.target.checked })}
+                  className="accent-brand w-4 h-4 cursor-pointer"
+                />
+                <span className="text-zinc-300 text-sm">Публичная трансляция</span>
+              </label>
+
+              {!stream.isPublic && stream.previewKey && orgSlug && streamSlug && (
+                <button
+                  onClick={() =>
+                    copyText(
+                      `${window.location.origin}/watch/${orgSlug}/${streamSlug}?key=${stream.previewKey}`,
+                    )
+                  }
+                  className="flex items-center gap-1 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-lg transition-all active:scale-[0.98] cursor-pointer"
+                >
+                  <Copy size={12} /> Скопировать ссылку для зрителей
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-zinc-500">Камера для превью (во время стрима)</label>
+              <select
+                value={stream.previewMode ?? 'multicam'}
+                onChange={(e) => updateStream.mutate({ previewMode: e.target.value })}
+                className={`${inputClasses} cursor-pointer`}
+              >
+                <option value="multicam">Мультикам (все камеры)</option>
+                <option value="cam1">Камера 1 (верхний левый)</option>
+                <option value="cam2">Камера 2 (верхний правый)</option>
+                <option value="cam3">Камера 3 (нижний левый)</option>
+                <option value="cam4">Камера 4 (нижний правый)</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        {/* Section: Broadcasts Archive */}
+        <section className="bg-surface-elevated border border-zinc-800/50 rounded-xl p-5">
+          <h2 className="flex items-center gap-2 text-base font-medium text-zinc-300 mb-4">
+            <Archive size={18} className="text-zinc-400" />
+            Архив трансляций
+          </h2>
+
+          {broadcasts?.length === 0 && (
+            <div className="flex flex-col items-center py-8 gap-2 opacity-40">
+              <VideoCamera size={32} className="text-zinc-600" weight="thin" />
+              <p className="text-zinc-500 text-sm">Записей пока нет</p>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            {broadcasts?.map((b) => (
+              <div key={b.id} className="bg-surface-primary rounded-lg p-3.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="font-semibold text-sm text-zinc-100">{b.title}</span>
+                    {b.description && (
+                      <span className="ml-2 text-zinc-600 text-xs">{b.description}</span>
+                    )}
+                    <div className="text-xs text-zinc-600 mt-0.5 font-mono tabular-nums">
+                      {new Date(b.startedAt).toLocaleDateString('ru-RU')}
+                      {b.recording?.duration ? ` · ${formatTime(b.recording.duration)}` : ''}
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
+                    {b.recording?.status === 'ready' && (
+                      <a
+                        href={`/api/v1/org/broadcasts/${b.id}/recording/download`}
+                        className="flex items-center gap-1 px-2.5 py-1 bg-brand hover:bg-brand-hover text-white text-xs rounded-md transition-all active:scale-[0.98] no-underline"
+                      >
+                        <DownloadSimple size={12} />
+                        Скачать
+                        {b.recording.fileSize
+                          ? ` (${(b.recording.fileSize / 1024 / 1024 / 1024).toFixed(1)} ГБ)`
+                          : ''}
+                      </a>
+                    )}
+                    {b.recording?.status === 'processing' && (
+                      <span className="px-2.5 py-1 bg-zinc-800 text-zinc-500 text-xs rounded-md">
+                        Обрабатывается...
+                      </span>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (confirm(`Удалить запись "${b.title}"?`))
+                          deleteBroadcast.mutate(b.id);
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-red-900/30 hover:bg-red-900/60 text-red-400 hover:text-red-300 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
+                    >
+                      <Trash size={12} /> Удалить
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+    </DashboardLayout>
+  );
+}

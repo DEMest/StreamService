@@ -49,11 +49,7 @@ export default function OrganizationsPage() {
           {orgs && orgs.length > 0 && (
             <motion.div variants={staggerContainer} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
               {orgs.map((item) => {
-                // key зависит от типа карточки (discriminated union).
-                const key =
-                  item.type === 'event'
-                    ? `event:${item.orgSlug}/${item.eventSlug}`
-                    : `stream:${item.orgSlug}/${item.streamSlug}`;
+                const key = `${item.orgSlug}/${item.streamSlug}`;
                 return (
                   <motion.div key={key} variants={cardFadeUp}>
                     <OrgCard org={item} thumbKey={thumbKey} />

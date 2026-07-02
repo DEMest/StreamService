@@ -1,11 +1,9 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { DashboardLayout } from '@/components/DashboardLayout';
-import { EventsSection } from '@/components/dashboard/EventsSection';
 import { RecordingControl, type RecordingMode } from '@/components/dashboard/RecordingControl';
 import { Broadcast, Gear, ImageSquare, Archive, Copy, Eye, EyeSlash, ArrowsClockwise, PencilSimple, DownloadSimple, Trash, VideoCamera, Upload, CaretDown, ArrowRight, Stack, Plus, DotsThreeVertical, X, Warning } from '@phosphor-icons/react';
 
@@ -13,12 +11,8 @@ interface OrgStreamSummary {
   id: string;
   slug: string;
   name: string;
-  mode: 'composite' | 'multistream';
-  slotCount: number;
   isLive: boolean;
 }
-
-type StreamMode = 'composite' | 'multistream';
 
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -65,7 +59,6 @@ const inputClasses = 'w-full px-3 py-2 bg-surface-primary border border-zinc-700
 
 export default function DashboardPage() {
   const qc = useQueryClient();
-  const router = useRouter();
   const [keyVisible, setKeyVisible] = useState(false);
   const [protocol, setProtocol] = useState<'srt' | 'rtmp'>('srt');
   const [editingBroadcast, setEditingBroadcast] = useState<{ id: string; title: string; description: string } | null>(null);
@@ -124,15 +117,11 @@ export default function DashboardPage() {
   });
 
   const createStreamMutation = useMutation({
-    mutationFn: (data: { slug: string; name?: string; mode: StreamMode; slotCount: number }) =>
+    mutationFn: (data: { slug: string; name?: string }) =>
       api.post<OrgStreamSummary>('/v1/org/streams', data),
-    onSuccess: (created) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['org-streams-list'] });
       setCreateOpen(false);
-      // Multistream — сразу в Studio. Composite — остаёмся на дашборде.
-      if (created.mode === 'multistream') {
-        router.push(`/dashboard/streams/${created.id}/studio`);
-      }
     },
   });
 
@@ -258,7 +247,7 @@ export default function DashboardPage() {
       <div className="max-w-[920px] mx-auto px-6 py-8 space-y-5">
         <h1 className="text-xl font-semibold text-zinc-50 tracking-tight">{profile?.name} — Панель управления</h1>
 
-        {/* Streams catalog — все Stream'ы орги: default + named (composite/multistream) */}
+        {/* Streams catalog — все Stream'ы орги: default + named */}
         <section className="bg-surface-elevated border border-zinc-800/50 rounded-xl p-5">
           <div className="flex items-center justify-between gap-3 mb-4">
             <h2 className="flex items-center gap-2 text-base font-medium text-zinc-300">
@@ -286,10 +275,9 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {sortedStreams.map((s) => {
                 const isDefault = s.slug === '';
-                const isMultistream = s.mode === 'multistream';
                 const targetHref = isDefault
                   ? '#default-stream-config'
-                  : `/dashboard/streams/${s.id}/studio`;
+                  : `/dashboard/streams/${s.id}`;
                 return (
                   <div
                     key={s.id}
@@ -351,7 +339,7 @@ export default function DashboardPage() {
                     {/* Badges row */}
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-zinc-800 border border-zinc-700/50 text-[10px] text-zinc-400 font-mono uppercase tracking-wider">
-                        {isMultistream ? `${s.slotCount} cams` : 'composite'}
+                        stream
                       </span>
                       {s.isLive ? (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-medium">
@@ -385,7 +373,7 @@ export default function DashboardPage() {
                         href={targetHref}
                         className="mt-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-brand/20 hover:bg-brand/30 text-brand text-xs font-medium rounded-md transition-all active:scale-[0.98] no-underline"
                       >
-                        {isMultistream ? 'Studio' : 'Открыть'}
+                        Открыть
                         <ArrowRight size={12} weight="bold" />
                       </Link>
                     )}
@@ -395,14 +383,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* TODO Step 5+: для named composite Stream'а нужен отдельный
-              /dashboard/streams/[id]/page.tsx — упрощённый дашборд для конкретного
-              Stream'а (URL/key/settings/archive). Пока ссылка ведёт в Studio,
-              откуда composite Stream редиректится обратно на /dashboard. */}
         </section>
-
-        {/* Events — Step 5: группирующая сущность над Stream'ами */}
-        <EventsSection />
 
         {/* Anchor — секции ниже относятся к default Stream'у орги */}
         <div ref={defaultSectionRef} id="default-stream-config" />
@@ -1039,7 +1020,7 @@ function ModalShell({ title, onClose, children, widthClass = 'max-w-md' }: Modal
 interface CreateStreamModalProps {
   onClose: () => void;
   existingSlugs: string[];
-  onSubmit: (payload: { slug: string; name?: string; mode: StreamMode; slotCount: number }) => void;
+  onSubmit: (payload: { slug: string; name?: string }) => void;
   isSubmitting: boolean;
   errorMessage: string | null;
 }
@@ -1047,8 +1028,6 @@ interface CreateStreamModalProps {
 function CreateStreamModal({ onClose, existingSlugs, onSubmit, isSubmitting, errorMessage }: CreateStreamModalProps) {
   const [slug, setSlug] = useState('');
   const [name, setName] = useState('');
-  const [mode, setMode] = useState<StreamMode>('composite');
-  const [slotCount, setSlotCount] = useState(2);
 
   const trimmedSlug = slug.trim().toLowerCase();
   const slugFormatValid = SLUG_REGEX.test(trimmedSlug);
@@ -1073,8 +1052,6 @@ function CreateStreamModal({ onClose, existingSlugs, onSubmit, isSubmitting, err
     onSubmit({
       slug: trimmedSlug,
       name: name.trim() || undefined,
-      mode,
-      slotCount: mode === 'multistream' ? slotCount : 1,
     });
   }
 
@@ -1109,87 +1086,6 @@ function CreateStreamModal({ onClose, existingSlugs, onSubmit, isSubmitting, err
             className={inputClasses}
             disabled={isSubmitting}
           />
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs text-zinc-500">Тип стрима</label>
-          <div className="grid grid-cols-2 gap-2">
-            <label
-              className={`flex flex-col gap-1 p-3 rounded-lg border cursor-pointer transition-colors ${
-                mode === 'composite'
-                  ? 'border-brand bg-brand/10'
-                  : 'border-zinc-800 bg-surface-primary hover:border-zinc-700'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="mode"
-                  value="composite"
-                  checked={mode === 'composite'}
-                  onChange={() => setMode('composite')}
-                  className="accent-brand"
-                  disabled={isSubmitting}
-                />
-                <span className="text-sm text-zinc-200 font-medium">Composite</span>
-              </div>
-              <p className="text-[11px] text-zinc-500 leading-snug">
-                Один SRT-поток, до 4 камер в кадре (vMix)
-              </p>
-            </label>
-            <label
-              className={`flex flex-col gap-1 p-3 rounded-lg border cursor-pointer transition-colors ${
-                mode === 'multistream'
-                  ? 'border-brand bg-brand/10'
-                  : 'border-zinc-800 bg-surface-primary hover:border-zinc-700'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="mode"
-                  value="multistream"
-                  checked={mode === 'multistream'}
-                  onChange={() => setMode('multistream')}
-                  className="accent-brand"
-                  disabled={isSubmitting}
-                />
-                <span className="text-sm text-zinc-200 font-medium">Multistream</span>
-              </div>
-              <p className="text-[11px] text-zinc-500 leading-snug">
-                Отдельные потоки на камеру, раскладка в Studio
-              </p>
-            </label>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs text-zinc-500">
-            Количество камер{mode === 'composite' && <span className="text-zinc-600"> (фиксировано для composite)</span>}
-          </label>
-          <div className="grid grid-cols-4 gap-2">
-            {[1, 2, 3, 4].map((n) => {
-              const disabled = mode === 'composite' ? n !== 1 : false;
-              const active = mode === 'composite' ? n === 1 : slotCount === n;
-              return (
-                <button
-                  type="button"
-                  key={n}
-                  disabled={disabled || isSubmitting}
-                  onClick={() => setSlotCount(n)}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-all cursor-pointer disabled:cursor-not-allowed ${
-                    active
-                      ? 'bg-brand text-white'
-                      : disabled
-                        ? 'bg-surface-primary text-zinc-700 border border-zinc-800/40'
-                        : 'bg-surface-primary text-zinc-400 hover:text-zinc-200 border border-zinc-800/40'
-                  }`}
-                >
-                  {n}
-                </button>
-              );
-            })}
-          </div>
         </div>
 
         {visibleError && !conflict && (

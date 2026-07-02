@@ -136,7 +136,7 @@ describe('RecordingService', () => {
       );
     });
 
-    it('composite mode (slotCount=1) creates exactly one Recording with slotIndex=1', async () => {
+    it('creates exactly one Recording with slotIndex=1 (composite)', async () => {
       spyExistsSync.mockReturnValue(true);
       spyReaddirSync.mockImplementation((_p: any, opts?: any) => {
         if (opts && (opts as any).withFileTypes) return [];
@@ -149,7 +149,7 @@ describe('RecordingService', () => {
       );
       mockPrisma.recording.update.mockResolvedValue({});
 
-      await service.onStreamEnded('bcast-comp', 'org1', 'composite', 1);
+      await service.onStreamEnded('bcast-comp', 'org1');
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setImmediate(r));
       }
@@ -166,67 +166,14 @@ describe('RecordingService', () => {
       );
     });
 
-    it('multistream mode skips empty/missing slot dirs and creates Recording only for publishing slots', async () => {
-      // slotCount=4. Только slot-1 и slot-3 имеют сегменты; slot-2 missing, slot-4 пустая.
-      const slotDir = (n: number) => path.join('/recordings', 'live', 'org1', String(n));
-      const presentDirs = new Set<string>([slotDir(1), slotDir(3)]);
-      const emptyDirs = new Set<string>([slotDir(4)]);
-      const missingDirs = new Set<string>([slotDir(2)]);
-
-      spyExistsSync.mockImplementation((p: any) => {
-        const s = String(p);
-        if (missingDirs.has(s)) return false;
-        return true;
-      });
-      spyReaddirSync.mockImplementation((p: any, opts?: any) => {
+    it('master.m3u8 contains exactly one EXT-X-STREAM-INF referencing slot-1', async () => {
+      spyExistsSync.mockReturnValue(true);
+      spyReaddirSync.mockImplementation((_p: any, opts?: any) => {
         if (opts && (opts as any).withFileTypes) return [];
-        const s = String(p);
-        if (presentDirs.has(s)) return ['seg-001.mp4'] as any;
-        if (emptyDirs.has(s)) return [] as any;
-        return [] as any;
+        return ['seg-001.mp4'] as any;
       });
 
-      let nextId = 1;
-      const createCalls: any[] = [];
-      mockPrisma.recording.create.mockImplementation(({ data }: any) => {
-        createCalls.push(data);
-        return Promise.resolve({ id: `r${nextId++}`, slotIndex: data.slotIndex });
-      });
-      mockPrisma.recording.update.mockResolvedValue({});
-
-      await service.onStreamEnded('bcast-multi', 'org1', 'multistream', 4);
-      for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setImmediate(r));
-      }
-
-      // Exactly two Recording'а — для slot 1 и slot 3
-      expect(createCalls).toHaveLength(2);
-      expect(createCalls.map((c) => c.slotIndex).sort()).toEqual([1, 3]);
-      expect(createCalls.every((c) => c.broadcastId === 'bcast-multi' && c.status === 'processing')).toBe(true);
-    });
-
-    it('multistream master.m3u8 contains one EXT-X-STREAM-INF per publishing slot', async () => {
-      // Same setup: slot 1 and 3 publishing
-      const slotDir = (n: number) => path.join('/recordings', 'live', 'org1', String(n));
-      const presentDirs = new Set<string>([slotDir(1), slotDir(3)]);
-      const missingDirs = new Set<string>([slotDir(2), slotDir(4)]);
-
-      spyExistsSync.mockImplementation((p: any) => {
-        const s = String(p);
-        if (missingDirs.has(s)) return false;
-        return true;
-      });
-      spyReaddirSync.mockImplementation((p: any, opts?: any) => {
-        if (opts && (opts as any).withFileTypes) return [];
-        const s = String(p);
-        if (presentDirs.has(s)) return ['seg-001.mp4'] as any;
-        return [] as any;
-      });
-
-      let nextId = 1;
-      mockPrisma.recording.create.mockImplementation(({ data }: any) =>
-        Promise.resolve({ id: `r${nextId++}`, slotIndex: data.slotIndex }),
-      );
+      mockPrisma.recording.create.mockResolvedValue({ id: 'rm', slotIndex: 1 });
       mockPrisma.recording.update.mockResolvedValue({});
 
       const masterWrites: string[] = [];
@@ -236,7 +183,7 @@ describe('RecordingService', () => {
         }
       });
 
-      await service.onStreamEnded('bcast-multi-master', 'org1', 'multistream', 4);
+      await service.onStreamEnded('bcast-master', 'orgA');
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setImmediate(r));
       }
@@ -244,57 +191,32 @@ describe('RecordingService', () => {
       expect(masterWrites.length).toBeGreaterThan(0);
       const lastMaster = masterWrites[masterWrites.length - 1];
       const streamInfMatches = lastMaster.match(/#EXT-X-STREAM-INF/g) || [];
-      expect(streamInfMatches.length).toBe(2);
+      expect(streamInfMatches.length).toBe(1);
       expect(lastMaster).toContain('slot-1/index.m3u8');
-      expect(lastMaster).toContain('slot-3/index.m3u8');
-      expect(lastMaster).not.toContain('slot-2/index.m3u8');
-      expect(lastMaster).not.toContain('slot-4/index.m3u8');
     });
 
-    it('multistream returns without creating Recording when all slot dirs are empty/missing', async () => {
-      const liveRoot = path.join('/recordings', 'live', 'org1');
-      spyExistsSync.mockImplementation((p: any) => {
-        const s = String(p);
-        // Все slot-dirs под /recordings/live/org1 отсутствуют.
-        if (s.startsWith(liveRoot + path.sep) || s === liveRoot) return false;
-        return true;
-      });
-      spyReaddirSync.mockReturnValue([] as any);
-
-      await service.onStreamEnded('bcast-empty', 'org1', 'multistream', 4);
-      expect(mockPrisma.recording.create).not.toHaveBeenCalled();
-    });
-
-    it('multistream fileSize counts only slot-N dir contents (not whole broadcastDir)', async () => {
-      // Один publishing slot — slot 1. Проверим что getDirSize вызывается на slot-1 dir,
-      // не на broadcastDir; иначе при множественных slot'ах получили бы over-counting.
-      const liveSlotDir = path.join('/recordings', 'live', 'org1', '1');
-      const presentDirs = new Set<string>([liveSlotDir]);
-
+    it('fileSize counts only slot-1 dir contents (not whole broadcastDir)', async () => {
       spyExistsSync.mockReturnValue(true);
 
       const sizedPaths: string[] = [];
       spyReaddirSync.mockImplementation((p: any, opts?: any) => {
         const s = String(p);
         if (opts && (opts as any).withFileTypes) {
-          // getDirSize: запоминаем путь, по которому рекурсивный обход
           sizedPaths.push(s);
           return [{ name: 'seg-0001.mp4', isDirectory: () => false } as any];
         }
-        if (presentDirs.has(s)) return ['seg-001.mp4'] as any;
-        return [] as any;
+        return ['seg-001.mp4'] as any;
       });
       spyStatSync.mockReturnValue({ size: 1024, isDirectory: () => false } as any);
 
       mockPrisma.recording.create.mockResolvedValue({ id: 'rsize', slotIndex: 1 });
       mockPrisma.recording.update.mockResolvedValue({});
 
-      await service.onStreamEnded('bcast-size', 'org1', 'multistream', 1);
+      await service.onStreamEnded('bcast-size', 'org1');
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setImmediate(r));
       }
 
-      // getDirSize должен пройти по slot-1 dir, не по broadcastDir.
       const broadcastDirArch = path.join('/recordings', 'archive', 'org1', 'bcast-size');
       const slotDirArch = path.join(broadcastDirArch, 'slot-1');
       expect(sizedPaths).toContain(slotDirArch);
