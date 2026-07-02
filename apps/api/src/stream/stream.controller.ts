@@ -9,7 +9,11 @@ import {
   Post,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { CreateStreamInput, StreamService, UpdateStreamConfigInput } from './stream.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -18,17 +22,13 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtPayload } from '../auth/auth.service';
 
 /**
- * Per-Stream API для org_admin (Step 3+ multi-stream-studio).
+ * Per-Stream API для org_admin.
  *
  * Все endpoint'ы фильтруются по `user.orgId` — попытка доступа к Stream'у чужой
  * орги возвращает 404 (не палим существование).
  *
- * Step 4 добавил POST/DELETE для управления несколькими Stream'ами в орге:
- * default Stream (slug='') создаётся вместе с оргой через admin.createOrg и
- * защищён от DELETE; пользовательские Stream'ы (slug≠'') можно создавать и
- * удалять через этот контроллер.
- *
- * См. spec §11 «Backend-данные для Studio», §14 Step 4 (create/delete API).
+ * Нет привилегированного «дефолтного» Stream'а — все Stream'ы орги (включая
+ * последний) создаются/удаляются через этот контроллер на равных правах.
  */
 @Controller('v1/org/streams')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -62,11 +62,10 @@ export class StreamController {
   }
 
   /**
-   * DELETE /v1/org/streams/:id — удалить Stream орги.
+   * DELETE /v1/org/streams/:id — удалить Stream орги (в т.ч. последний).
    *
    * - 404 для cross-tenant.
-   * - 400 при попытке удалить default Stream (slug=''): он удаляется только
-   *   каскадом через admin.deleteOrg.
+   * - 409 если Stream сейчас live — сначала нужно остановить трансляцию.
    * - Side-effect: удаление MediaMTX-путей (best-effort). При падении MediaMTX —
    *   log warn, но запись из Prisma всё равно удаляется.
    * - Каскад: Broadcast → Recording удаляются onDelete:Cascade.
@@ -150,5 +149,39 @@ export class StreamController {
     @Body() body: { enabled?: boolean; mode?: 'auto' | 'manual' },
   ) {
     return this.streams.setRecording(user.orgId!, id, body ?? {});
+  }
+
+  /**
+   * POST /v1/org/streams/:id/preview — загрузить статичное превью Stream'а
+   * (показывается зрителям когда Stream offline).
+   */
+  @Post(':id/preview')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 } }))
+  uploadPreview(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+      throw new BadRequestException('Only JPEG, PNG and WebP images are allowed');
+    }
+    return this.streams.uploadPreviewForOrg(user.orgId!, id, file.buffer);
+  }
+
+  /**
+   * DELETE /v1/org/streams/:id/preview — удалить статичное превью.
+   */
+  @Delete(':id/preview')
+  deletePreview(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.streams.deletePreviewForOrg(user.orgId!, id);
+  }
+
+  /**
+   * POST /v1/org/streams/:id/chat/clear — очистить чат этого Stream'а.
+   */
+  @Post(':id/chat/clear')
+  clearChat(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.streams.clearChatForOrg(user.orgId!, id);
   }
 }

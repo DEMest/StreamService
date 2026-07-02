@@ -26,41 +26,14 @@ export class PublicController {
     return this.pub.getCatalog();
   }
 
-  // ─────────── default Stream орги (slug='') ───────────
-  // Backward-compat: пути без сегмента /streams/<streamSlug>.
-
+  /** GET /v1/public/orgs/:orgSlug — обзор орги (список Stream'ов). */
   @Get('orgs/:orgSlug')
-  getOrgWatch(@Param('orgSlug') orgSlug: string, @Query('key') key?: string) {
-    return this.pub.getOrgWatch(orgSlug, undefined, key);
+  getOrgOverview(@Param('orgSlug') orgSlug: string) {
+    return this.pub.getOrgOverview(orgSlug);
   }
-
-  @Get('orgs/:orgSlug/stream')
-  getStreamUrl(@Param('orgSlug') orgSlug: string, @Query('key') key?: string) {
-    return this.pub.getStreamUrl(orgSlug, undefined, key);
-  }
-
-  @Get('orgs/:orgSlug/broadcasts')
-  getOrgBroadcasts(@Param('orgSlug') orgSlug: string, @Query('key') key?: string) {
-    return this.pub.getOrgBroadcasts(orgSlug, undefined, key);
-  }
-
-  @Get('orgs/:orgSlug/thumbnail')
-  async getThumbnail(@Param('orgSlug') orgSlug: string, @Res() res: Response) {
-    const { buffer, maxAge } = await this.pub.getThumbnail(orgSlug);
-    res.set({
-      'Content-Type': 'image/jpeg',
-      'Cache-Control': `public, max-age=${maxAge}`,
-    });
-    res.send(buffer);
-  }
-
-  // ─────────── named Stream орги (slug != '') ───────────
-  // Step 4: orga может иметь несколько Stream'ов помимо default'а; viewer
-  // обращается к ним через явный сегмент /streams/<streamSlug>.
-  // Логика идентична default-варианту — просто прокидывается streamSlug.
 
   @Get('orgs/:orgSlug/streams/:streamSlug')
-  getNamedOrgWatch(
+  getOrgWatch(
     @Param('orgSlug') orgSlug: string,
     @Param('streamSlug') streamSlug: string,
     @Query('key') key?: string,
@@ -69,7 +42,7 @@ export class PublicController {
   }
 
   @Get('orgs/:orgSlug/streams/:streamSlug/stream')
-  getNamedStreamUrl(
+  getStreamUrl(
     @Param('orgSlug') orgSlug: string,
     @Param('streamSlug') streamSlug: string,
     @Query('key') key?: string,
@@ -78,7 +51,7 @@ export class PublicController {
   }
 
   @Get('orgs/:orgSlug/streams/:streamSlug/broadcasts')
-  getNamedOrgBroadcasts(
+  getOrgBroadcasts(
     @Param('orgSlug') orgSlug: string,
     @Param('streamSlug') streamSlug: string,
     @Query('key') key?: string,
@@ -87,7 +60,7 @@ export class PublicController {
   }
 
   @Get('orgs/:orgSlug/streams/:streamSlug/thumbnail')
-  async getNamedThumbnail(
+  async getThumbnail(
     @Param('orgSlug') orgSlug: string,
     @Param('streamSlug') streamSlug: string,
     @Res() res: Response,

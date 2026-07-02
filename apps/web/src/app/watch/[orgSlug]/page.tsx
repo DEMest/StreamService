@@ -1,15 +1,12 @@
 'use client';
-import { WatchView } from '@/components/WatchView';
+import { OrgOverview } from '@/components/OrgOverview';
 
 /**
- * Watch-страница для default Stream'а орги.
- *
- * Backward-compat: путь `/watch/<orgSlug>` (без сегмента /streams/<slug>) —
- * это исторический URL, который указывает на default Stream орги (slug='').
- *
- * Реальная логика плеера/чата вынесена в `WatchView`, чтобы переиспользоваться
- * между default и named (`/watch/<orgSlug>/<streamSlug>`) route'ами.
+ * Обзор орги: список её публичных Stream'ов + опциональный режим совместного
+ * просмотра (канвас-компоновка всех live Stream'ов). Больше НЕ проигрывает
+ * какой-то конкретный «дефолтный» Stream — для этого используйте
+ * `/watch/<orgSlug>/<streamSlug>`.
  */
-export default function WatchPage({ params }: { params: { orgSlug: string } }) {
-  return <WatchView orgSlug={params.orgSlug} />;
+export default function WatchOrgPage({ params }: { params: { orgSlug: string } }) {
+  return <OrgOverview orgSlug={params.orgSlug} />;
 }

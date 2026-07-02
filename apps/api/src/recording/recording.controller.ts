@@ -24,23 +24,9 @@ export class RecordingController {
     private prisma: PrismaService,
   ) {}
 
-  // ─────────── archive HLS: default Stream ───────────
-
-  @Get('v1/public/orgs/:orgSlug/broadcasts/:broadcastId/recording/hls/*')
-  async serveHls(
-    @Param('orgSlug') orgSlug: string,
-    @Param('broadcastId') broadcastId: string,
-    @Param('0') wildcard: string,
-    @Res() res: Response,
-  ) {
-    this.logger.log(`serveHls: orgSlug=${orgSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
-    await this.serveArchiveHlsImpl(orgSlug, '', broadcastId, wildcard, res);
-  }
-
-  // ─────────── archive HLS: named Stream ───────────
-  // Step 4: каждый Stream орги имеет свой набор broadcast'ов. URL архивного
-  // HLS включает явный /streams/<streamSlug>/ префикс, чтобы matching shape
-  // совпадал с live HLS URL'ом (см. ниже).
+  // ─────────── archive HLS ───────────
+  // Каждый Stream орги имеет свой набор broadcast'ов; URL включает явный
+  // /streams/<streamSlug>/ сегмент.
 
   @Get('v1/public/orgs/:orgSlug/streams/:streamSlug/broadcasts/:broadcastId/recording/hls/*')
   async serveHlsNamed(
@@ -55,16 +41,12 @@ export class RecordingController {
   }
 
   /**
-   * Общая реализация archive HLS под default и named Stream.
-   *
-   * Lookup broadcast'а делается через stream { slug: streamSlug, org: { slug: orgSlug } }
-   * (для default streamSlug='' попадает в этот же фильтр, потому что у каждой
-   * orgi всегда есть Stream с slug='').
+   * Реализация archive HLS-сервинга.
    *
    * Расположение файлов на диске не зависит от streamSlug — оно определяется
    * через `getRecordingDir(broadcastId)`, который читает broadcast.streamId
-   * и собирает путь сам. Поэтому единственная вещь, на которую влияет
-   * streamSlug — это запрос к БД (фильтр по nested Stream).
+   * и собирает путь сам. streamSlug используется только для запроса к БД
+   * (фильтр по nested Stream, чтобы 404-ить чужие/несуществующие пути).
    */
   private async serveArchiveHlsImpl(
     orgSlug: string,
@@ -144,22 +126,9 @@ export class RecordingController {
     }
   }
 
-  // ─────────── live HLS: default Stream ───────────
-
-  @Get('v1/public/orgs/:orgSlug/live/hls/*')
-  async serveLiveHls(
-    @Param('orgSlug') orgSlug: string,
-    @Param('0') wildcard: string,
-    @Query('key') key: string | undefined,
-    @Res() res: Response,
-  ) {
-    this.logger.log(`serveLiveHls: orgSlug=${orgSlug} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
-    await this.serveLiveHlsImpl(orgSlug, '', wildcard, key, res);
-  }
-
-  // ─────────── live HLS: named Stream ───────────
-  // Step 4: HLS-output для named Stream'ов лежит под /hls/live/<orgSlug>/<streamSlug>/...
-  // (соответствует MediaMTX path 'live/<orgSlug>/<streamSlug>').
+  // ─────────── live HLS ───────────
+  // HLS-output лежит под /hls/live/<orgSlug>/<streamSlug>/... (соответствует
+  // MediaMTX path 'live/<orgSlug>/<streamSlug>').
 
   @Get('v1/public/orgs/:orgSlug/streams/:streamSlug/live/hls/*')
   async serveLiveHlsNamed(
@@ -174,17 +143,10 @@ export class RecordingController {
   }
 
   /**
-   * Общая реализация live HLS-проксирования с диска (named + default).
+   * Реализация live HLS-проксирования с диска.
    *
-   * Lookup Stream'а — `{ slug: streamSlug, org: { slug: orgSlug, isActive: true } }`.
-   * Для default streamSlug='' попадает в этот же фильтр (у орги всегда есть
-   * default Stream).
-   *
-   * liveDir =
-   *   default → /hls/live/<orgSlug>
-   *   named   → /hls/live/<orgSlug>/<streamSlug>
-   *
-   * Внутри liveDir файлы расположены по правилам FFmpeg/HLS: master.m3u8 + сегменты.
+   * liveDir = /hls/live/<orgSlug>/<streamSlug>. Внутри — файлы по правилам
+   * FFmpeg/HLS: master.m3u8 + сегменты.
    */
   private async serveLiveHlsImpl(
     orgSlug: string,
@@ -206,10 +168,7 @@ export class RecordingController {
       return;
     }
 
-    const liveDir =
-      streamSlug === ''
-        ? path.resolve(path.join(HLS_LIVE_ROOT, orgSlug))
-        : path.resolve(path.join(HLS_LIVE_ROOT, orgSlug, streamSlug));
+    const liveDir = path.resolve(path.join(HLS_LIVE_ROOT, orgSlug, streamSlug));
 
     let relativePath = decodeURIComponent(wildcard ?? '');
     relativePath = relativePath.split('?')[0];

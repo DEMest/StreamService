@@ -37,38 +37,26 @@ interface OrgWatch {
   streamTitle: string;
   streamDescription?: string;
   streamIsPublic: boolean;
+  feedMode: 'single' | 'composite';
   accessDenied?: boolean;
 }
 
 interface StreamInfo {
   hlsUrl: string;
+  feedMode: 'single' | 'composite';
 }
 
 interface WatchViewProps {
   orgSlug: string;
-  /**
-   * Named Stream slug. Empty string '' / undefined ⇒ default Stream орги
-   * (backward-compat: путь `/watch/<orgSlug>`).
-   */
-  streamSlug?: string;
+  streamSlug: string;
 }
 
 /**
- * Универсальный watch-компонент: рендерит плеер + чат для default Stream'а
- * (`streamSlug=''`) и для named Stream'а (`streamSlug='foo'`).
- *
- * Различия между default и named сводятся к двум вещам:
- *   1. URL префикс API: `/v1/public/orgs/<org>` vs `/v1/public/orgs/<org>/streams/<stream>`.
- *   2. Линк на archive: `/watch/<org>/archive` vs `/watch/<org>/<stream>/archive`.
- *   3. Заголовок и breadcrumb: для named — показываем имя Stream'а отдельно
- *      и кнопку «← к организации» уводит на default-watch (`/watch/<org>`).
+ * Watch-компонент конкретного Stream'а: рендерит плеер + чат для Stream'а
+ * `<orgSlug>/<streamSlug>`.
  */
 export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
-  const sSlug = streamSlug && streamSlug.length > 0 ? streamSlug : '';
-  const isNamed = sSlug !== '';
-  const apiBasePath = isNamed
-    ? `/v1/public/orgs/${orgSlug}/streams/${sSlug}`
-    : `/v1/public/orgs/${orgSlug}`;
+  const apiBasePath = `/v1/public/orgs/${orgSlug}/streams/${streamSlug}`;
   const searchParams = useSearchParams();
   const previewKey = searchParams.get('key') ?? undefined;
   const qc = useQueryClient();
@@ -165,14 +153,14 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
     : apiBasePath;
 
   const { data: org } = useQuery({
-    queryKey: ['watch', orgSlug, sSlug, previewKey],
+    queryKey: ['watch', orgSlug, streamSlug, previewKey],
     queryFn: () => api.get<OrgWatch>(apiUrl),
     refetchInterval: 15_000,
   });
 
   // Stream config + HLS URL. Polled every 3s while the org is live.
   const { data: stream } = useQuery({
-    queryKey: ['stream', orgSlug, sSlug, previewKey],
+    queryKey: ['stream', orgSlug, streamSlug, previewKey],
     queryFn: () => api.get<StreamInfo>(`${apiBasePath}/stream${previewKey ? `?key=${previewKey}` : ''}`),
     enabled: org?.isLive === true,
     retry: false,
@@ -185,6 +173,9 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
   // Camera-row entries for portrait mobile (composite: multicam + cam1..4).
   const cameraRowEntries = useMemo<CameraRowEntry[]>(() => {
     if (!stream) return [];
+    if (stream.feedMode === 'single') {
+      return [{ key: 'multicam', label: 'Все', isLive: true }];
+    }
     return [
       { key: 'multicam', label: 'Все', isLive: true },
       { key: 'cam1', label: '1', isLive: true },
@@ -198,7 +189,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
   function handleVideoClick(e: React.MouseEvent<HTMLDivElement>) {
     setQualityMenuOpen(false);
     setMobileViewOpen(false);
-    if (!stream) return;
+    if (!stream || stream.feedMode === 'single') return;
 
     if (viewMode !== 'multicam') { setViewMode('multicam'); return; }
     const rect = e.currentTarget.getBoundingClientRect();
@@ -335,10 +326,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
     return () => { if (desktopControlsTimerRef.current) clearTimeout(desktopControlsTimerRef.current); };
   }, [isFullscreen]);
 
-  // Archive URL — для default: `/watch/<org>/archive`, для named: `/watch/<org>/<stream>/archive`.
-  const archiveBasePath = isNamed
-    ? `/watch/${orgSlug}/${sSlug}/archive`
-    : `/watch/${orgSlug}/archive`;
+  const archiveBasePath = `/watch/${orgSlug}/${streamSlug}/archive`;
   const archiveLink = previewKey
     ? `${archiveBasePath}?key=${previewKey}`
     : archiveBasePath;
@@ -367,17 +355,16 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
       <ViewSwitcher
         mode={viewMode as CompositeViewMode}
         onChange={(m: CompositeViewMode) => { setViewMode(m); setMobileViewOpen(false); }}
+        feedMode={org?.feedMode ?? 'composite'}
       />
     );
   }
 
-  // Заголовок: для named Stream'а склеиваем «<orgName> · <streamName>».
+  // Заголовок: склеиваем «<orgName> · <streamName>».
   const composedTitle = (() => {
     const streamName = org?.streamTitle?.trim();
-    if (isNamed && streamName) {
-      return `${org?.name ?? orgSlug} · ${streamName}`;
-    }
-    return streamName || org?.name || orgSlug;
+    if (streamName) return `${org?.name ?? orgSlug} · ${streamName}`;
+    return org?.name || orgSlug;
   })();
 
   // ── Mobile layout ──────────────────────────────────────────────────────
@@ -521,7 +508,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
               className="absolute top-0 z-[25] backdrop-blur-sm"
               style={{ right: mobileChatOpen ? 0 : -240, bottom: 50, width: 240, background: 'rgba(12,12,14,0.95)', transition: 'right 0.2s' }}
             >
-              {org && <Chat orgSlug={orgSlug} streamSlug={sSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
+              {org && <Chat orgSlug={orgSlug} streamSlug={streamSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
             </div>
           </>
         ) : (
@@ -642,10 +629,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
                   <p className="text-zinc-100 font-semibold text-sm leading-snug truncate">
                     {composedTitle}
                   </p>
-                  {isNamed && org?.name && (
-                    <p className="text-zinc-500 text-xs mt-0.5 truncate">{org.name}</p>
-                  )}
-                  {!isNamed && org?.streamTitle && org?.name && (
+                  {org?.name && (
                     <p className="text-zinc-500 text-xs mt-0.5 truncate">{org.name}</p>
                   )}
                 </div>
@@ -665,7 +649,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
 
             {/* Chat */}
             <div className="flex-1 overflow-hidden">
-              {org && <Chat orgSlug={orgSlug} streamSlug={sSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
+              {org && <Chat orgSlug={orgSlug} streamSlug={streamSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
             </div>
           </>
         )}
@@ -697,16 +681,14 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
           {!isFullscreen && org && (
             <div className="absolute top-3 left-3 z-10 flex flex-col gap-1 max-w-[60%] pointer-events-auto">
               <div className="flex items-center gap-2 bg-black/55 backdrop-blur-sm rounded-lg px-3 py-1.5">
-                {isNamed ? (
-                  <Link
-                    href={previewKey ? `/watch/${orgSlug}?key=${previewKey}` : `/watch/${orgSlug}`}
-                    className="text-zinc-400 hover:text-zinc-200 transition-colors no-underline shrink-0 flex items-center"
-                    title={`К ${org.name}`}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <CaretLeft size={14} />
-                  </Link>
-                ) : null}
+                <Link
+                  href={previewKey ? `/watch/${orgSlug}?key=${previewKey}` : `/watch/${orgSlug}`}
+                  className="text-zinc-400 hover:text-zinc-200 transition-colors no-underline shrink-0 flex items-center"
+                  title={`К ${org.name}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <CaretLeft size={14} />
+                </Link>
                 <span className="text-zinc-200 text-xs font-semibold truncate">{composedTitle}</span>
               </div>
             </div>
@@ -812,7 +794,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
           </button>
           <div className="overflow-hidden shrink-0 transition-[width] duration-200" style={{ width: chatOpen ? 300 : 0, borderLeft: chatOpen ? '1px solid rgba(39,39,42,0.6)' : 'none' }}>
             <div className="h-full" style={{ width: 300 }}>
-              {org && <Chat orgSlug={orgSlug} streamSlug={sSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
+              {org && <Chat orgSlug={orgSlug} streamSlug={streamSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
             </div>
           </div>
         </>

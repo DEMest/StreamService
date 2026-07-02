@@ -1,9 +1,20 @@
+jest.mock('sharp', () => {
+  return jest.fn(() => ({
+    resize: jest.fn().mockReturnThis(),
+    jpeg: jest.fn().mockReturnThis(),
+    toFile: jest.fn().mockResolvedValue(undefined),
+  }));
+});
+
 import { Test } from '@nestjs/testing';
 import { StreamService } from './stream.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
-import { NotFoundException } from '@nestjs/common';
+import { ChatService } from '../chat/chat.service';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { promises as fsPromises } from 'fs';
+import * as sharp from 'sharp';
 
 const mockPrisma = {
   stream: {
@@ -28,6 +39,7 @@ const mockMediamtx = {
 };
 // onStreamEnded должен возвращать Promise — StreamService.endBroadcast вешает на него .catch.
 const mockRecording = { onStreamEnded: jest.fn().mockResolvedValue(undefined) };
+const mockChatService = { clearMessagesByStream: jest.fn() };
 
 describe('StreamService', () => {
   let service: StreamService;
@@ -35,31 +47,29 @@ describe('StreamService', () => {
   beforeEach(async () => {
     jest.resetAllMocks();
     mockRecording.onStreamEnded.mockResolvedValue(undefined);
+    // jest.resetAllMocks() выше стирает implementation, забиндженную в jest.mock('sharp', ...)
+    // фабрике (она инициализируется один раз при загрузке модуля) — восстанавливаем
+    // её здесь на каждый тест, как и mockRecording.onStreamEnded выше.
+    (sharp as unknown as jest.Mock).mockImplementation(() => ({
+      resize: jest.fn().mockReturnThis(),
+      jpeg: jest.fn().mockReturnThis(),
+      toFile: jest.fn().mockResolvedValue(undefined),
+    }));
+    // spy on fs.promises methods individually (not jest.mock('fs', ...)) —
+    // сохраняет реальный fs для Prisma/остальной инфраструктуры, см. паттерн
+    // в recording.service.spec.ts.
+    jest.spyOn(fsPromises, 'mkdir').mockResolvedValue(undefined as any);
+    jest.spyOn(fsPromises, 'unlink').mockResolvedValue(undefined as any);
     const module = await Test.createTestingModule({
       providers: [
         StreamService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: MediamtxService, useValue: mockMediamtx },
         { provide: RecordingService, useValue: mockRecording },
+        { provide: ChatService, useValue: mockChatService },
       ],
     }).compile();
     service = module.get(StreamService);
-  });
-
-  describe('getDefaultStream', () => {
-    it('returns default Stream of org', async () => {
-      mockPrisma.stream.findUnique.mockResolvedValue({ id: 's1', orgId: 'o1', slug: '' });
-      const r = await service.getDefaultStream('o1');
-      expect(r.id).toBe('s1');
-      expect(mockPrisma.stream.findUnique).toHaveBeenCalledWith({
-        where: { orgId_slug: { orgId: 'o1', slug: '' } },
-      });
-    });
-
-    it('throws NotFoundException if no default Stream', async () => {
-      mockPrisma.stream.findUnique.mockResolvedValue(null);
-      await expect(service.getDefaultStream('o1')).rejects.toBeInstanceOf(NotFoundException);
-    });
   });
 
   describe('rotateKey', () => {
@@ -406,6 +416,24 @@ describe('StreamService', () => {
       expect(mockMediamtx.replaceStreamPaths).not.toHaveBeenCalled();
       expect(mockPrisma.stream.update).toHaveBeenCalledTimes(1);
     });
+
+    it('updates feedMode', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(baseRow);
+      mockPrisma.stream.update.mockResolvedValue({ ...baseRow, feedMode: 'single' });
+
+      const r = await service.updateConfig('org-1', 'st-1', { feedMode: 'single' });
+      expect((r as any).feedMode).toBe('single');
+      expect(mockPrisma.stream.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ feedMode: 'single' }),
+      }));
+    });
+
+    it('rejects invalid feedMode', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(baseRow);
+      await expect(service.updateConfig('org-1', 'st-1', { feedMode: 'foo' as any }))
+        .rejects.toBeInstanceOf(BadRequestException);
+      expect(mockPrisma.stream.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('getByIdForOrg — DTO includes recording fields', () => {
@@ -481,6 +509,81 @@ describe('StreamService', () => {
           orderBy: { startedAt: 'desc' },
         }),
       );
+    });
+  });
+
+  describe('uploadPreviewForOrg', () => {
+    it('throws NotFoundException (404) for cross-tenant stream, sharp/prisma.update not called', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(null);
+      await expect(
+        service.uploadPreviewForOrg('org-1', 'st-foreign', Buffer.from('img')),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(mockPrisma.stream.update).not.toHaveBeenCalled();
+    });
+
+    it('resizes/encodes via sharp, writes previewImagePath, returns ok:true', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        id: 'st-1', orgId: 'org-1', slug: '',
+        org: { slug: 'club' },
+      });
+      mockPrisma.stream.update.mockResolvedValue({});
+
+      const r = await service.uploadPreviewForOrg('org-1', 'st-1', Buffer.from('img'));
+
+      expect(fsPromises.mkdir).toHaveBeenCalledWith(expect.any(String), { recursive: true });
+      expect(mockPrisma.stream.update).toHaveBeenCalledWith({
+        where: { id: 'st-1' },
+        data: { previewImagePath: 'previews/st-1.jpg' },
+      });
+      expect(r).toEqual({ ok: true, previewImagePath: 'previews/st-1.jpg' });
+    });
+  });
+
+  describe('deletePreviewForOrg', () => {
+    it('throws NotFoundException (404) for cross-tenant stream', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(null);
+      await expect(service.deletePreviewForOrg('org-1', 'st-foreign'))
+        .rejects.toBeInstanceOf(NotFoundException);
+      expect(mockPrisma.stream.update).not.toHaveBeenCalled();
+    });
+
+    it('unlinks preview file and clears previewImagePath', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        id: 'st-1', orgId: 'org-1', slug: '',
+        org: { slug: 'club' },
+      });
+      mockPrisma.stream.update.mockResolvedValue({});
+
+      const r = await service.deletePreviewForOrg('org-1', 'st-1');
+
+      expect(fsPromises.unlink).toHaveBeenCalledWith(expect.stringContaining('st-1.jpg'));
+      expect(mockPrisma.stream.update).toHaveBeenCalledWith({
+        where: { id: 'st-1' },
+        data: { previewImagePath: null },
+      });
+      expect(r).toEqual({ ok: true });
+    });
+  });
+
+  describe('clearChatForOrg', () => {
+    it('throws NotFoundException (404) for cross-tenant stream', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(null);
+      await expect(service.clearChatForOrg('org-1', 'st-foreign'))
+        .rejects.toBeInstanceOf(NotFoundException);
+      expect(mockChatService.clearMessagesByStream).not.toHaveBeenCalled();
+    });
+
+    it('delegates to chatService.clearMessagesByStream(streamId)', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        id: 'st-1', orgId: 'org-1', slug: '',
+        org: { slug: 'club' },
+      });
+      mockChatService.clearMessagesByStream.mockResolvedValue({ deleted: 3 });
+
+      const r = await service.clearChatForOrg('org-1', 'st-1');
+
+      expect(mockChatService.clearMessagesByStream).toHaveBeenCalledWith('st-1');
+      expect(r).toEqual({ deleted: 3 });
     });
   });
 });

@@ -1,30 +1,22 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { StreamService } from '../stream/stream.service';
 import { RecordingService } from '../recording/recording.service';
 import { ChatGateway } from '../chat/chat.gateway';
-import { ChatService, ALLOWED_CHAT_TTL_MINUTES } from '../chat/chat.service';
-import * as sharp from 'sharp';
-import { promises as fs } from 'fs';
-import { join } from 'path';
 
 /**
- * OrgService теперь работает только с org-уровневыми операциями.
- * Все stream-уровневые (ingestKey, isLive, broadcasts, settings) делегируются в StreamService
- * через default Stream орга (slug=''). DTO-форма ответов сохраняется для backwards-compat.
- * Чат-настройки (chatTtlMinutes, chatEnabled) живут на Organization.
+ * OrgService — только org-уровневые операции. Всё, что раньше делегировалось
+ * в «default Stream» (ingest/recording/preview/per-stream chat) теперь живёт
+ * на StreamController/StreamService для КАЖДОГО Stream'а орги индивидуально.
  */
 @Injectable()
 export class OrgService {
   constructor(
     private prisma: PrismaService,
-    private stream: StreamService,
     private recording: RecordingService,
     private chatGateway: ChatGateway,
-    private chatService: ChatService,
   ) {}
 
-  async getProfile(orgId: string, revealKey = false) {
+  async getProfile(orgId: string) {
     const org = await this.prisma.organization.findUnique({
       where: { id: orgId },
       select: {
@@ -38,157 +30,45 @@ export class OrgService {
       },
     });
     if (!org) throw new NotFoundException('Organization not found');
-    const stream = await this.stream.getDefaultStream(orgId);
-
-    // Legacy DTO для совместимости с фронтом (Step 1 — фронт не меняется)
-    return {
-      id: org.id,
-      slug: org.slug,
-      name: org.name,
-      isActive: org.isActive,
-      createdAt: org.createdAt,
-      chatTtlMinutes: org.chatTtlMinutes,
-      chatEnabled: org.chatEnabled,
-      isLive: stream.isLive,
-      autoStream: stream.autoStartMode === 'public',
-      streamTitle: stream.name,
-      streamDescription: stream.description,
-      streamIsPublic: stream.isPublic,
-      streamPreviewKey: stream.previewKey,
-      previewMode: stream.previewMode,
-      previewImagePath: stream.previewImagePath,
-      ingestKey: revealKey ? stream.ingestKey : undefined,
-      ingestKeyCreatedAt: stream.ingestKeyCreatedAt,
-    };
-  }
-
-  async rotateKey(orgId: string, _slug: string) {
-    const defaultStream = await this.stream.getDefaultStream(orgId);
-    const updated = await this.stream.rotateKey(defaultStream.id);
-    return {
-      id: defaultStream.id,
-      slug: _slug,
-      ingestKey: updated.ingestKey,
-      ingestKeyCreatedAt: updated.ingestKeyCreatedAt,
-    };
-  }
-
-  async clearChat(orgId: string) {
-    const org = await this.prisma.organization.findUnique({
-      where: { id: orgId },
-      select: { slug: true },
-    });
-    if (!org) throw new NotFoundException('Organization not found');
-    // Step 5: clears default Stream scope (+ legacy orgId-сообщения как
-    // backward-compat). Endpoint POST /v1/org/chat/clear оставлен для текущего
-    // фронта; per-Stream clear будет добавлен отдельным route'ом.
-    const result = await this.chatService.clearMessages(orgId);
-    this.chatGateway.broadcastChatCleared(org.slug);
-    return { ok: true, ...result };
+    return org;
   }
 
   /**
-   * @deprecated Step 3+ — используйте StreamController PATCH /v1/org/streams/:id.
-   * Этот wrapper делегирует stream-уровневые поля в StreamService.updateSettings
-   * (для default Stream орги), а chatTtlMinutes/chatEnabled — на Organization.
-   * Сохранён для backward-compat существующего frontend'а до его переписывания
-   * на per-Stream API.
+   * `name` — отображаемое имя орги (уникально в БД, независимо от логина/slug).
+   * P2002 при занятом имени → 409.
    */
-  async updateStreamSettings(
-    orgId: string,
-    data: {
-      streamTitle?: string;
-      streamDescription?: string;
-      streamIsPublic?: boolean;
-      autoStream?: boolean;
-      previewMode?: string;
-      chatTtlMinutes?: number;
-      chatEnabled?: boolean;
-    },
-  ) {
-    // Chat fields go to Organization
+  async updateSettings(orgId: string, data: { name?: string; chatTtlMinutes?: number; chatEnabled?: boolean }) {
     const orgData: Record<string, any> = {};
-    if (data.chatTtlMinutes !== undefined) {
-      if (!ALLOWED_CHAT_TTL_MINUTES.includes(data.chatTtlMinutes as any)) {
-        throw new BadRequestException(`Invalid chatTtlMinutes. Allowed: ${ALLOWED_CHAT_TTL_MINUTES.join(', ')}`);
-      }
-      orgData.chatTtlMinutes = data.chatTtlMinutes;
-    }
-    if (data.chatEnabled !== undefined) {
-      orgData.chatEnabled = data.chatEnabled;
-    }
+    if (data.name !== undefined) orgData.name = data.name.trim();
+    if (data.chatTtlMinutes !== undefined) orgData.chatTtlMinutes = data.chatTtlMinutes;
+    if (data.chatEnabled !== undefined) orgData.chatEnabled = data.chatEnabled;
 
-    let updatedOrg: { slug: string; chatTtlMinutes: number; chatEnabled: boolean } | null = null;
-    if (Object.keys(orgData).length > 0) {
-      updatedOrg = await this.prisma.organization.update({
+    let updated;
+    try {
+      updated = await this.prisma.organization.update({
         where: { id: orgId },
         data: orgData,
-        select: { slug: true, chatTtlMinutes: true, chatEnabled: true },
+        select: { slug: true, name: true, chatTtlMinutes: true, chatEnabled: true },
       });
-      if (data.chatEnabled !== undefined && updatedOrg) {
-        this.chatGateway.broadcastChatEnabled(updatedOrg.slug, updatedOrg.chatEnabled);
-      }
+    } catch (e: any) {
+      if (e.code === 'P2002') throw new ConflictException(`Name '${orgData.name}' already taken`);
+      throw e;
     }
 
-    // Stream-level fields delegated to StreamService
-    const defaultStream = await this.stream.getDefaultStream(orgId);
-    const mapped: Parameters<StreamService['updateSettings']>[1] = {};
-    if (data.streamTitle !== undefined) mapped.name = data.streamTitle;
-    if (data.streamDescription !== undefined) mapped.description = data.streamDescription;
-    if (data.streamIsPublic !== undefined) mapped.isPublic = data.streamIsPublic;
-    if (data.autoStream !== undefined) mapped.autoStartMode = data.autoStream ? 'public' : 'test';
-    if (data.previewMode !== undefined) mapped.previewMode = data.previewMode;
-
-    const updated = await this.stream.updateSettings(defaultStream.id, mapped);
-    const orgChat = updatedOrg ?? await this.prisma.organization.findUnique({
-      where: { id: orgId },
-      select: { chatTtlMinutes: true, chatEnabled: true },
-    });
-
-    return {
-      id: updated.id,
-      streamTitle: updated.name,
-      streamDescription: updated.description,
-      streamIsPublic: updated.isPublic,
-      streamPreviewKey: updated.previewKey,
-      autoStream: updated.autoStartMode === 'public',
-      isLive: updated.isLive,
-      previewMode: updated.previewMode,
-      chatTtlMinutes: orgChat?.chatTtlMinutes,
-      chatEnabled: orgChat?.chatEnabled,
-    };
+    if (data.chatEnabled !== undefined) {
+      this.chatGateway.broadcastChatEnabled(updated.slug, updated.chatEnabled);
+    }
+    return updated;
   }
 
-  async listBroadcasts(orgId: string) {
-    const defaultStream = await this.stream.getDefaultStream(orgId);
-    const broadcasts = await this.prisma.broadcast.findMany({
-      where: { streamId: defaultStream.id, endedAt: { not: null } },
-      orderBy: { startedAt: 'desc' },
-      select: {
-        id: true, title: true, description: true,
-        startedAt: true, endedAt: true, createdAt: true,
-        recordings: {
-          where: { slotIndex: 1 },
-          select: { id: true, status: true, fileSize: true, duration: true },
-          take: 1,
-        },
-      },
-    });
-    // Preserve legacy DTO shape: recording (singular) instead of recordings (array)
-    return broadcasts.map(({ recordings, ...rest }) => ({
-      ...rest,
-      recording: recordings[0] ?? null,
-    }));
-  }
-
-  async updateBroadcast(
-    orgId: string,
-    broadcastId: string,
-    data: { title?: string; description?: string },
-  ) {
-    const defaultStream = await this.stream.getDefaultStream(orgId);
+  /**
+   * Tenant-scoped по принадлежности Stream'у этой орги (не по конкретному
+   * «главному» Stream'у — раньше искало только у default Stream'а, из-за чего
+   * update/delete 404-ились для broadcast'ов именованных Stream'ов).
+   */
+  async updateBroadcast(orgId: string, broadcastId: string, data: { title?: string; description?: string }) {
     const broadcast = await this.prisma.broadcast.findFirst({
-      where: { id: broadcastId, streamId: defaultStream.id },
+      where: { id: broadcastId, stream: { orgId } },
     });
     if (!broadcast) throw new NotFoundException('Broadcast not found');
     return this.prisma.broadcast.update({
@@ -199,50 +79,12 @@ export class OrgService {
   }
 
   async deleteBroadcast(orgId: string, broadcastId: string) {
-    const defaultStream = await this.stream.getDefaultStream(orgId);
     const broadcast = await this.prisma.broadcast.findFirst({
-      where: { id: broadcastId, streamId: defaultStream.id },
+      where: { id: broadcastId, stream: { orgId } },
     });
     if (!broadcast) throw new NotFoundException('Broadcast not found');
     await this.recording.deleteRecordingByBroadcastId(broadcastId);
     await this.prisma.broadcast.delete({ where: { id: broadcastId } });
-    return { ok: true };
-  }
-
-  private getUploadsDir(): string {
-    return join(process.cwd(), 'uploads', 'previews');
-  }
-
-  async uploadPreview(orgId: string, orgSlug: string, fileBuffer: Buffer): Promise<{ ok: true; previewImagePath: string }> {
-    const dir = this.getUploadsDir();
-    await fs.mkdir(dir, { recursive: true });
-
-    const filename = `${orgSlug}.jpg`;
-    const filePath = join(dir, filename);
-
-    await sharp(fileBuffer)
-      .resize(640, 360, { fit: 'cover' })
-      .jpeg({ quality: 80 })
-      .toFile(filePath);
-
-    const relativePath = `previews/${filename}`;
-    const defaultStream = await this.stream.getDefaultStream(orgId);
-    await this.prisma.stream.update({
-      where: { id: defaultStream.id },
-      data: { previewImagePath: relativePath },
-    });
-
-    return { ok: true, previewImagePath: relativePath };
-  }
-
-  async deletePreview(orgId: string, orgSlug: string): Promise<{ ok: true }> {
-    const filePath = join(this.getUploadsDir(), `${orgSlug}.jpg`);
-    await fs.unlink(filePath).catch(() => {});
-    const defaultStream = await this.stream.getDefaultStream(orgId);
-    await this.prisma.stream.update({
-      where: { id: defaultStream.id },
-      data: { previewImagePath: null },
-    });
     return { ok: true };
   }
 }

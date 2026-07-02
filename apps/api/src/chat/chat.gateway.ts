@@ -145,9 +145,10 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   }
 
   /**
-   * org-level clear → транслирует chat_cleared во все rooms, где есть
-   * зрители этой орги. Это сохраняет семантику legacy endpoint'а
-   * POST /v1/org/chat/clear, который чистит чат default Stream'а орги.
+   * org-level clear (без streamId) → транслирует chat_cleared во все rooms,
+   * где есть зрители этой орги. НЕ имеет текущего production-вызывающего —
+   * per-Stream chat-clear (`StreamService.clearChatForOrg`) очищает БД, но
+   * пока не эмитит real-time broadcast; известный гэп.
    */
   broadcastChatCleared(orgSlug: string, streamId?: string) {
     if (streamId) {
