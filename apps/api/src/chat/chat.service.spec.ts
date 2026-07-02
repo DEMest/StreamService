@@ -1,10 +1,9 @@
 import { Test } from '@nestjs/testing';
-import { ChatService, scopeRoomKey } from './chat.service';
+import { ChatService, chatRoomKey } from './chat.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const mockPrisma = {
   stream: { findFirst: jest.fn(), findUnique: jest.fn() },
-  event: { findUnique: jest.fn() },
   organization: { findUnique: jest.fn(), findMany: jest.fn() },
   chatMessage: {
     create: jest.fn(),
@@ -13,7 +12,7 @@ const mockPrisma = {
   },
 };
 
-describe('ChatService — scope-based persistence (Step 5 B2)', () => {
+describe('ChatService — per-Stream chat', () => {
   let service: ChatService;
 
   beforeEach(async () => {
@@ -24,62 +23,35 @@ describe('ChatService — scope-based persistence (Step 5 B2)', () => {
     service = module.get(ChatService);
   });
 
-  describe('scopeRoomKey', () => {
-    it('event scope', () => {
-      expect(scopeRoomKey({ type: 'event', eventId: 'e1' })).toBe('event:e1');
-    });
-    it('stream scope', () => {
-      expect(scopeRoomKey({ type: 'stream', streamId: 's1' })).toBe('stream:s1');
+  describe('chatRoomKey', () => {
+    it('builds stream room key', () => {
+      expect(chatRoomKey('s1')).toBe('stream:s1');
     });
   });
 
-  describe('resolveScope', () => {
-    it('returns event scope when Stream is in active Event', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({
-        id: 'sA',
-        eventStreams: [{ eventId: 'evt1' }],
-      });
-      const scope = await service.resolveScope('club', 'mat-a');
-      expect(scope).toEqual({ type: 'event', eventId: 'evt1' });
-      // Karen H4: eventStreams сабселект должен использовать orderBy startedAt DESC
-      // — синхронизировано со всеми остальными точками резолва активного Event'а.
-      const callArgs = mockPrisma.stream.findFirst.mock.calls[0][0];
-      expect(callArgs.select.eventStreams.orderBy).toEqual({
-        event: { startedAt: 'desc' },
-      });
-    });
-
-    it('returns stream scope when Stream has NO active Event', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({
-        id: 'sA',
-        eventStreams: [],
-      });
-      const scope = await service.resolveScope('club', 'mat-a');
-      expect(scope).toEqual({ type: 'stream', streamId: 'sA' });
+  describe('resolveStreamId', () => {
+    it('returns streamId when Stream found', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({ id: 'sA' });
+      const streamId = await service.resolveStreamId('club', 'mat-a');
+      expect(streamId).toBe('sA');
     });
 
     it('returns null when org/stream not found', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue(null);
-      const scope = await service.resolveScope('nope', 'x');
-      expect(scope).toBeNull();
+      const streamId = await service.resolveStreamId('nope', 'x');
+      expect(streamId).toBeNull();
     });
 
     it('empty streamSlug → ищет default Stream (slug="")', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({
-        id: 'sDefault',
-        eventStreams: [],
-      });
-      await service.resolveScope('club');
+      mockPrisma.stream.findFirst.mockResolvedValue({ id: 'sDefault' });
+      await service.resolveStreamId('club');
       const call = mockPrisma.stream.findFirst.mock.calls[0][0];
       expect(call.where.slug).toBe('');
     });
 
     it('omitted streamSlug also resolves to default Stream', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({
-        id: 'sDefault',
-        eventStreams: [],
-      });
-      await service.resolveScope('club', '');
+      mockPrisma.stream.findFirst.mockResolvedValue({ id: 'sDefault' });
+      await service.resolveStreamId('club', '');
       const call = mockPrisma.stream.findFirst.mock.calls[0][0];
       expect(call.where.slug).toBe('');
     });
@@ -92,31 +64,15 @@ describe('ChatService — scope-based persistence (Step 5 B2)', () => {
         orgId: 'o1',
         org: { chatTtlMinutes: 180, chatEnabled: true },
       });
-      mockPrisma.event.findUnique.mockResolvedValue({
-        orgId: 'o1',
-        org: { chatTtlMinutes: 180, chatEnabled: true },
-      });
     });
 
-    it('event scope: saves with eventId FK only (NO orgId, NO streamId)', async () => {
+    it('saves with streamId FK only', async () => {
       mockPrisma.chatMessage.create.mockResolvedValue({
         id: 'm1', nickname: 'A', content: 'hi', createdAt: new Date(),
       });
-      await service.writeMessage({ type: 'event', eventId: 'evt1' }, 'A', 'hi');
-      const call = mockPrisma.chatMessage.create.mock.calls[0][0];
-      expect(call.data.eventId).toBe('evt1');
-      expect(call.data.streamId).toBeUndefined();
-      expect(call.data.orgId).toBeUndefined();
-    });
-
-    it('stream scope: saves with streamId FK only', async () => {
-      mockPrisma.chatMessage.create.mockResolvedValue({
-        id: 'm1', nickname: 'A', content: 'hi', createdAt: new Date(),
-      });
-      await service.writeMessage({ type: 'stream', streamId: 'sA' }, 'A', 'hi');
+      await service.writeMessage('sA', 'A', 'hi');
       const call = mockPrisma.chatMessage.create.mock.calls[0][0];
       expect(call.data.streamId).toBe('sA');
-      expect(call.data.eventId).toBeUndefined();
       expect(call.data.orgId).toBeUndefined();
     });
 
@@ -125,7 +81,7 @@ describe('ChatService — scope-based persistence (Step 5 B2)', () => {
         id: 'm', nickname: 'A', content: 'x', createdAt: new Date(),
       });
       const long = 'a'.repeat(700);
-      await service.writeMessage({ type: 'stream', streamId: 'sA' }, 'A', long);
+      await service.writeMessage('sA', 'A', long);
       const call = mockPrisma.chatMessage.create.mock.calls[0][0];
       expect(call.data.content).toHaveLength(500);
     });
@@ -135,7 +91,7 @@ describe('ChatService — scope-based persistence (Step 5 B2)', () => {
         orgId: 'o1',
         org: { chatTtlMinutes: 180, chatEnabled: false },
       });
-      const r = await service.writeMessage({ type: 'stream', streamId: 'sA' }, 'A', 'hi');
+      const r = await service.writeMessage('sA', 'A', 'hi');
       expect(r).toBeNull();
       expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
     });
@@ -146,30 +102,20 @@ describe('ChatService — scope-based persistence (Step 5 B2)', () => {
       mockPrisma.chatMessage.findMany.mockResolvedValue([]);
     });
 
-    it('event scope: filters by eventId only', async () => {
-      mockPrisma.event.findUnique.mockResolvedValue({
-        orgId: 'o1',
-        org: { chatTtlMinutes: 180, chatEnabled: true },
-      });
-      await service.listMessages({ type: 'event', eventId: 'evt1' });
-      const call = mockPrisma.chatMessage.findMany.mock.calls[0][0];
-      expect(call.where.eventId).toBe('evt1');
-    });
-
-    it('stream scope (non-default Stream): filters by streamId only', async () => {
+    it('non-default Stream: filters by streamId only', async () => {
       mockPrisma.stream.findUnique.mockResolvedValue({
         orgId: 'o1',
         slug: 'mat-a',
         org: { chatTtlMinutes: 180, chatEnabled: true },
       });
-      await service.listMessages({ type: 'stream', streamId: 'sA' });
+      await service.listMessages('sA');
       const call = mockPrisma.chatMessage.findMany.mock.calls[0][0];
       expect(call.where.streamId).toBe('sA');
       expect(call.where.OR).toBeUndefined();
     });
 
-    it('stream scope (default Stream): OR-фильтр включает legacy orgId-сообщения', async () => {
-      // getOrgMetaForScope использует первый findUnique-вызов (returns stream).
+    it('default Stream: OR-фильтр включает legacy orgId-сообщения', async () => {
+      // getOrgMetaForStream использует первый findUnique-вызов (returns stream).
       // Затем listMessages второй раз вызывает findUnique для streamMeta (slug check).
       // Замокаем оба вызова одинаково.
       mockPrisma.stream.findUnique.mockResolvedValue({
@@ -177,7 +123,7 @@ describe('ChatService — scope-based persistence (Step 5 B2)', () => {
         slug: '',
         org: { chatTtlMinutes: 180, chatEnabled: true },
       });
-      await service.listMessages({ type: 'stream', streamId: 'sDefault' });
+      await service.listMessages('sDefault');
       const call = mockPrisma.chatMessage.findMany.mock.calls[0][0];
       // where.AND[1].OR содержит и {streamId} и {orgId, streamId:null}.
       const andClause = call.where.AND;
@@ -186,7 +132,7 @@ describe('ChatService — scope-based persistence (Step 5 B2)', () => {
       expect(orClause).toEqual(
         expect.arrayContaining([
           { streamId: 'sDefault' },
-          { orgId: 'o1', streamId: null, eventId: null },
+          { orgId: 'o1', streamId: null },
         ]),
       );
     });
@@ -202,7 +148,7 @@ describe('ChatService — scope-based persistence (Step 5 B2)', () => {
         { id: 'm2', nickname: 'B', content: '2', createdAt: new Date(2000) },
         { id: 'm1', nickname: 'A', content: '1', createdAt: new Date(1000) },
       ]);
-      const r = await service.listMessages({ type: 'stream', streamId: 'sA' });
+      const r = await service.listMessages('sA');
       expect(r.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'm3']);
     });
 
@@ -212,37 +158,29 @@ describe('ChatService — scope-based persistence (Step 5 B2)', () => {
         slug: 'mat-a',
         org: { chatTtlMinutes: 60, chatEnabled: true },
       });
-      const r = await service.listMessages({ type: 'stream', streamId: 'sA' });
+      const r = await service.listMessages('sA');
       expect(r.ttlMinutes).toBe(60);
     });
   });
 
-  describe('clearMessagesByScope', () => {
-    it('event scope: deletes by eventId', async () => {
-      mockPrisma.chatMessage.deleteMany.mockResolvedValue({ count: 3 });
-      const r = await service.clearMessagesByScope({ type: 'event', eventId: 'evt1' });
-      const call = mockPrisma.chatMessage.deleteMany.mock.calls[0][0];
-      expect(call.where.eventId).toBe('evt1');
-      expect(r.deleted).toBe(3);
-    });
-
-    it('stream scope (default Stream): deletes by streamId OR legacy orgId', async () => {
+  describe('clearMessagesByStream', () => {
+    it('default Stream: deletes by streamId OR legacy orgId', async () => {
       mockPrisma.stream.findUnique.mockResolvedValue({ orgId: 'o1', slug: '' });
       mockPrisma.chatMessage.deleteMany.mockResolvedValue({ count: 7 });
-      await service.clearMessagesByScope({ type: 'stream', streamId: 'sDefault' });
+      await service.clearMessagesByStream('sDefault');
       const call = mockPrisma.chatMessage.deleteMany.mock.calls[0][0];
       expect(call.where.OR).toEqual(
         expect.arrayContaining([
           { streamId: 'sDefault' },
-          { orgId: 'o1', streamId: null, eventId: null },
+          { orgId: 'o1', streamId: null },
         ]),
       );
     });
 
-    it('stream scope (named Stream): deletes by streamId only', async () => {
+    it('named Stream: deletes by streamId only', async () => {
       mockPrisma.stream.findUnique.mockResolvedValue({ orgId: 'o1', slug: 'mat-a' });
       mockPrisma.chatMessage.deleteMany.mockResolvedValue({ count: 2 });
-      await service.clearMessagesByScope({ type: 'stream', streamId: 'sA' });
+      await service.clearMessagesByStream('sA');
       const call = mockPrisma.chatMessage.deleteMany.mock.calls[0][0];
       expect(call.where.streamId).toBe('sA');
       expect(call.where.OR).toBeUndefined();
@@ -250,9 +188,9 @@ describe('ChatService — scope-based persistence (Step 5 B2)', () => {
   });
 
   describe('clearMessages (legacy orgId-based)', () => {
-    it('routes to default Stream scope when one exists', async () => {
+    it('routes to default Stream when one exists', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({ id: 'sDefault' });
-      // Затем clearMessagesByScope сделает second findUnique для slug.
+      // Затем clearMessagesByStream сделает second findUnique для slug.
       mockPrisma.stream.findUnique.mockResolvedValue({ orgId: 'o1', slug: '' });
       mockPrisma.chatMessage.deleteMany.mockResolvedValue({ count: 4 });
       const r = await service.clearMessages('o1');
@@ -287,41 +225,39 @@ describe('ChatService — scope-based persistence (Step 5 B2)', () => {
   });
 
   describe('cleanupOldMessages', () => {
-    it('iterates orgs and deletes stale messages via stream/event association', async () => {
+    it('iterates orgs and deletes stale messages via stream association', async () => {
       mockPrisma.organization.findMany.mockResolvedValue([
         { id: 'o1', chatTtlMinutes: 60 },
         { id: 'o2', chatTtlMinutes: 5 },
       ]);
       mockPrisma.chatMessage.deleteMany.mockResolvedValue({ count: 1 });
       await service.cleanupOldMessages();
-      // 2 org-итерации + 1 orphan-чистка (Karen C3).
+      // 2 org-итерации + 1 orphan-чистка.
       expect(mockPrisma.chatMessage.deleteMany).toHaveBeenCalledTimes(3);
       const firstCall = mockPrisma.chatMessage.deleteMany.mock.calls[0][0];
-      // OR-фильтр включает orgId, stream.orgId, event.orgId.
+      // OR-фильтр включает orgId, stream.orgId.
       expect(firstCall.where.OR).toEqual(
         expect.arrayContaining([
           { orgId: 'o1' },
           { stream: { orgId: 'o1' } },
-          { event: { orgId: 'o1' } },
         ]),
       );
     });
 
-    // Karen C3 (Step 5): orphan-сообщения с обнулёнными FK
-    // (orgId/streamId/eventId все null) не подбираются ни одной org-итерацией.
-    // Добавлен отдельный deleteMany со всеми FK=null.
-    it('also deletes orphan messages with all FKs null (Karen C3)', async () => {
+    // Orphan-сообщения с обнулёнными FK (orgId/streamId оба null) не
+    // подбираются ни одной org-итерацией. Отдельный deleteMany со всеми FK=null
+    // также подхватывает legacy-сообщения, оставшиеся от удалённой Event-фичи.
+    it('also deletes orphan messages with orgId/streamId null', async () => {
       mockPrisma.organization.findMany.mockResolvedValue([]);
       mockPrisma.chatMessage.deleteMany.mockResolvedValue({ count: 0 });
       await service.cleanupOldMessages();
-      // Даже без орг хотя бы одна вызов — orphan cleanup.
+      // Даже без орг хотя бы один вызов — orphan cleanup.
       expect(mockPrisma.chatMessage.deleteMany).toHaveBeenCalledTimes(1);
       const orphanCall = mockPrisma.chatMessage.deleteMany.mock.calls[0][0];
       expect(orphanCall.where).toEqual(
         expect.objectContaining({
           orgId: null,
           streamId: null,
-          eventId: null,
           createdAt: { lt: expect.any(Date) },
         }),
       );

@@ -99,19 +99,4 @@ export class PublicController {
     });
     res.send(buffer);
   }
-
-  // ─────────── Event landing (Step 5, spec §12) ───────────
-
-  /**
-   * GET /v1/public/orgs/:orgSlug/events/:eventSlug — landing-страница Event'а.
-   * Возвращает мета + список публичных Stream'ов Event'а.
-   * 404 — нет орги/Event'а или орга неактивна.
-   */
-  @Get('orgs/:orgSlug/events/:eventSlug')
-  getEventLanding(
-    @Param('orgSlug') orgSlug: string,
-    @Param('eventSlug') eventSlug: string,
-  ) {
-    return this.pub.getEventLanding(orgSlug, eventSlug);
-  }
 }

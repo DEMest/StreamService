@@ -7,7 +7,6 @@ import { api } from '@/lib/api';
 import MatPlayer, { type MatPlayerHandle } from '@/components/MatPlayer';
 import ViewSwitcher, {
   type CompositeViewMode,
-  type MultistreamViewMode,
   type PlayerViewMode,
 } from '@/components/ViewSwitcher';
 import { Chat } from '@/components/Chat';
@@ -21,9 +20,7 @@ import {
   GridFour, VideoCamera,
 } from '@phosphor-icons/react';
 
-// Camera-row entries shown on portrait mobile. Generated dynamically from the
-// active stream config (composite uses cam1..cam4; multistream uses slot-N
-// with custom names).
+// Camera-row entries shown on portrait mobile (composite: multicam + cam1..4).
 type CameraRowEntry = {
   key: PlayerViewMode;
   label: string;
@@ -40,39 +37,11 @@ interface OrgWatch {
   streamTitle: string;
   streamDescription?: string;
   streamIsPublic: boolean;
-  /**
-   * Step 5: активный Event Stream'а (startedAt && !endedAt, и Stream в нём
-   * через EventStream). Используется для breadcrumb «← {Event title}» в
-   * header'е. null если Stream не в активном Event'е.
-   */
-  currentEvent?: { slug: string; title: string } | null;
   accessDenied?: boolean;
 }
 
-interface StreamSlot {
-  index: number;
-  name: string;
-  isAudioSource?: boolean;
-}
-
-interface StreamHlsUrl {
-  slotIndex: number;
-  url: string;
-}
-
 interface StreamInfo {
-  mode: 'composite' | 'multistream';
-  slotCount: number;
-  slots: StreamSlot[];
-  slotOrder: number[];
-  layoutPreset: string;
-  fallbackLayouts: Record<number, string> | null;
-  hlsUrls: StreamHlsUrl[];
-  activeSlotIndexes: number[];
-}
-
-function defaultViewModeFor(mode: 'composite' | 'multistream'): PlayerViewMode {
-  return mode === 'composite' ? 'multicam' : 'composed';
+  hlsUrl: string;
 }
 
 interface WatchViewProps {
@@ -201,9 +170,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
     refetchInterval: 15_000,
   });
 
-  // Stream config + URLs + active slots. Polled every 3s while the org is
-  // live so the player adapts to camera publishing/unpublishing events
-  // without a dedicated WS namespace (see C4 §2 — polling chosen for v1).
+  // Stream config + HLS URL. Polled every 3s while the org is live.
   const { data: stream } = useQuery({
     queryKey: ['stream', orgSlug, sSlug, previewKey],
     queryFn: () => api.get<StreamInfo>(`${apiBasePath}/stream${previewKey ? `?key=${previewKey}` : ''}`),
@@ -212,69 +179,19 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
     refetchInterval: () => (org?.isLive ? 3000 : false),
   });
 
-  // When stream mode changes (e.g. owner rotates from composite to multistream),
-  // reset viewMode to a sensible default for the new mode.
-  const lastModeRef = useRef<'composite' | 'multistream' | null>(null);
-  useEffect(() => {
-    if (!stream) {
-      lastModeRef.current = null;
-      return;
-    }
-    if (lastModeRef.current === stream.mode) return;
-    lastModeRef.current = stream.mode;
-    setViewMode(defaultViewModeFor(stream.mode));
-  }, [stream?.mode]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // If we land in a slot-specific view but the slot dropped offline, fall
-  // back to the composed/multicam view automatically so the user isn't
-  // staring at a black quadrant.
-  useEffect(() => {
-    if (!stream) return;
-    if (stream.mode !== 'multistream') return;
-    if (typeof viewMode === 'string' && viewMode.startsWith('slot-')) {
-      const targetIdx = parseInt(viewMode.slice('slot-'.length), 10);
-      if (!Number.isNaN(targetIdx) && !stream.activeSlotIndexes.includes(targetIdx)) {
-        setViewMode('composed');
-      }
-    }
-  }, [stream, viewMode]);
-
   // ── Derived state ───────────────────────────────────────────────────────
-  const isMultistream = stream?.mode === 'multistream';
-  const compositeUrl = stream?.hlsUrls[0]?.url;
-  const orderedStreamUrls = useMemo<string[]>(() => {
-    if (!stream || stream.mode !== 'multistream') return [];
-    // Order URLs by slotIndex so MatPlayer's video[idx] = slot at position idx+1.
-    return stream.hlsUrls
-      .slice()
-      .sort((a, b) => a.slotIndex - b.slotIndex)
-      .map((h) => h.url);
-  }, [stream]);
+  const compositeUrl = stream?.hlsUrl;
 
-  // Camera-row entries for portrait mobile. Composite shows multicam + cam1..4;
-  // multistream shows composed + slot-N (with isLive reflecting publishing state).
+  // Camera-row entries for portrait mobile (composite: multicam + cam1..4).
   const cameraRowEntries = useMemo<CameraRowEntry[]>(() => {
     if (!stream) return [];
-    if (stream.mode === 'composite') {
-      return [
-        { key: 'multicam', label: 'Все', isLive: true },
-        { key: 'cam1', label: '1', isLive: true },
-        { key: 'cam2', label: '2', isLive: true },
-        { key: 'cam3', label: '3', isLive: true },
-        { key: 'cam4', label: '4', isLive: true },
-      ];
-    }
-    const active = new Set(stream.activeSlotIndexes);
-    const entries: CameraRowEntry[] = [{ key: 'composed', label: 'Все', isLive: true }];
-    for (const slot of stream.slots) {
-      const label = slot.name?.trim() || `${slot.index}`;
-      entries.push({
-        key: `slot-${slot.index}` as MultistreamViewMode,
-        label,
-        isLive: active.has(slot.index),
-      });
-    }
-    return entries;
+    return [
+      { key: 'multicam', label: 'Все', isLive: true },
+      { key: 'cam1', label: '1', isLive: true },
+      { key: 'cam2', label: '2', isLive: true },
+      { key: 'cam3', label: '3', isLive: true },
+      { key: 'cam4', label: '4', isLive: true },
+    ];
   }, [stream]);
 
   // ── Handlers ────────────────────────────────────────────────────────────
@@ -283,38 +200,14 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
     setMobileViewOpen(false);
     if (!stream) return;
 
-    if (stream.mode === 'composite') {
-      if (viewMode !== 'multicam') { setViewMode('multicam'); return; }
-      const rect = e.currentTarget.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width;
-      const y = (e.clientY - rect.top) / rect.height;
-      if      (x < 0.5 && y < 0.5) setViewMode('cam1');
-      else if (x >= 0.5 && y < 0.5) setViewMode('cam2');
-      else if (x < 0.5)             setViewMode('cam3');
-      else                           setViewMode('cam4');
-      return;
-    }
-
-    // Multistream: tap a quadrant on `composed` view → focus the slot at that
-    // position (using slotOrder mapping); tap elsewhere returns to composed.
-    if (viewMode !== 'composed') { setViewMode('composed'); return; }
-
-    // Resolve which slot lives at the tap position using the slotOrder array
-    // mapped onto a 2x2 grid (matches the default grid-2x2 layout). For other
-    // layouts the mapping may be off — that's acceptable; the explicit
-    // ViewSwitcher is always available.
+    if (viewMode !== 'multicam') { setViewMode('multicam'); return; }
     const rect = e.currentTarget.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
-    let pos: number;
-    if      (x < 0.5 && y < 0.5) pos = 0;
-    else if (x >= 0.5 && y < 0.5) pos = 1;
-    else if (x < 0.5)             pos = 2;
-    else                           pos = 3;
-    const slotIdx = stream.slotOrder[pos];
-    if (slotIdx && stream.activeSlotIndexes.includes(slotIdx)) {
-      setViewMode(`slot-${slotIdx}` as MultistreamViewMode);
-    }
+    if      (x < 0.5 && y < 0.5) setViewMode('cam1');
+    else if (x >= 0.5 && y < 0.5) setViewMode('cam2');
+    else if (x < 0.5)             setViewMode('cam3');
+    else                           setViewMode('cam4');
   }
 
   function handleTimeUpdate(current: number, dur: number, live: boolean, start: number) {
@@ -369,27 +262,11 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
     }
   }
 
-  // Cycle through the available views. For multistream this only cycles
-  // through publishing slots (skipping offline ones).
+  // Cycle through composite views (multicam → cam1 → cam2 → cam3 → cam4 → multicam).
   function cycleViewMode() {
-    if (!stream) return;
-    if (stream.mode === 'composite') {
-      const cycle: CompositeViewMode[] = ['multicam', 'cam1', 'cam2', 'cam3', 'cam4'];
-      setViewMode((prev) => {
-        const idx = cycle.indexOf(prev as CompositeViewMode);
-        return cycle[(idx + 1) % cycle.length];
-      });
-      return;
-    }
-    const cycle: PlayerViewMode[] = ['composed'];
-    for (const slot of stream.slots) {
-      if (stream.activeSlotIndexes.includes(slot.index)) {
-        cycle.push(`slot-${slot.index}` as MultistreamViewMode);
-      }
-    }
-    if (cycle.length === 1) return;
+    const cycle: CompositeViewMode[] = ['multicam', 'cam1', 'cam2', 'cam3', 'cam4'];
     setViewMode((prev) => {
-      const idx = cycle.indexOf(prev);
+      const idx = cycle.indexOf(prev as CompositeViewMode);
       return cycle[(idx + 1) % cycle.length];
     });
   }
@@ -466,36 +343,13 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
     ? `${archiveBasePath}?key=${previewKey}`
     : archiveBasePath;
 
-  // ── Player element (mode-aware) ─────────────────────────────────────────
-  // Extracted to avoid duplicating the conditional rendering between mobile
-  // landscape, mobile portrait, and desktop layouts.
+  // ── Player element ──────────────────────────────────────────────────────
   function renderPlayer() {
-    if (!stream) return null;
-    if (stream.mode === 'composite') {
-      if (!compositeUrl) return null;
-      return (
-        <MatPlayer
-          ref={matRef}
-          streamUrl={compositeUrl}
-          viewMode={viewMode}
-          volume={volume}
-          isArchive={false}
-          onMutedFallback={() => setVolume(0)}
-          onTimeUpdate={handleTimeUpdate}
-          onBuffering={setIsBuffering}
-          onQualityChange={setActiveQuality}
-        />
-      );
-    }
+    if (!compositeUrl) return null;
     return (
       <MatPlayer
         ref={matRef}
-        mode="multistream"
-        streamUrls={orderedStreamUrls}
-        slots={stream.slots}
-        activeSlotIndexes={stream.activeSlotIndexes}
-        layoutPreset={stream.layoutPreset}
-        fallbackLayouts={stream.fallbackLayouts}
+        streamUrl={compositeUrl}
         viewMode={viewMode}
         volume={volume}
         isArchive={false}
@@ -507,31 +361,17 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
     );
   }
 
-  // ── ViewSwitcher element (mode-aware) ───────────────────────────────────
+  // ── ViewSwitcher element ────────────────────────────────────────────────
   function renderViewSwitcher() {
-    if (!stream) return null;
-    if (stream.mode === 'composite') {
-      return (
-        <ViewSwitcher
-          mode={viewMode as CompositeViewMode}
-          onChange={(m: CompositeViewMode) => { setViewMode(m); setMobileViewOpen(false); }}
-        />
-      );
-    }
     return (
       <ViewSwitcher
-        mode="multistream"
-        value={viewMode as MultistreamViewMode}
-        onChange={(m: MultistreamViewMode) => { setViewMode(m); setMobileViewOpen(false); }}
-        slots={stream.slots}
-        activeSlotIndexes={stream.activeSlotIndexes}
+        mode={viewMode as CompositeViewMode}
+        onChange={(m: CompositeViewMode) => { setViewMode(m); setMobileViewOpen(false); }}
       />
     );
   }
 
   // Заголовок: для named Stream'а склеиваем «<orgName> · <streamName>».
-  // Сам orgName уже отдаётся в `org.name`; streamTitle — это имя Stream'а
-  // (для default это исторически было «название стрима» орги).
   const composedTitle = (() => {
     const streamName = org?.streamTitle?.trim();
     if (isNamed && streamName) {
@@ -558,7 +398,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
           /* ── Immersive (landscape OR fullscreen from portrait) ───────── */
           <>
             <div className="absolute inset-0 overflow-hidden" onClick={handleVideoClick}>
-              {stream
+              {compositeUrl
                 ? renderPlayer()
                 : <div className="flex items-center justify-center h-full">
                     <TelevisionSimple size={48} className="text-zinc-700" weight="thin" />
@@ -583,8 +423,6 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
                   <button onClick={toggleMute} className="text-white bg-transparent border-none w-8 h-8 flex items-center justify-center cursor-pointer shrink-0">
                     <VolumeIcon />
                   </button>
-                  {/* Quality menu — hidden when no levels are available (multistream
-                      currently does not expose per-slot ABR). */}
                   {(matRef.current?.getQualityLevels()?.length ?? 0) > 1 && (
                     <div className="relative shrink-0">
                       <button
@@ -705,7 +543,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
               onTouchMove={handleSwipeMove}
               onTouchEnd={handleSwipeEnd}
             >
-              {stream
+              {compositeUrl
                 ? renderPlayer()
                 : <div className="flex items-center justify-center h-full">
                     <TelevisionSimple size={40} className="text-zinc-700" weight="thin" />
@@ -754,13 +592,12 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
               )}
             </div>
 
-            {/* Camera selector row — composite shows multicam + cam1..4,
-                multistream shows composed + slot-N with custom names. */}
+            {/* Camera selector row — composite shows multicam + cam1..4. */}
             {cameraRowEntries.length > 0 && (
               <div className="px-3 py-2 border-b border-zinc-800/40 shrink-0 flex items-center gap-1.5 overflow-x-auto">
                 {cameraRowEntries.map((m) => {
                   const active = viewMode === m.key;
-                  const isMulticam = m.key === 'multicam' || m.key === 'composed';
+                  const isMulticam = m.key === 'multicam';
                   const dimmed = !m.isLive;
                   const onClick = () => {
                     if (dimmed) return;
@@ -785,7 +622,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
                         : <VideoCamera size={12} weight={active ? 'fill' : 'regular'} />}
                       {isMulticam
                         ? 'Все камеры'
-                        : (isMultistream ? m.label : `Камера ${m.label}`)}
+                        : `Камера ${m.label}`}
                     </button>
                   );
                 })}
@@ -802,16 +639,6 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
                   <CaretLeft size={20} weight="bold" />
                 </button>
                 <div className="min-w-0 flex-1">
-                  {/* Step 5: breadcrumb на Event landing если Stream в активном Event'е */}
-                  {org?.currentEvent && (
-                    <Link
-                      href={`/event/${orgSlug}/${org.currentEvent.slug}`}
-                      className="inline-flex items-center gap-1 text-brand text-[11px] no-underline hover:text-brand-hover transition-colors mb-0.5"
-                    >
-                      <CaretLeft size={10} weight="bold" />
-                      <span className="truncate">{org.currentEvent.title}</span>
-                    </Link>
-                  )}
                   <p className="text-zinc-100 font-semibold text-sm leading-snug truncate">
                     {composedTitle}
                   </p>
@@ -858,7 +685,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
           onClick={handleVideoClick}
           onMouseMove={isFullscreen ? resetDesktopControlsTimer : undefined}
         >
-          {stream
+          {compositeUrl
             ? renderPlayer()
             : <div className="flex flex-col items-center justify-center h-full gap-2">
                 <TelevisionSimple size={48} className="text-zinc-700" weight="thin" />
@@ -866,26 +693,11 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
               </div>
           }
 
-          {/* Title overlay (top-left) — для named Stream'а показываем breadcrumb
-              на default-watch орги; для default — просто имя орги + название стрима.
-              Step 5: если Stream в активном Event'е — приоритетный breadcrumb на
-              Event landing (важнее чем переход к орге для зрителя в контексте
-              мероприятия). */}
+          {/* Title overlay (top-left) */}
           {!isFullscreen && org && (
             <div className="absolute top-3 left-3 z-10 flex flex-col gap-1 max-w-[60%] pointer-events-auto">
-              {org.currentEvent && (
-                <Link
-                  href={`/event/${orgSlug}/${org.currentEvent.slug}`}
-                  className="inline-flex items-center gap-1 self-start bg-black/55 backdrop-blur-sm rounded-md px-2 py-0.5 text-[11px] text-zinc-300 hover:text-white transition-colors no-underline"
-                  onClick={(e) => e.stopPropagation()}
-                  title={`К событию: ${org.currentEvent.title}`}
-                >
-                  <CaretLeft size={12} weight="bold" />
-                  <span className="truncate max-w-[200px]">{org.currentEvent.title}</span>
-                </Link>
-              )}
               <div className="flex items-center gap-2 bg-black/55 backdrop-blur-sm rounded-lg px-3 py-1.5">
-                {isNamed && !org.currentEvent ? (
+                {isNamed ? (
                   <Link
                     href={previewKey ? `/watch/${orgSlug}?key=${previewKey}` : `/watch/${orgSlug}`}
                     className="text-zinc-400 hover:text-zinc-200 transition-colors no-underline shrink-0 flex items-center"
@@ -954,8 +766,6 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
               <span className="text-zinc-500 text-xs font-mono tabular-nums shrink-0">{formatTime(duration - seekableStart)}</span>
               <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-20 shrink-0" />
               <button onClick={toggleMute} className="text-white bg-transparent border-none w-9 h-9 rounded flex items-center justify-center cursor-pointer shrink-0 hover:bg-white/10 transition-colors"><VolumeIcon /></button>
-              {/* Quality selector — hidden when no levels are advertised
-                  (multistream currently doesn't expose per-slot ABR). */}
               {(matRef.current?.getQualityLevels()?.length ?? 0) > 1 && (
                 <div className="relative shrink-0">
                   <button

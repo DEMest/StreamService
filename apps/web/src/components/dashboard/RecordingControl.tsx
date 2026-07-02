@@ -17,8 +17,7 @@ export interface RecordingControlProps {
 
 /**
  * Кнопка-переключатель «Идёт запись / Запись выкл.» + popover с явным
- * визуальным выбором режима (auto/manual). Используется и в multistream-,
- * и в default-студии.
+ * визуальным выбором режима (auto/manual). Используется в Studio-странице.
  */
 export function RecordingControl({
   enabled,

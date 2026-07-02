@@ -46,8 +46,8 @@ describe('AdminService', () => {
     mockPrisma.stream.create.mockResolvedValue({ id: 's1' });
     const result = await service.createOrg({ slug: 'club', name: 'Club', password: 'pass' });
     expect(result.slug).toBe('club');
-    // default Stream → composite, slotCount=1 → один путь 'live/club'
-    expect(mockMediamtx.addStreamPaths).toHaveBeenCalledWith('club', '', 'composite', 1, expect.any(String));
+    // default Stream → один путь 'live/club'
+    expect(mockMediamtx.addStreamPaths).toHaveBeenCalledWith('club', '', expect.any(String));
   });
 
   it('creates Org with a default Stream (slug=\'\', mode=composite)', async () => {
@@ -62,13 +62,10 @@ describe('AdminService', () => {
       data: expect.objectContaining({
         orgId: 'o1',
         slug: '',
-        mode: 'composite',
-        slotCount: 1,
-        layoutPreset: 'solo',
         ingestKey: expect.any(String),
       }),
     }));
-    expect(mockMediamtx.addStreamPaths).toHaveBeenCalledWith('club', '', 'composite', 1, expect.any(String));
+    expect(mockMediamtx.addStreamPaths).toHaveBeenCalledWith('club', '', expect.any(String));
   });
 
   it('throws NotFoundException when deleting non-existent org', async () => {
@@ -81,13 +78,13 @@ describe('AdminService', () => {
   it('deletes all stream paths of org when deleting org', async () => {
     mockPrisma.organization.findUnique.mockResolvedValue({
       streams: [
-        { slug: '', mode: 'composite', slotCount: 1 },
-        { slug: 'tournament', mode: 'multistream', slotCount: 3 },
+        { slug: '' },
+        { slug: 'tournament' },
       ],
     });
     mockPrisma.organization.delete.mockResolvedValue({});
     await service.deleteOrg('club');
-    expect(mockMediamtx.deleteStreamPaths).toHaveBeenCalledWith('club', '', 'composite', 1);
-    expect(mockMediamtx.deleteStreamPaths).toHaveBeenCalledWith('club', 'tournament', 'multistream', 3);
+    expect(mockMediamtx.deleteStreamPaths).toHaveBeenCalledWith('club', '');
+    expect(mockMediamtx.deleteStreamPaths).toHaveBeenCalledWith('club', 'tournament');
   });
 });

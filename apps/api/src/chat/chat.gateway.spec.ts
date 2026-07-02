@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { ChatGateway } from './chat.gateway';
-import { ChatService, ChatScope } from './chat.service';
+import { ChatService } from './chat.service';
 
 /**
  * Lightweight Socket-like stub. Записывает все emit'ы, join'ы и to(room).emit'ы
@@ -33,10 +33,10 @@ function makeSocket(id: string) {
   };
 }
 
-describe('ChatGateway — scope-based rooms (Step 5 B2)', () => {
+describe('ChatGateway — per-Stream rooms', () => {
   let gateway: ChatGateway;
   let chat: {
-    resolveScope: jest.Mock;
+    resolveStreamId: jest.Mock;
     writeMessage: jest.Mock;
     listMessages: jest.Mock;
     isChatEnabled: jest.Mock;
@@ -44,7 +44,7 @@ describe('ChatGateway — scope-based rooms (Step 5 B2)', () => {
 
   beforeEach(async () => {
     chat = {
-      resolveScope: jest.fn(),
+      resolveStreamId: jest.fn(),
       writeMessage: jest.fn(),
       listMessages: jest
         .fn()
@@ -60,65 +60,55 @@ describe('ChatGateway — scope-based rooms (Step 5 B2)', () => {
     } as any;
   });
 
-  describe('handleJoin — room key derived from resolved scope', () => {
-    it('stream scope (no active Event) → room "stream:<streamId>"', async () => {
-      chat.resolveScope.mockResolvedValue({ type: 'stream', streamId: 'sA' });
+  describe('handleJoin — room key derived from resolved streamId', () => {
+    it('resolves stream → room "stream:<streamId>"', async () => {
+      chat.resolveStreamId.mockResolvedValue('sA');
       const sock = makeSocket('s1');
       await gateway.handleJoin(sock as any, { orgSlug: 'club', streamSlug: 'mat-a' });
       expect(sock._joinedRooms).toEqual(['stream:sA']);
     });
 
-    it('event scope (Stream in active Event) → room "event:<eventId>"', async () => {
-      chat.resolveScope.mockResolvedValue({ type: 'event', eventId: 'evt1' });
-      const sock = makeSocket('s2');
-      await gateway.handleJoin(sock as any, { orgSlug: 'club', streamSlug: 'mat-a' });
-      expect(sock._joinedRooms).toEqual(['event:evt1']);
-    });
-
-    it('omitted streamSlug → resolveScope receives undefined and joins default Stream', async () => {
-      chat.resolveScope.mockResolvedValue({ type: 'stream', streamId: 'sDefault' });
+    it('omitted streamSlug → resolveStreamId receives undefined and joins default Stream', async () => {
+      chat.resolveStreamId.mockResolvedValue('sDefault');
       const sock = makeSocket('s3');
       await gateway.handleJoin(sock as any, { orgSlug: 'club' });
-      expect(chat.resolveScope).toHaveBeenCalledWith('club', undefined);
+      expect(chat.resolveStreamId).toHaveBeenCalledWith('club', undefined);
       expect(sock._joinedRooms).toEqual(['stream:sDefault']);
     });
 
-    it('scope=null (org/stream not found) → emits error and does NOT join', async () => {
-      chat.resolveScope.mockResolvedValue(null);
+    it('streamId=null (org/stream not found) → emits error and does NOT join', async () => {
+      chat.resolveStreamId.mockResolvedValue(null);
       const sock = makeSocket('s4');
       await gateway.handleJoin(sock as any, { orgSlug: 'nope', streamSlug: 'x' });
       expect(sock._joinedRooms).toEqual([]);
       expect(sock._emitted.find((e) => e.event === 'error')).toBeTruthy();
     });
 
-    it('two clients on different Streams of SAME active Event SHARE event-room', async () => {
-      // Stream A и Stream B оба резолвятся в одинаковый event scope.
-      chat.resolveScope.mockResolvedValue({ type: 'event', eventId: 'evt1' });
+    it('two clients on same Stream SHARE its room', async () => {
+      chat.resolveStreamId.mockResolvedValue('sA');
       const a = makeSocket('a1');
       const b = makeSocket('b1');
       await gateway.handleJoin(a as any, { orgSlug: 'club', streamSlug: 'mat-a' });
-      await gateway.handleJoin(b as any, { orgSlug: 'club', streamSlug: 'mat-b' });
+      await gateway.handleJoin(b as any, { orgSlug: 'club', streamSlug: 'mat-a' });
 
-      // Оба в комнате event:evt1.
-      expect(a._joinedRooms).toEqual(['event:evt1']);
-      expect(b._joinedRooms).toEqual(['event:evt1']);
+      expect(a._joinedRooms).toEqual(['stream:sA']);
+      expect(b._joinedRooms).toEqual(['stream:sA']);
 
-      // Viewer count в event-room растёт совместно: a видит 1, b видит 2.
+      // Viewer count в room растёт совместно: a видит 1, b видит 2.
       const aViewers = a._emitted.filter((e) => e.event === 'viewers');
       const bViewers = b._emitted.filter((e) => e.event === 'viewers');
       expect(aViewers[aViewers.length - 1].payload).toBe(1);
       expect(bViewers[bViewers.length - 1].payload).toBe(2);
     });
 
-    it('switching from stream-room to event-room: leaves prev and decrements its viewers', async () => {
-      // c1 заходит в stream-scope (Event ещё не начался).
-      chat.resolveScope.mockResolvedValueOnce({ type: 'stream', streamId: 'sA' });
+    it('switching Streams in same SPA session: leaves prev room and decrements its viewers', async () => {
+      // c1 заходит на Stream A.
+      chat.resolveStreamId.mockResolvedValueOnce('sA');
       const c1 = makeSocket('c1');
       await gateway.handleJoin(c1 as any, { orgSlug: 'club', streamSlug: 'mat-a' });
-      // ...затем Event стартует и тот же сокет (по reconnect/SPA-навигации)
-      // получает event scope.
-      chat.resolveScope.mockResolvedValueOnce({ type: 'event', eventId: 'evt1' });
-      await gateway.handleJoin(c1 as any, { orgSlug: 'club', streamSlug: 'mat-a' });
+      // ...затем тот же сокет (SPA-навигация) переключается на Stream B.
+      chat.resolveStreamId.mockResolvedValueOnce('sB');
+      await gateway.handleJoin(c1 as any, { orgSlug: 'club', streamSlug: 'mat-b' });
 
       // c1 покинул stream:sA → последний broadcast "viewers=0" в stream:sA
       // (после join первый broadcast был "viewers=1" — берём именно последний).
@@ -126,50 +116,41 @@ describe('ChatGateway — scope-based rooms (Step 5 B2)', () => {
         (e) => e.room === 'stream:sA' && e.event === 'viewers',
       );
       expect(sAViewerBroadcasts[sAViewerBroadcasts.length - 1]?.payload).toBe(0);
-      // И теперь только в event:evt1.
-      expect(c1._joinedRooms).toEqual(['event:evt1']);
+      // И теперь только в stream:sB.
+      expect(c1._joinedRooms).toEqual(['stream:sB']);
     });
   });
 
-  describe('handleMessage — посылает в room текущего scope', () => {
-    it('event scope: two clients on different Streams of same Event see each others messages', async () => {
-      chat.resolveScope.mockResolvedValue({ type: 'event', eventId: 'evt1' });
+  describe('handleMessage — посылает в room текущего стрима', () => {
+    it('two clients on same Stream see each others messages', async () => {
+      chat.resolveStreamId.mockResolvedValue('sA');
       const a = makeSocket('alice');
       const b = makeSocket('bob');
       await gateway.handleJoin(a as any, { orgSlug: 'club', streamSlug: 'mat-a' });
-      await gateway.handleJoin(b as any, { orgSlug: 'club', streamSlug: 'mat-b' });
+      await gateway.handleJoin(b as any, { orgSlug: 'club', streamSlug: 'mat-a' });
 
       chat.writeMessage.mockResolvedValueOnce({
-        id: 'm1', nickname: 'Alice', content: 'hi event', createdAt: new Date(),
+        id: 'm1', nickname: 'Alice', content: 'hi stream', createdAt: new Date(),
       });
 
-      await gateway.handleMessage(a as any, { nickname: 'Alice', content: 'hi event' });
+      await gateway.handleMessage(a as any, { nickname: 'Alice', content: 'hi stream' });
 
       // a получил свой message локально.
-      expect(a._emitted.find((e) => e.event === 'message')?.payload.content).toBe('hi event');
-      // Broadcast пошёл в event-room → b его получит (через socket.io to(room).emit).
+      expect(a._emitted.find((e) => e.event === 'message')?.payload.content).toBe('hi stream');
+      // Broadcast пошёл в room стрима → b его получит (через socket.io to(room).emit).
       const broadcast = a._toEmits.find((e) => e.event === 'message');
-      expect(broadcast?.room).toBe('event:evt1');
-      // writeMessage был вызван со scope=event.
-      expect(chat.writeMessage).toHaveBeenCalledWith(
-        { type: 'event', eventId: 'evt1' },
-        'Alice',
-        'hi event',
-      );
+      expect(broadcast?.room).toBe('stream:sA');
+      expect(chat.writeMessage).toHaveBeenCalledWith('sA', 'Alice', 'hi stream');
     });
 
-    it('stream scope: different Streams (Event ended) are isolated', async () => {
+    it('different Streams are isolated', async () => {
       const a = makeSocket('a');
       const b = makeSocket('b');
-      chat.resolveScope.mockResolvedValueOnce({ type: 'stream', streamId: 'sA' });
+      chat.resolveStreamId.mockResolvedValueOnce('sA');
       await gateway.handleJoin(a as any, { orgSlug: 'club', streamSlug: 'mat-a' });
-      chat.resolveScope.mockResolvedValueOnce({ type: 'stream', streamId: 'sB' });
+      chat.resolveStreamId.mockResolvedValueOnce('sB');
       await gateway.handleJoin(b as any, { orgSlug: 'club', streamSlug: 'mat-b' });
 
-      // Step 5 Karen C2: handleMessage делает re-resolve scope каждый раз.
-      // Для сообщения от `a` (streamSlug=mat-a) re-resolve должен вернуть
-      // тот же stream:sA scope, чтобы actual==cached → миграции не будет.
-      chat.resolveScope.mockResolvedValueOnce({ type: 'stream', streamId: 'sA' });
       chat.writeMessage.mockResolvedValueOnce({
         id: 'm2', nickname: 'A', content: 'only A', createdAt: new Date(),
       });
@@ -182,6 +163,23 @@ describe('ChatGateway — scope-based rooms (Step 5 B2)', () => {
       expect(b._emitted.find((e) => e.event === 'message')).toBeUndefined();
     });
 
+    it('room стабильна на весь сеанс — handleMessage не резолвит streamId заново', async () => {
+      chat.resolveStreamId.mockResolvedValueOnce('sA');
+      const sock = makeSocket('stable');
+      await gateway.handleJoin(sock as any, { orgSlug: 'club', streamSlug: 'mat-a' });
+      chat.resolveStreamId.mockClear();
+
+      chat.writeMessage.mockResolvedValueOnce({
+        id: 'm1', nickname: 'A', content: 'hello', createdAt: new Date(),
+      });
+      await gateway.handleMessage(sock as any, { nickname: 'A', content: 'hello' });
+
+      // handleMessage использует кэшированный streamId из join, без повторного resolve.
+      expect(chat.resolveStreamId).not.toHaveBeenCalled();
+      expect(chat.writeMessage).toHaveBeenCalledWith('sA', 'A', 'hello');
+      expect(sock._joinedRooms).toEqual(['stream:sA']);
+    });
+
     it('socket без предварительного join не сохраняет и не броадкастит', async () => {
       const orphan = makeSocket('orphan');
       await gateway.handleMessage(orphan as any, { nickname: 'X', content: 'hi' });
@@ -189,52 +187,8 @@ describe('ChatGateway — scope-based rooms (Step 5 B2)', () => {
       expect(orphan._toEmits).toHaveLength(0);
     });
 
-    // Karen C2 (Step 5): scope re-resolve в handleMessage. Если за время сессии
-    // Event.start/end изменил резолв scope'а (stream → event или наоборот),
-    // следующий message должен уйти в актуальный room, а socket — мигрировать.
-    it('re-resolves scope on each message (Event.start mid-session) — message goes to event-room', async () => {
-      // Изначально join'имся в stream-scope.
-      chat.resolveScope.mockResolvedValueOnce({ type: 'stream', streamId: 'sA' });
-      const sock = makeSocket('migrant');
-      await gateway.handleJoin(sock as any, { orgSlug: 'club', streamSlug: 'mat-a' });
-      expect(sock._joinedRooms).toEqual(['stream:sA']);
-
-      // Event стартанул — следующий resolveScope (вызванный из handleMessage)
-      // вернёт event-scope.
-      chat.resolveScope.mockResolvedValueOnce({ type: 'event', eventId: 'evt1' });
-      chat.writeMessage.mockResolvedValueOnce({
-        id: 'm1', nickname: 'A', content: 'hello', createdAt: new Date(),
-      });
-
-      await gateway.handleMessage(sock as any, { nickname: 'A', content: 'hello' });
-
-      // writeMessage был вызван с НОВЫМ event-scope, не cached stream-scope.
-      expect(chat.writeMessage).toHaveBeenCalledWith(
-        { type: 'event', eventId: 'evt1' },
-        'A',
-        'hello',
-      );
-      // Broadcast пошёл в event-room.
-      const messageBroadcasts = sock._toEmits.filter((e) => e.event === 'message');
-      expect(messageBroadcasts[messageBroadcasts.length - 1].room).toBe('event:evt1');
-      // Socket мигрировал: leave stream:sA, join event:evt1.
-      expect(sock._joinedRooms).toEqual(['event:evt1']);
-    });
-
-    it('re-resolved scope returns null mid-session → message dropped silently', async () => {
-      chat.resolveScope.mockResolvedValueOnce({ type: 'stream', streamId: 'sA' });
-      const sock = makeSocket('dropped');
-      await gateway.handleJoin(sock as any, { orgSlug: 'club', streamSlug: 'mat-a' });
-
-      // Орга/стрим исчезли (org deleted?). resolveScope returns null.
-      chat.resolveScope.mockResolvedValueOnce(null);
-      await gateway.handleMessage(sock as any, { nickname: 'X', content: 'hi' });
-
-      expect(chat.writeMessage).not.toHaveBeenCalled();
-    });
-
     it('chat выключен (writeMessage вернул null) → клиенту emit chat_enabled=false', async () => {
-      chat.resolveScope.mockResolvedValue({ type: 'stream', streamId: 'sA' });
+      chat.resolveStreamId.mockResolvedValue('sA');
       const sock = makeSocket('s');
       await gateway.handleJoin(sock as any, { orgSlug: 'club', streamSlug: 'mat-a' });
 
@@ -248,13 +202,27 @@ describe('ChatGateway — scope-based rooms (Step 5 B2)', () => {
     });
   });
 
+  describe('handleDisconnect — очищает internal maps', () => {
+    it('удаляет socketStreamId и socketOrg записи', async () => {
+      chat.resolveStreamId.mockResolvedValue('sA');
+      const sock = makeSocket('disc');
+      await gateway.handleJoin(sock as any, { orgSlug: 'club', streamSlug: 'mat-a' });
+
+      gateway.handleDisconnect(sock as any);
+
+      // После disconnect повторный message от того же socketId ничего не делает.
+      await gateway.handleMessage(sock as any, { nickname: 'X', content: 'hi' });
+      expect(chat.writeMessage).not.toHaveBeenCalled();
+    });
+  });
+
   describe('broadcastChatEnabled / broadcastChatCleared — мульти-room по orgSlug', () => {
     it('broadcastChatEnabled рассылается во все rooms, где есть зрители орги', async () => {
-      // Подписываем 2 клиентов в разные scope'ы одной орги (event+stream).
-      chat.resolveScope.mockResolvedValueOnce({ type: 'event', eventId: 'evt1' });
+      // Подписываем 2 клиентов на разные Stream'ы одной орги.
+      chat.resolveStreamId.mockResolvedValueOnce('sA');
       const a = makeSocket('a');
       await gateway.handleJoin(a as any, { orgSlug: 'club', streamSlug: 'mat-a' });
-      chat.resolveScope.mockResolvedValueOnce({ type: 'stream', streamId: 'sB' });
+      chat.resolveStreamId.mockResolvedValueOnce('sB');
       const b = makeSocket('b');
       await gateway.handleJoin(b as any, { orgSlug: 'club', streamSlug: 'mat-b' });
 
@@ -262,15 +230,14 @@ describe('ChatGateway — scope-based rooms (Step 5 B2)', () => {
       toMock.mockClear();
       gateway.broadcastChatEnabled('club', false);
       const calledRooms = toMock.mock.calls.map((c) => c[0]).sort();
-      expect(calledRooms).toEqual(['event:evt1', 'stream:sB']);
+      expect(calledRooms).toEqual(['stream:sA', 'stream:sB']);
     });
 
-    it('broadcastChatCleared со scope шлёт только в этот scope-room', async () => {
-      const scope: ChatScope = { type: 'event', eventId: 'evt1' };
+    it('broadcastChatCleared со streamId шлёт только в room этого стрима', async () => {
       const toMock = gateway.server.to as jest.Mock;
       toMock.mockClear();
-      gateway.broadcastChatCleared('club', scope);
-      expect(toMock).toHaveBeenCalledWith('event:evt1');
+      gateway.broadcastChatCleared('club', 'sA');
+      expect(toMock).toHaveBeenCalledWith('stream:sA');
       expect(toMock).toHaveBeenCalledTimes(1);
     });
   });

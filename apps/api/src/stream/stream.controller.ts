@@ -48,11 +48,11 @@ export class StreamController {
   /**
    * POST /v1/org/streams — создать новый Stream внутри орги.
    *
-   * Body: { slug, name?, description?, mode?, slotCount? }
+   * Body: { slug, name?, description? }
    *   - slug обязателен, lowercase alphanumeric+dash, не равен '' (зарезервирован).
-   *   - mode по умолчанию 'composite', slotCount=1, name=slug.
+   *   - name по умолчанию равен slug.
    *
-   * Side-effect: создание MediaMTX-путей. При падении MediaMTX — Prisma rollback.
+   * Side-effect: создание MediaMTX-пути. При падении MediaMTX — Prisma rollback.
    *
    * Возвращает DTO без ingestKey (как list). 409 если slug дублируется в орге.
    */
@@ -91,12 +91,18 @@ export class StreamController {
   }
 
   /**
+   * GET /v1/org/streams/:id/broadcasts — завершённые трансляции Stream'а (tenant-scoped).
+   */
+  @Get(':id/broadcasts')
+  listBroadcasts(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.streams.listBroadcastsForOrg(user.orgId!, id);
+  }
+
+  /**
    * PATCH /v1/org/streams/:id — обновить конфигурацию Stream'а.
    *
-   * Body поля (все опциональны): name, description, mode, slotCount, slots[],
-   * slotOrder[], layoutPreset, fallbackLayouts, isPublic, previewMode, autoStartMode.
+   * Body поля (все опциональны): name, description, isPublic, previewMode, autoStartMode.
    *
-   * Side-effect: при изменении mode/slotCount — diff-обновление MediaMTX-путей.
    * Валидация описана в `StreamService.updateConfig`.
    */
   @Patch(':id')

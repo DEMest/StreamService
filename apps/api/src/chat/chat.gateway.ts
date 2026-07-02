@@ -10,34 +10,23 @@ import {
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
-import { ChatScope, ChatService, scopeRoomKey } from './chat.service';
+import { ChatService, chatRoomKey } from './chat.service';
 
 /**
- * Step 5 B2 — chat scope refactor.
- *
- * Room ключи теперь scope-based:
- *   - event scope → `event:<eventId>`
- *   - stream scope → `stream:<streamId>`
- *
- * Все Stream'ы одного активного Event'а делят room (event scope), их зрители
- * видят одни и те же сообщения. Standalone Stream (не в Event'е) или Stream
- * в endedEvent'е получает stream-room — изолирован от других стримов орги.
- *
- * Резолв scope делает ChatService.resolveScope. Если orgа/stream не найдены —
- * gateway отправляет `error` клиенту и не подписывает на room.
+ * Room ключ = `stream:<streamId>`, резолвится один раз в handleJoin и
+ * стабилен на весь сеанс сокета (переключение стрима — только при повторном
+ * `join` от клиента, не автоматически).
  */
 @WebSocketGateway({ cors: { origin: '*' }, namespace: '/chat' })
 export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
   private readonly logger = new Logger(ChatGateway.name);
-  // socketId → room key (для disconnect-cleanup и валидации message)
+  // socketId → room key ("stream:<streamId>")
   private readonly socketRoom = new Map<string, string>();
-  // socketId → scope (для writeMessage; восстанавливается на handleJoin)
-  private readonly socketScope = new Map<string, ChatScope>();
+  // socketId → streamId (для writeMessage)
+  private readonly socketStreamId = new Map<string, string>();
   // socketId → orgSlug (для broadcastChatEnabled/Cleared по orgSlug)
   private readonly socketOrg = new Map<string, string>();
-  // socketId → streamSlug (для re-resolve scope в handleMessage; см. Karen C2)
-  private readonly socketStreamSlug = new Map<string, string>();
   private readonly roomViewers = new Map<string, number>(); // room → count
 
   constructor(private chat: ChatService) {}
@@ -53,9 +42,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   handleDisconnect(client: Socket) {
     this.logger.log(`Socket disconnected: ${client.id}`);
     const room = this.socketRoom.get(client.id);
-    this.socketScope.delete(client.id);
+    this.socketStreamId.delete(client.id);
     this.socketOrg.delete(client.id);
-    this.socketStreamSlug.delete(client.id);
     if (!room) return;
     this.socketRoom.delete(client.id);
     const prev = this.roomViewers.get(room) ?? 0;
@@ -72,16 +60,15 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   ) {
     if (!data?.orgSlug) return;
 
-    const scope = await this.chat.resolveScope(data.orgSlug, data.streamSlug);
-    if (!scope) {
+    const streamId = await this.chat.resolveStreamId(data.orgSlug, data.streamSlug);
+    if (!streamId) {
       client.emit('error', { message: 'Stream not found' });
       return;
     }
-    const room = scopeRoomKey(scope);
+    const room = chatRoomKey(streamId);
 
     // Если socket уже был в другой комнате (переключение между Stream'ами
-    // одной орги в SPA, или переход Stream'а в активный Event и обратно),
-    // сначала покидаем её и декрементим viewer-count там.
+    // одной орги в SPA), сначала покидаем её и декрементим viewer-count там.
     const prevRoom = this.socketRoom.get(client.id);
     if (prevRoom && prevRoom !== room) {
       client.leave(prevRoom);
@@ -95,9 +82,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     client.join(room);
     const alreadyJoined = prevRoom === room;
     this.socketRoom.set(client.id, room);
-    this.socketScope.set(client.id, scope);
+    this.socketStreamId.set(client.id, streamId);
     this.socketOrg.set(client.id, data.orgSlug);
-    this.socketStreamSlug.set(client.id, data.streamSlug ?? '');
 
     let count = this.roomViewers.get(room) ?? 0;
     if (!alreadyJoined) {
@@ -108,7 +94,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     client.to(room).emit('viewers', count);
 
     try {
-      const { messages, ttlMinutes, chatEnabled } = await this.chat.listMessages(scope);
+      const { messages, ttlMinutes, chatEnabled } = await this.chat.listMessages(streamId);
       client.emit('history', messages);
       client.emit('chat_ttl', ttlMinutes);
       client.emit('chat_enabled', chatEnabled);
@@ -123,48 +109,15 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { nickname: string; content: string },
   ) {
-    const cachedScope = this.socketScope.get(client.id);
-    const cachedRoom = this.socketRoom.get(client.id);
+    const streamId = this.socketStreamId.get(client.id);
+    const room = this.socketRoom.get(client.id);
     const orgSlug = this.socketOrg.get(client.id);
-    if (!cachedScope || !cachedRoom || !orgSlug) return;
+    if (!streamId || !room || !orgSlug) return;
     if (!data?.nickname?.trim() || !data?.content?.trim()) return;
-
-    // Karen C2 (Step 5): scope резолвился один раз при join, но если за время
-    // сессии случился Event.start/end — cached scope застывает на старом значении
-    // и сообщения уходят не туда. Перерезолвим actual scope при каждом message
-    // (одна простая Prisma-выборка — допустимая нагрузка, чат не hot path).
-    // Если scope изменился — мигрируем socket в новую room ДО writeMessage,
-    // чтобы локальный echo и broadcast попали в актуальный room.
-    const streamSlug = this.socketStreamSlug.get(client.id) ?? '';
-    const actualScope = await this.chat.resolveScope(orgSlug, streamSlug);
-    if (!actualScope) return; // org/stream исчезли посреди сессии
-
-    let scope = cachedScope;
-    let room = cachedRoom;
-    if (scopeRoomKey(actualScope) !== scopeRoomKey(cachedScope)) {
-      const newRoom = scopeRoomKey(actualScope);
-      client.leave(cachedRoom);
-      const prevCount = this.roomViewers.get(cachedRoom) ?? 0;
-      const nextPrevCount = Math.max(0, prevCount - 1);
-      if (nextPrevCount > 0) this.roomViewers.set(cachedRoom, nextPrevCount);
-      else this.roomViewers.delete(cachedRoom);
-      client.to(cachedRoom).emit('viewers', nextPrevCount);
-
-      client.join(newRoom);
-      const newCount = (this.roomViewers.get(newRoom) ?? 0) + 1;
-      this.roomViewers.set(newRoom, newCount);
-      client.to(newRoom).emit('viewers', newCount);
-      client.emit('viewers', newCount);
-
-      this.socketRoom.set(client.id, newRoom);
-      this.socketScope.set(client.id, actualScope);
-      scope = actualScope;
-      room = newRoom;
-    }
 
     try {
       const message = await this.chat.writeMessage(
-        scope,
+        streamId,
         data.nickname.trim(),
         data.content.trim(),
       );
@@ -181,9 +134,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   }
 
   /**
-   * Широковещание chatEnabled на все scope-rooms орги. chatEnabled — пока
-   * org-level настройка (Step 5 пока не вводит per-Stream chatEnabled), поэтому
-   * матчим все актуальные rooms где есть зрители этой орги.
+   * Широковещание chatEnabled на все rooms орги. chatEnabled — пока
+   * org-level настройка, поэтому матчим все актуальные rooms где есть
+   * зрители этой орги.
    */
   broadcastChatEnabled(orgSlug: string, enabled: boolean) {
     for (const room of this.roomsForOrg(orgSlug)) {
@@ -192,14 +145,13 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   }
 
   /**
-   * Step 5: org-level clear → транслирует chat_cleared во все rooms, где есть
-   * зрители этой орги (включая stream- и event-scope комнаты). Это сохраняет
-   * семантику legacy endpoint'а POST /v1/org/chat/clear, который чистит чат
-   * default Stream'а орги.
+   * org-level clear → транслирует chat_cleared во все rooms, где есть
+   * зрители этой орги. Это сохраняет семантику legacy endpoint'а
+   * POST /v1/org/chat/clear, который чистит чат default Stream'а орги.
    */
-  broadcastChatCleared(orgSlug: string, scope?: ChatScope) {
-    if (scope) {
-      this.server.to(scopeRoomKey(scope)).emit('chat_cleared');
+  broadcastChatCleared(orgSlug: string, streamId?: string) {
+    if (streamId) {
+      this.server.to(chatRoomKey(streamId)).emit('chat_cleared');
       return;
     }
     for (const room of this.roomsForOrg(orgSlug)) {
@@ -209,8 +161,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
   /**
    * Все актуальные rooms, где есть хотя бы один зритель этой орги.
-   * Опирается на socketOrg-map, чтобы корректно покрыть и event-rooms
-   * (event scope уже не содержит orgSlug в ключе).
+   * Опирается на socketOrg-map. Room-ключ всегда `stream:<streamId>`.
    */
   private roomsForOrg(orgSlug: string): string[] {
     const rooms = new Set<string>();

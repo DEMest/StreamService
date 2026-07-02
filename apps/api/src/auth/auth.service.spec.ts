@@ -34,7 +34,7 @@ describe('AuthService', () => {
       id: '1', login: 'admin', passwordHash: hash('pass'), role: 'superadmin',
     });
     const result = await service.login('admin', 'pass');
-    expect(result.token).toBe('token');
+    expect(result.accessToken).toBe('token');
     expect(result.role).toBe('superadmin');
   });
 
