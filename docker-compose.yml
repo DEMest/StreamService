@@ -16,6 +16,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   # ─── MediaMTX ───
   mediamtx:
@@ -24,10 +25,11 @@ services:
       dockerfile: Dockerfile
     container_name: ${COMPOSE_PROJECT_NAME:-streamservice}-mediamtx
     ports:
+      # Наружу торчит только ингест (SRT/RTMP). HLS (8888) отдаёт API через nginx,
+      # а control-API (9997) дёргает только контейнер api по внутренней docker-сети —
+      # публиковать их на хост незачем (иначе доступны всей локалке/Tailscale в обход nginx/ufw).
       - "${MEDIAMTX_SRT_PORT:-8890}:8890/udp"
       - "${MEDIAMTX_RTMP_PORT:-1935}:1935/tcp"
-      - "${MEDIAMTX_HLS_PORT:-8888}:8888"
-      - "${MEDIAMTX_API_PORT:-9997}:9997"
     environment:
       MEDIAMTX_WEBHOOK_SECRET: ${MEDIAMTX_WEBHOOK_SECRET:-}
     volumes:
@@ -42,8 +44,7 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     container_name: ${COMPOSE_PROJECT_NAME:-streamservice}-api
-    ports:
-      - "${API_PORT:-3001}:3001"
+    # host-порт не публикуем: nginx ходит в api по имени контейнера через сеть edge.
     volumes:
       - recordings_data:/recordings
       - uploads_data:/app/uploads
@@ -90,8 +91,7 @@ services:
         NEXT_PUBLIC_RTMP_PORT: ${MEDIAMTX_RTMP_PORT:-1935}
         NEXT_PUBLIC_HLS_PORT: ${MEDIAMTX_HLS_PORT:-8888}
     container_name: ${COMPOSE_PROJECT_NAME:-streamservice}-web
-    ports:
-      - "${WEB_PORT:-3000}:3000"
+    # host-порт не публикуем: nginx ходит в web по имени контейнера через сеть edge.
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       NEXT_PUBLIC_API_URL: /api
