@@ -1,0 +1,105 @@
+services:
+  # ─── PostgreSQL ───
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: streamservice
+      POSTGRES_USER: stream
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-streampass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stream -d streamservice"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─── MediaMTX ───
+  mediamtx:
+    build:
+      context: ./infra/mediamtx
+      dockerfile: Dockerfile
+    container_name: streamservice-mediamtx
+    ports:
+      - "${MEDIAMTX_SRT_PORT:-8890}:8890/udp"
+      - "${MEDIAMTX_RTMP_PORT:-1935}:1935/tcp"
+      - "8888:8888"
+      - "9997:9997"
+    environment:
+      MEDIAMTX_WEBHOOK_SECRET: ${MEDIAMTX_WEBHOOK_SECRET:-}
+    volumes:
+      - ./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro
+      - recordings_data:/recordings
+      - hls_data:/hls
+    restart: unless-stopped
+
+  # ─── API ───
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: streamservice-api
+    ports:
+      - "3001:3001"
+    volumes:
+      - recordings_data:/recordings
+      - uploads_data:/app/uploads
+      - hls_data:/hls
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      API_PORT: 3001
+      DATABASE_URL: postgresql://stream:${POSTGRES_PASSWORD:-streampass}@postgres:5432/streamservice
+      JWT_SECRET: ${JWT_SECRET:-changeme-in-production}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      MEDIAMTX_API_URL: http://mediamtx:9997
+      MEDIAMTX_API_USER: ${MEDIAMTX_API_USER:-api}
+      MEDIAMTX_API_PASS: ${MEDIAMTX_API_PASS:-mediamtxpass}
+      SUPERADMIN_LOGIN: ${SUPERADMIN_LOGIN:-admin}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-adminpass}
+      MEDIAMTX_WEBHOOK_SECRET: ${MEDIAMTX_WEBHOOK_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+    networks:
+      - default
+      - edge
+    restart: unless-stopped
+
+  # ─── Web ───
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        API_UPSTREAM: http://api:3001
+        NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL:-http://localhost:3001}
+        NEXT_PUBLIC_SERVER_IP: ${NEXT_PUBLIC_SERVER_IP:-localhost}
+    container_name: streamservice-web
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      NEXT_PUBLIC_API_URL: /api
+      NEXT_PUBLIC_STREAM_BASE_URL: /hls/live
+    depends_on:
+      - api
+      - mediamtx
+    networks:
+      - default
+      - edge
+    restart: unless-stopped
+
+networks:
+  default:
+  edge:
+    external: true
+
+volumes:
+  postgres_data:
+  recordings_data:
+  uploads_data:
+  hls_data:
