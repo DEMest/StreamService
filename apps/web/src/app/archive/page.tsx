@@ -10,11 +10,11 @@ import type { CatalogItem } from '@/lib/types';
 import { TelevisionSimple } from '@phosphor-icons/react';
 
 /**
- * Архив теперь организован по оргам: карточка орги ведёт на её обзор
- * (`/watch/<orgSlug>`), где зритель выбирает конкретный Stream и его архив.
- * Глобальная агрегация отдельных записей убрана — новая форма каталога
- * (`CatalogOrgCard`, одна карточка на орг) больше не несёт данных для
- * точечных archive-ссылок на уровне отдельного Stream'а.
+ * Архив организован по оргам: карточка ведёт на обзор орги в архивном режиме
+ * (`/watch/<orgSlug>?view=archive`) — там ссылки на Stream'ы сразу указывают
+ * на их архив, а не на live-просмотр. Глобальная агрегация отдельных записей
+ * убрана — новая форма каталога (`CatalogOrgCard`, одна карточка на орг)
+ * не несёт данных для этого на уровне списка орг.
  */
 export default function ArchivePage() {
   const { data: items, isLoading } = useQuery({
@@ -60,7 +60,7 @@ export default function ArchivePage() {
             <motion.div variants={staggerContainer} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
               {orgs.map((item) => (
                 <motion.div key={item.orgSlug} variants={cardFadeUp}>
-                  <OrgCard org={item} thumbKey={thumbKey} />
+                  <OrgCard org={item} thumbKey={thumbKey} href={`/watch/${item.orgSlug}?view=archive`} />
                 </motion.div>
               ))}
             </motion.div>

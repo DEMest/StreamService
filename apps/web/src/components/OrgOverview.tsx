@@ -29,7 +29,7 @@ interface StreamUrlDto {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '/api';
 
-export function OrgOverview({ orgSlug }: { orgSlug: string }) {
+export function OrgOverview({ orgSlug, archiveMode = false }: { orgSlug: string; archiveMode?: boolean }) {
   const [canvasMode, setCanvasMode] = useState(false);
 
   const { data: org, isLoading } = useQuery({
@@ -60,7 +60,7 @@ export function OrgOverview({ orgSlug }: { orgSlug: string }) {
         .filter((r): r is PromiseFulfilledResult<CanvasTile> => r.status === 'fulfilled')
         .map((r) => r.value);
     },
-    enabled: canvasMode && liveStreams.length >= 2,
+    enabled: !archiveMode && canvasMode && liveStreams.length >= 2,
     refetchInterval: 10_000,
   });
 
@@ -68,7 +68,10 @@ export function OrgOverview({ orgSlug }: { orgSlug: string }) {
     <div className="min-h-[100dvh] bg-surface-primary text-zinc-200">
       <Header />
       <main className="max-w-[1100px] mx-auto px-6 py-8">
-        <h1 className="text-xl font-semibold text-zinc-50 tracking-tight mb-1">{org?.orgName ?? orgSlug}</h1>
+        <h1 className="text-xl font-semibold text-zinc-50 tracking-tight mb-1">
+          {archiveMode ? `Архив · ${org?.orgName ?? orgSlug}` : (org?.orgName ?? orgSlug)}
+        </h1>
+        {archiveMode && <p className="text-zinc-500 text-sm mb-3">Записи прошедших трансляций</p>}
         {org?.orgDescription && <p className="text-zinc-500 text-sm mb-6">{org.orgDescription}</p>}
 
         {isLoading && <div className="text-zinc-500 text-sm py-12 text-center">Загрузка...</div>}
@@ -80,7 +83,7 @@ export function OrgOverview({ orgSlug }: { orgSlug: string }) {
           </div>
         )}
 
-        {liveStreams.length >= 2 && (
+        {!archiveMode && liveStreams.length >= 2 && (
           <div className="mb-6">
             <button
               onClick={() => setCanvasMode((v) => !v)}
@@ -92,7 +95,7 @@ export function OrgOverview({ orgSlug }: { orgSlug: string }) {
           </div>
         )}
 
-        {canvasMode && canvasTiles && canvasTiles.length >= 2 && (
+        {!archiveMode && canvasMode && canvasTiles && canvasTiles.length >= 2 && (
           <div className="mb-8">
             <OrgCanvasPlayer tiles={canvasTiles} />
           </div>
@@ -107,7 +110,7 @@ export function OrgOverview({ orgSlug }: { orgSlug: string }) {
               return (
                 <Link
                   key={s.streamSlug}
-                  href={`/watch/${orgSlug}/${s.streamSlug}`}
+                  href={archiveMode ? `/watch/${orgSlug}/${s.streamSlug}/archive` : `/watch/${orgSlug}/${s.streamSlug}`}
                   className="no-underline group"
                 >
                   <article className={`rounded-xl overflow-hidden border transition-all duration-200 active:scale-[0.99] ${

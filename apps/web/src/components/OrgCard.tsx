@@ -6,10 +6,11 @@ import type { CatalogOrgCard } from '@/lib/types';
 import { API_BASE } from '@/lib/types';
 
 /**
- * Карточка каталога (одна орга). Ссылка ведёт на `/watch/<orgSlug>` — обзор
- * орги со списком её Stream'ов.
+ * Карточка каталога (одна орга). По умолчанию ведёт на `/watch/<orgSlug>` —
+ * обзор орги со списком её Stream'ов; можно переопределить `href` (например
+ * на странице архива — сразу в архивный режим обзора орги).
  */
-export function OrgCard({ org, thumbKey }: { org: CatalogOrgCard; thumbKey: number }) {
+export function OrgCard({ org, thumbKey, href }: { org: CatalogOrgCard; thumbKey: number; href?: string }) {
   const [imgError, setImgError] = useState(false);
   const isLive = org.liveCount > 0;
   const hasThumbnail = (isLive || org.hasCustomPreview) && !!org.representativeStreamSlug;
@@ -20,7 +21,7 @@ export function OrgCard({ org, thumbKey }: { org: CatalogOrgCard; thumbKey: numb
   useEffect(() => { setImgError(false); }, [thumbKey]);
 
   return (
-    <Link href={`/watch/${org.orgSlug}`} className="no-underline group">
+    <Link href={href ?? `/watch/${org.orgSlug}`} className="no-underline group">
       <article
         className={`rounded-xl overflow-hidden border transition-all duration-200 active:scale-[0.99] ${
           isLive
