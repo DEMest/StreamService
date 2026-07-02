@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { RecordingService } from './recording.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { S3Service } from '../storage/s3.service';
 import { NotFoundException } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -24,6 +25,12 @@ const mockPrisma = {
     findMany: jest.fn(),
     delete: jest.fn(),
   },
+};
+
+const mockS3 = {
+  uploadDirectory: jest.fn().mockResolvedValue(undefined),
+  deleteByPrefix: jest.fn().mockResolvedValue(undefined),
+  getPresignedUrl: jest.fn().mockResolvedValue('https://s3.example.com/signed'),
 };
 
 describe('RecordingService', () => {
@@ -54,6 +61,7 @@ describe('RecordingService', () => {
       providers: [
         RecordingService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: S3Service, useValue: mockS3 },
       ],
     }).compile();
     service = module.get(RecordingService);
@@ -64,6 +72,7 @@ describe('RecordingService', () => {
       width: 1920,
       height: 1080,
     });
+    jest.spyOn(service as any, 'buildDownloadMp4').mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -125,15 +134,46 @@ describe('RecordingService', () => {
         await new Promise((r) => setImmediate(r));
       }
 
+      expect(mockS3.uploadDirectory).toHaveBeenCalledWith(
+        expect.stringContaining(path.join('archive', 'orgA', 'bcast2')),
+        'archive/orgA/bcast2',
+      );
+      expect(spyRmSync).toHaveBeenCalledWith(
+        expect.stringContaining(path.join('archive', 'orgA', 'bcast2')),
+        { recursive: true, force: true },
+      );
       expect(mockPrisma.recording.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'r2' },
           data: expect.objectContaining({
             status: 'ready',
-            manifestPath: expect.stringContaining('master.m3u8'),
+            manifestPath: 'archive/orgA/bcast2/master.m3u8',
           }),
         }),
       );
+    });
+
+    it('marks Recording failed and keeps local broadcastDir when S3 upload fails', async () => {
+      spyExistsSync.mockReturnValue(true);
+      spyReaddirSync.mockImplementation((_p: any, opts?: any) => {
+        if (opts && (opts as any).withFileTypes) return [];
+        return ['seg-001.mp4'] as any;
+      });
+
+      mockPrisma.recording.create.mockResolvedValue({ id: 'r-fail', slotIndex: 1 });
+      mockPrisma.recording.update.mockResolvedValue({});
+      mockS3.uploadDirectory.mockRejectedValueOnce(new Error('S3 unreachable'));
+
+      await service.onStreamEnded('bcast-fail', 'orgFail');
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setImmediate(r));
+      }
+
+      expect(mockPrisma.recording.update).toHaveBeenCalledWith({
+        where: { id: 'r-fail' },
+        data: { status: 'failed' },
+      });
+      expect(spyRmSync).not.toHaveBeenCalled();
     });
 
     it('creates exactly one Recording with slotIndex=1 (composite)', async () => {
@@ -224,10 +264,10 @@ describe('RecordingService', () => {
     });
   });
 
-  describe('getRecordingDir', () => {
+  describe('getRecordingKeyPrefix', () => {
     it('uses compound unique key broadcastId_slotIndex', async () => {
       mockPrisma.recording.findUnique.mockResolvedValue(null);
-      await expect(service.getRecordingDir('bcast1', 1)).rejects.toThrow(NotFoundException);
+      await expect(service.getRecordingKeyPrefix('bcast1', 1)).rejects.toThrow(NotFoundException);
       expect(mockPrisma.recording.findUnique).toHaveBeenCalledWith({
         where: { broadcastId_slotIndex: { broadcastId: 'bcast1', slotIndex: 1 } },
       });
@@ -235,7 +275,7 @@ describe('RecordingService', () => {
 
     it('defaults slotIndex to 1 when not provided', async () => {
       mockPrisma.recording.findUnique.mockResolvedValue(null);
-      await expect(service.getRecordingDir('bcast1')).rejects.toThrow(NotFoundException);
+      await expect(service.getRecordingKeyPrefix('bcast1')).rejects.toThrow(NotFoundException);
       expect(mockPrisma.recording.findUnique).toHaveBeenCalledWith({
         where: { broadcastId_slotIndex: { broadcastId: 'bcast1', slotIndex: 1 } },
       });
@@ -245,26 +285,16 @@ describe('RecordingService', () => {
       mockPrisma.recording.findUnique.mockResolvedValue({
         id: '1', broadcastId: 'b1', slotIndex: 1, status: 'processing', manifestPath: null,
       });
-      await expect(service.getRecordingDir('b1', 1)).rejects.toThrow(NotFoundException);
+      await expect(service.getRecordingKeyPrefix('b1', 1)).rejects.toThrow(NotFoundException);
     });
 
-    it('throws NotFoundException when recording directory missing from disk', async () => {
+    it('returns S3 key prefix (posix dirname of manifestPath) when recording is ready', async () => {
       mockPrisma.recording.findUnique.mockResolvedValue({
         id: '1', broadcastId: 'b1', slotIndex: 1, status: 'ready',
-        manifestPath: '/recordings/archive/org/b1/master.m3u8',
+        manifestPath: 'archive/org/b1/master.m3u8',
       });
-      spyExistsSync.mockReturnValue(false);
-      await expect(service.getRecordingDir('b1', 1)).rejects.toThrow(NotFoundException);
-    });
-
-    it('returns broadcast directory when recording is ready and dir exists', async () => {
-      mockPrisma.recording.findUnique.mockResolvedValue({
-        id: '1', broadcastId: 'b1', slotIndex: 1, status: 'ready',
-        manifestPath: '/recordings/archive/org/b1/master.m3u8',
-      });
-      spyExistsSync.mockReturnValue(true);
-      const dir = await service.getRecordingDir('b1', 1);
-      expect(dir).toBe('/recordings/archive/org/b1');
+      const prefix = await service.getRecordingKeyPrefix('b1', 1);
+      expect(prefix).toBe('archive/org/b1');
     });
   });
 
@@ -280,17 +310,14 @@ describe('RecordingService', () => {
       await expect(service.deleteRecordingByBroadcastId('none')).resolves.not.toThrow();
     });
 
-    it('calls rmSync for recordings with a manifestPath', async () => {
+    it('calls s3.deleteByPrefix for recordings with a manifestPath', async () => {
       mockPrisma.recording.findMany.mockResolvedValue([
-        { id: 'r1', manifestPath: '/recordings/archive/org/bcast1/master.m3u8' },
+        { id: 'r1', manifestPath: 'archive/org/bcast1/master.m3u8' },
         { id: 'r2', manifestPath: null },
       ]);
       await service.deleteRecordingByBroadcastId('bcast1');
-      expect(spyRmSync).toHaveBeenCalledWith(
-        '/recordings/archive/org/bcast1',
-        { recursive: true, force: true },
-      );
-      expect(spyRmSync).toHaveBeenCalledTimes(1);
+      expect(mockS3.deleteByPrefix).toHaveBeenCalledWith('archive/org/bcast1');
+      expect(mockS3.deleteByPrefix).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -1,22 +1,29 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { S3Service } from '../storage/s3.service';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
+import { randomBytes } from 'crypto';
 import { buildHlsVodPlaylist, buildMasterPlaylist, FmpSegment } from './hls-vod';
 
 const execFileAsync = promisify(execFile);
 const RECORDINGS_ROOT = '/recordings';
 const ARCHIVE_ROOT = '/recordings/archive';
 const FFPROBE_TIMEOUT_MS = 30_000;
+const FFMPEG_CONCAT_TIMEOUT_MS = 120_000;
 
 @Injectable()
 export class RecordingService {
   private readonly logger = new Logger(RecordingService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private s3: S3Service,
+  ) {}
 
   async onStreamEnded(
     broadcastId: string,
@@ -52,8 +59,10 @@ export class RecordingService {
   }
 
   /**
-   * Конвертация: перемещает fmp4-сегменты в архив, генерирует HLS-VOD manifest.
-   * Никаких FFmpeg-вызовов кроме ffprobe (только для чтения длительности).
+   * Конвертация: перемещает fmp4-сегменты в архив, генерирует HLS-VOD
+   * manifest + единый MP4 для скачивания, заливает готовый архив в S3.
+   * Финализация Recording (status='ready') происходит ТОЛЬКО после успешной
+   * заливки — иначе запись пометится «готовой», хотя объекта в S3 нет.
    */
   private async convertRecording(
     recordingId: string,
@@ -104,25 +113,35 @@ export class RecordingService {
       const masterPath = path.join(broadcastDir, 'master.m3u8');
       fs.writeFileSync(masterPath, masterPlaylist);
 
-      // Step 4: финализировать Recording.
-      // fileSize считаем только по slot-N/ — это «честный» расход данного Recording'а
-      // и избегаем гонок с другими slot-job'ами, пишущими в общий broadcastDir.
+      // Step 4: собрать единый скачиваемый MP4 (один раз, пока сегменты локальные).
+      await this.buildDownloadMp4(slotDir, broadcastDir);
+
+      // fileSize считаем только по slot-N/ (до заливки/удаления) — «честный»
+      // расход данного Recording'а, не всего broadcastDir.
       const totalSize = this.getDirSize(slotDir);
+
+      // Step 5: залить весь broadcastDir (master.m3u8 + slot-N/ + download.mp4) в S3.
+      const keyPrefix = `archive/${mediamtxPath}/${broadcastId}`;
+      await this.s3.uploadDirectory(broadcastDir, keyPrefix);
+
+      // Step 6: заливка успешна — чистим локальный scratch, финализируем Recording.
+      fs.rmSync(broadcastDir, { recursive: true, force: true });
+
       await this.prisma.recording.update({
         where: { id: recordingId },
         data: {
           status: 'ready',
-          manifestPath: masterPath,
+          manifestPath: `${keyPrefix}/master.m3u8`,
           fileSize: totalSize,
           duration: Math.round(totalDuration),
         },
       });
 
-      this.logger.log(`Recording ${recordingId} ready (HLS-VOD): ${broadcastDir}`);
+      this.logger.log(`Recording ${recordingId} ready (S3): ${keyPrefix}`);
     } catch (err: any) {
-      this.logger.error(`HLS-VOD conversion failed for ${recordingId}: ${err.message}`);
-      // Чистим только свою slot-папку — другие slot'ы того же Broadcast'а могли успешно конвертнуться.
-      try { fs.rmSync(slotDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      this.logger.error(`Conversion/upload failed for ${recordingId}: ${err.message}`);
+      // Локальный broadcastDir НЕ удаляем при ошибке (ни конверсии, ни заливки) —
+      // оставляем retryFailed (крон 03:30) возможность пересобрать и перезалить заново.
       await this.prisma.recording.update({
         where: { id: recordingId },
         data: { status: 'failed' },
@@ -146,6 +165,37 @@ export class RecordingService {
     };
   }
 
+  /**
+   * Собирает единый скачиваемый MP4 один раз, сразу после эфира — вместо
+   * прежней ленивой сборки на каждый запрос скачивания. Складывается в корень
+   * broadcastDir рядом с master.m3u8, заливается в S3 вместе с HLS-VOD.
+   */
+  private async buildDownloadMp4(slotDir: string, broadcastDir: string): Promise<void> {
+    const segments = fs.readdirSync(slotDir)
+      .filter((f: string) => f.startsWith('seg-') && f.endsWith('.mp4'))
+      .sort();
+    if (segments.length === 0) return;
+
+    const listFile = path.join(os.tmpdir(), `_archive_${randomBytes(8).toString('hex')}.txt`);
+    const listContent = segments
+      .map((f) => `file '${path.join(slotDir, f).replace(/'/g, "'\\''")}'`)
+      .join('\n');
+    fs.writeFileSync(listFile, listContent);
+
+    const outputPath = path.join(broadcastDir, 'download.mp4');
+    try {
+      await execFileAsync('ffmpeg', [
+        '-f', 'concat', '-safe', '0',
+        '-i', listFile,
+        '-c', 'copy',
+        '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+        '-y', outputPath,
+      ], { timeout: FFMPEG_CONCAT_TIMEOUT_MS });
+    } finally {
+      fs.unlink(listFile, () => { /* ignore */ });
+    }
+  }
+
   private getDirSize(dirPath: string): number {
     let total = 0;
     if (!fs.existsSync(dirPath)) return 0;
@@ -159,33 +209,29 @@ export class RecordingService {
   }
 
   /**
-   * Возвращает корневую директорию broadcast'а (где лежит master.m3u8).
-   * Используется RecordingController.serveHls и downloadRecording.
+   * Возвращает S3 key-префикс broadcast'а (где лежит master.m3u8 и download.mp4).
+   * Используется RecordingController для генерации presigned-ссылок.
    *
-   * Для НОВЫХ recordings (Step 2+): broadcastDir содержит master.m3u8 и slot-N/index.m3u8.
-   * Для СТАРЫХ recordings (pre Step 2): broadcastDir содержит master.m3u8 + hd/index.m3u8 + lq/index.m3u8.
-   * Оба формата играются через тот же serveHls (статика по recording-dir).
+   * `manifestPath` теперь хранит S3-ключ (напр. `archive/org/stream/b1/master.m3u8`),
+   * не локальный путь — используем path.posix.dirname (S3-ключи всегда через `/`,
+   * независимо от ОС, на которой запущен сервис).
    */
-  async getRecordingDir(broadcastId: string, slotIndex = 1): Promise<string> {
+  async getRecordingKeyPrefix(broadcastId: string, slotIndex = 1): Promise<string> {
     const recording = await this.prisma.recording.findUnique({
       where: { broadcastId_slotIndex: { broadcastId, slotIndex } },
     });
     if (!recording || recording.status !== 'ready' || !recording.manifestPath) {
       throw new NotFoundException('Recording not found or not ready');
     }
-    const dir = path.dirname(recording.manifestPath);
-    if (!fs.existsSync(dir)) {
-      throw new NotFoundException('Recording directory missing from disk');
-    }
-    return dir;
+    return path.posix.dirname(recording.manifestPath);
   }
 
   async deleteRecordingByBroadcastId(broadcastId: string): Promise<void> {
     const recordings = await this.prisma.recording.findMany({ where: { broadcastId } });
     for (const rec of recordings) {
       if (rec.manifestPath) {
-        const dir = path.dirname(rec.manifestPath);
-        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+        const keyPrefix = path.posix.dirname(rec.manifestPath);
+        await this.s3.deleteByPrefix(keyPrefix);
       }
     }
   }
@@ -196,13 +242,14 @@ export class RecordingService {
       where: { expiresAt: { lt: new Date() } },
     });
 
-    // Group by directory to avoid double-rm same directory (e.g. broadcastDir has multiple slots)
-    const dirs = new Set<string>();
+    // Group by key prefix to avoid double-deleting the same prefix (e.g.
+    // broadcastDir with multiple slots sharing one master.m3u8 directory).
+    const prefixes = new Set<string>();
     for (const rec of expired) {
-      if (rec.manifestPath) dirs.add(path.dirname(rec.manifestPath));
+      if (rec.manifestPath) prefixes.add(path.posix.dirname(rec.manifestPath));
     }
-    for (const dir of dirs) {
-      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    for (const prefix of prefixes) {
+      await this.s3.deleteByPrefix(prefix);
     }
     for (const rec of expired) {
       await this.prisma.recording.delete({ where: { id: rec.id } });

@@ -2,16 +2,6 @@ import { RecordingController } from './recording.controller';
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import * as childProcess from 'child_process';
-
-jest.mock('child_process', () => {
-  const actual = jest.requireActual<typeof import('child_process')>('child_process');
-  return {
-    ...actual,
-    default: actual,
-    spawn: jest.fn(),
-  };
-});
 
 const mockPrisma = {
   broadcast: { findFirst: jest.fn() },
@@ -20,7 +10,10 @@ const mockPrisma = {
 };
 
 const mockRecordingService = {
-  getRecordingDir: jest.fn(),
+  getRecordingKeyPrefix: jest.fn(),
+};
+const mockS3 = {
+  getPresignedUrl: jest.fn().mockResolvedValue('https://s3.example.com/signed-url'),
 };
 
 function makeRes() {
@@ -39,6 +32,7 @@ function makeRes() {
     return this;
   });
   res.setHeader = jest.fn();
+  res.redirect = jest.fn();
   res.end = jest.fn();
   return res;
 }
@@ -48,8 +42,6 @@ describe('RecordingController', () => {
   let spyExistsSync: jest.SpyInstance;
   let spyStatSync: jest.SpyInstance;
   let spyCreateReadStream: jest.SpyInstance;
-  let spyReaddirSync: jest.SpyInstance;
-  let spyWriteFileSync: jest.SpyInstance;
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -61,11 +53,10 @@ describe('RecordingController', () => {
       stream.pipe = jest.fn();
       return stream;
     });
-    spyReaddirSync = jest.spyOn(fs, 'readdirSync').mockReturnValue([] as any);
-    spyWriteFileSync = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
 
     controller = new RecordingController(
       mockRecordingService as any,
+      mockS3 as any,
       mockPrisma as any,
     );
   });
@@ -129,11 +120,10 @@ describe('RecordingController', () => {
     });
   });
 
-  describe('serveHlsNamed (Step 4: B2 — archive HLS for named Stream)', () => {
+  describe('serveHlsNamed — archive HLS presigned redirect', () => {
     it('looks up broadcast with named streamSlug filter', async () => {
-      const recordingDir = path.resolve('/recordings/archive/org/b1');
       mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
-      mockRecordingService.getRecordingDir.mockResolvedValue(recordingDir);
+      mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/foo/b1');
 
       const res = makeRes();
       await controller.serveHlsNamed('org1', 'foo', 'b1', 'master.m3u8', res);
@@ -153,39 +143,67 @@ describe('RecordingController', () => {
       await controller.serveHlsNamed('org1', 'foo', 'b1', 'master.m3u8', res);
 
       expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.redirect).not.toHaveBeenCalled();
+    });
+
+    it('redirects to a presigned S3 URL built from key prefix + relative path', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/foo/b1');
+      const res = makeRes();
+
+      await controller.serveHlsNamed('org1', 'foo', 'b1', 'master.m3u8', res);
+
+      expect(mockS3.getPresignedUrl).toHaveBeenCalledWith('archive/org1/foo/b1/master.m3u8');
+      expect(res.redirect).toHaveBeenCalledWith(302, 'https://s3.example.com/signed-url');
+    });
+
+    it('rejects disallowed file extensions with 403', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      const res = makeRes();
+
+      await controller.serveHlsNamed('org1', 'foo', 'b1', 'evil.exe', res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.redirect).not.toHaveBeenCalled();
+    });
+
+    it('rejects paths containing ".." with 403', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      const res = makeRes();
+
+      await controller.serveHlsNamed('org1', 'foo', 'b1', '../../etc/passwd.mp4', res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.redirect).not.toHaveBeenCalled();
     });
   });
 
-  describe('downloadRecording (fix #2: ffmpeg killed on res close)', () => {
-    it('kills ffmpeg with SIGKILL when response is closed by the client', async () => {
-      // Set up a fake ffmpeg child process
-      const ff: any = new EventEmitter();
-      ff.stdout = new EventEmitter();
-      (ff.stdout as any).pipe = jest.fn();
-      ff.stderr = new EventEmitter();
-      ff.killed = false;
-      ff.kill = jest.fn((_sig?: string) => { ff.killed = true; return true; });
-
-      (childProcess.spawn as jest.Mock).mockReturnValue(ff);
-
-      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1', title: 'My Stream' });
-      mockRecordingService.getRecordingDir.mockResolvedValue('/recordings/archive/org/b1');
-      // slotDir exists and contains segments
-      spyExistsSync.mockImplementation((p: any) => {
-        const s = String(p);
-        return s.endsWith('slot-1') || s.endsWith('original.mp4') === false;
-      });
-      spyReaddirSync.mockReturnValue(['seg-0001.mp4', 'seg-0002.mp4'] as any);
-
+  describe('downloadRecording — presigned redirect to pre-built MP4', () => {
+    it('returns 404 when broadcast does not exist for this org', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue(null);
       const res = makeRes();
-      const user = { sub: 'u1', role: 'org_admin', orgId: 'o1' } as any;
 
+      const user = { sub: 'u1', role: 'org_admin', orgId: 'o1' } as any;
       await controller.downloadRecording(user, 'b1', res);
 
-      // Now simulate client disconnect — emit 'close' on the response
-      res.emit('close');
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
 
-      expect(ff.kill).toHaveBeenCalledWith('SIGKILL');
+    it('redirects to a presigned URL for download.mp4 with a content-disposition filename', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1', title: 'My Stream' });
+      mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org/b1');
+      const res = makeRes();
+
+      const user = { sub: 'u1', role: 'org_admin', orgId: 'o1' } as any;
+      await controller.downloadRecording(user, 'b1', res);
+
+      expect(mockPrisma.broadcast.findFirst).toHaveBeenCalledWith({
+        where: { id: 'b1', stream: { orgId: 'o1' } },
+      });
+      expect(mockS3.getPresignedUrl).toHaveBeenCalledWith('archive/org/b1/download.mp4', {
+        responseContentDisposition: expect.stringContaining('attachment'),
+      });
+      expect(res.redirect).toHaveBeenCalledWith(302, 'https://s3.example.com/signed-url');
     });
   });
 });
