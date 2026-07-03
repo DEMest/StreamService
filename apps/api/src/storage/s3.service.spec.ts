@@ -2,15 +2,28 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   S3Client,
   PutObjectCommand,
+  GetObjectCommand,
   ListObjectsV2Command,
   DeleteObjectsCommand,
 } from '@aws-sdk/client-s3';
 import { S3Service } from './s3.service';
 import * as fs from 'fs';
+import { Readable } from 'stream';
 
 jest.mock('@aws-sdk/s3-request-presigner', () => ({
   getSignedUrl: jest.fn().mockResolvedValue('https://s3.example.com/signed-url'),
 }));
+
+/**
+ * lib-storage `Upload` с маленьким потоком (< partSize) отправляет одиночный
+ * PutObjectCommand через тот же замоканный S3Client — существующие assertions
+ * по commandCalls(PutObjectCommand) остаются валидными.
+ */
+function mockReadStream(): jest.SpyInstance {
+  return jest.spyOn(fs, 'createReadStream').mockImplementation(
+    () => Readable.from(Buffer.from('fake-bytes')) as any,
+  );
+}
 
 describe('S3Service', () => {
   const s3Mock = mockClient(S3Client);
@@ -19,7 +32,8 @@ describe('S3Service', () => {
   beforeEach(() => {
     s3Mock.reset();
     process.env.S3_BUCKET = 'test-bucket';
-    process.env.S3_ENDPOINT = 'http://localhost:9000';
+    process.env.S3_ENDPOINT = 'http://minio:9000';
+    process.env.S3_PUBLIC_ENDPOINT = 'http://localhost:9000';
     process.env.S3_REGION = 'us-east-1';
     process.env.S3_ACCESS_KEY_ID = 'test-key';
     process.env.S3_SECRET_ACCESS_KEY = 'test-secret';
@@ -41,7 +55,7 @@ describe('S3Service', () => {
         }
         return [] as any;
       });
-      jest.spyOn(fs, 'readFileSync').mockReturnValue(Buffer.from('fake-bytes'));
+      mockReadStream();
 
       await service.uploadDirectory('/scratch/broadcast1', 'archive/org/stream/broadcast1');
 
@@ -60,7 +74,7 @@ describe('S3Service', () => {
       jest.spyOn(fs, 'readdirSync').mockReturnValue([
         { name: 'master.m3u8', isDirectory: () => false },
       ] as any);
-      jest.spyOn(fs, 'readFileSync').mockReturnValue(Buffer.from('playlist'));
+      mockReadStream();
 
       await service.uploadDirectory('/scratch/b1', 'archive/b1');
 
@@ -75,7 +89,7 @@ describe('S3Service', () => {
       jest.spyOn(fs, 'readdirSync').mockReturnValue([
         { name: 'download.mp4', isDirectory: () => false },
       ] as any);
-      jest.spyOn(fs, 'readFileSync').mockReturnValue(Buffer.from('video'));
+      mockReadStream();
 
       await service.uploadDirectory('/scratch/b1', 'archive/b1');
 
@@ -84,6 +98,38 @@ describe('S3Service', () => {
       expect(call.args[0].input.CacheControl).toBe('public, max-age=31536000, immutable');
 
       jest.restoreAllMocks();
+    });
+
+    it('streams file bodies (createReadStream), never buffers whole files via readFileSync', async () => {
+      // Сегменты MediaMTX (3h) могут превышать 2 GiB Buffer-лимит Node —
+      // readFileSync здесь был бы бомбой замедленного действия.
+      jest.spyOn(fs, 'readdirSync').mockReturnValue([
+        { name: 'download.mp4', isDirectory: () => false },
+      ] as any);
+      const streamSpy = mockReadStream();
+      const readFileSpy = jest.spyOn(fs, 'readFileSync');
+
+      await service.uploadDirectory('/scratch/b1', 'archive/b1');
+
+      expect(streamSpy).toHaveBeenCalled();
+      expect(readFileSpy).not.toHaveBeenCalled();
+
+      jest.restoreAllMocks();
+    });
+  });
+
+  describe('getObjectText', () => {
+    it('returns the object body as string (playlist proxying)', async () => {
+      s3Mock.on(GetObjectCommand).resolves({
+        Body: { transformToString: async () => '#EXTM3U\nslot-1/index.m3u8\n' },
+      } as any);
+
+      const text = await service.getObjectText('archive/b1/master.m3u8');
+
+      expect(text).toContain('#EXTM3U');
+      const call = s3Mock.commandCalls(GetObjectCommand)[0];
+      expect(call.args[0].input.Key).toBe('archive/b1/master.m3u8');
+      expect(call.args[0].input.Bucket).toBe('test-bucket');
     });
   });
 

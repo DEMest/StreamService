@@ -32,10 +32,13 @@ services:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      # НЕ curl: свежие образы minio/minio его не содержат — healthcheck с curl
+      # никогда не проходит, и api (depends_on: service_healthy) блокирует весь стек.
+      # `mc ready local` — рекомендованный самим MinIO способ, mc есть в образе.
+      test: ["CMD", "mc", "ready", "local"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     restart: unless-stopped
 
   # ─── MediaMTX ───
@@ -86,6 +89,9 @@ services:
       # не сохранит cookie и /v1/org/me вернёт 401.
       COOKIE_SECURE: ${COOKIE_SECURE:-}
       S3_ENDPOINT: ${S3_ENDPOINT:-}
+      # Endpoint для presigned-ссылок: должен быть достижим ИЗ БРАУЗЕРА зрителя
+      # (S3_ENDPOINT — внутренний docker-адрес, браузер его не резолвит).
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-}
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_BUCKET: ${S3_BUCKET:-streamservice-archive}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}

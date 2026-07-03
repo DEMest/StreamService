@@ -120,24 +120,9 @@ export class RecordingService {
       // расход данного Recording'а, не всего broadcastDir.
       const totalSize = this.getDirSize(slotDir);
 
-      // Step 5: залить весь broadcastDir (master.m3u8 + slot-N/ + download.mp4) в S3.
+      // Step 5-6: заливка в S3 + финализация (общий код с retry-путём).
       const keyPrefix = `archive/${mediamtxPath}/${broadcastId}`;
-      await this.s3.uploadDirectory(broadcastDir, keyPrefix);
-
-      // Step 6: заливка успешна — чистим локальный scratch, финализируем Recording.
-      fs.rmSync(broadcastDir, { recursive: true, force: true });
-
-      await this.prisma.recording.update({
-        where: { id: recordingId },
-        data: {
-          status: 'ready',
-          manifestPath: `${keyPrefix}/master.m3u8`,
-          fileSize: totalSize,
-          duration: Math.round(totalDuration),
-        },
-      });
-
-      this.logger.log(`Recording ${recordingId} ready (S3): ${keyPrefix}`);
+      await this.uploadAndFinalize(recordingId, broadcastDir, keyPrefix, totalSize, Math.round(totalDuration));
     } catch (err: any) {
       this.logger.error(`Conversion/upload failed for ${recordingId}: ${err.message}`);
       // Локальный broadcastDir НЕ удаляем при ошибке (ни конверсии, ни заливки) —
@@ -146,6 +131,46 @@ export class RecordingService {
         where: { id: recordingId },
         data: { status: 'failed' },
       });
+    }
+  }
+
+  /**
+   * Заливка готового broadcastDir в S3 + финализация Recording (status='ready',
+   * manifestPath=S3-ключ, локальный scratch удаляется ТОЛЬКО после успешной
+   * заливки). Вынесено из convertRecording, чтобы retryFailed мог возобновить
+   * упавшую ЗАЛИВКУ без повторной конверсии — после первой попытки сегменты
+   * уже перемещены из live/ в archive-scratch, и полный пайплайн их не найдёт.
+   */
+  private async uploadAndFinalize(
+    recordingId: string,
+    broadcastDir: string,
+    keyPrefix: string,
+    fileSize: number,
+    duration: number,
+  ): Promise<void> {
+    await this.s3.uploadDirectory(broadcastDir, keyPrefix);
+    fs.rmSync(broadcastDir, { recursive: true, force: true });
+    await this.prisma.recording.update({
+      where: { id: recordingId },
+      data: {
+        status: 'ready',
+        manifestPath: `${keyPrefix}/master.m3u8`,
+        fileSize,
+        duration,
+      },
+    });
+    this.logger.log(`Recording ${recordingId} ready (S3): ${keyPrefix}`);
+  }
+
+  /** Суммарная длительность из #EXTINF-строк нашего же slot-плейлиста (без повторного ffprobe). */
+  private parsePlaylistDuration(indexPath: string): number {
+    try {
+      const text = fs.readFileSync(indexPath, 'utf8');
+      let total = 0;
+      for (const m of text.matchAll(/#EXTINF:([\d.]+)/g)) total += parseFloat(m[1]);
+      return Math.round(total);
+    } catch {
+      return 0;
     }
   }
 
@@ -268,7 +293,35 @@ export class RecordingService {
       if (!rec.broadcast.stream) continue;
       const { stream } = rec.broadcast;
       const basePath = stream.slug === '' ? stream.org.slug : `${stream.org.slug}/${stream.slug}`;
-      // Segments always lie in /recordings/live/<basePath>/ (composite only).
+
+      // Возобновление упавшей ЗАЛИВКИ: если конверсия первой попытки уже прошла
+      // (master.m3u8 собран, сегменты перемещены из live/ в archive-scratch),
+      // повторять нужно только upload+finalize — в live/ уже пусто, и падение
+      // в старую ветку ниже переместило бы сегменты СЛЕДУЮЩЕЙ трансляции этого
+      // стрима в чужой broadcastDir (cross-contamination).
+      const broadcastDir = path.join(ARCHIVE_ROOT, basePath, rec.broadcastId);
+      const slotDir = path.join(broadcastDir, `slot-${rec.slotIndex}`);
+      if (fs.existsSync(path.join(broadcastDir, 'master.m3u8'))) {
+        await this.prisma.recording.update({
+          where: { id: rec.id },
+          data: { status: 'processing' },
+        });
+        const keyPrefix = `archive/${basePath}/${rec.broadcastId}`;
+        const fileSize = this.getDirSize(slotDir);
+        const duration = this.parsePlaylistDuration(path.join(slotDir, 'index.m3u8'));
+        this.uploadAndFinalize(rec.id, broadcastDir, keyPrefix, fileSize, duration).catch(async (err) => {
+          this.logger.error(`Retry upload failed for ${rec.id}: ${err.message}`);
+          // Возвращаем в 'failed', иначе запись навсегда зависнет в 'processing'
+          // и следующий прогон крона её не увидит.
+          await this.prisma.recording.update({
+            where: { id: rec.id },
+            data: { status: 'failed' },
+          }).catch(() => { /* ignore */ });
+        });
+        continue;
+      }
+
+      // Конверсия первой попытки не дошла до конца — полный пайплайн из live/.
       const segmentsDir = path.join(RECORDINGS_ROOT, 'live', basePath);
 
       if (!fs.existsSync(segmentsDir)) continue;

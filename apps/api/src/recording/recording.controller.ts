@@ -40,14 +40,19 @@ export class RecordingController {
   }
 
   /**
-   * Реализация archive HLS-сервинга — presigned-редирект в S3, БЕЗ проксирования
-   * байтов через сервер (иначе трафик архива удваивал бы нагрузку на канал API
-   * при одновременном просмотре несколькими зрителями).
+   * Реализация archive HLS-сервинга поверх S3, гибридная:
    *
-   * S3-ключ вычисляется через getRecordingKeyPrefix(broadcastId), который читает
-   * broadcast.streamId и возвращает S3-префикс сам. streamSlug используется
-   * только для запроса к БД (фильтр по nested Stream, чтобы 404-ить чужие/
-   * несуществующие пути) — не участвует в вычислении S3-ключа.
+   *  - `.m3u8`-плейлисты (крошечный текст) ПРОКСИРУЮТСЯ через API. Это не
+   *    оптимизационный компромисс, а условие работоспособности: hls.js
+   *    резолвит относительные URI плейлиста против ФИНАЛЬНОГО URL ответа
+   *    (`xhr.responseURL`). Если бы плейлист отдавался 302-редиректом на S3,
+   *    все `seg-*.mp4` резолвились бы в S3-адрес БЕЗ подписи → 403 на каждый
+   *    сегмент приватного бакета. Прокси же оставляет базой API-URL, и каждый
+   *    сегмент приходит сюда за собственным свежеподписанным редиректом.
+   *  - сегменты/MP4 (тяжёлые байты) — presigned 302 в S3, мимо канала API.
+   *
+   * S3-ключ вычисляется через getRecordingKeyPrefix(broadcastId); streamSlug
+   * используется только для tenancy-фильтра в БД (404 на чужие пути).
    */
   private async serveArchiveHlsImpl(
     orgSlug: string,
@@ -86,6 +91,19 @@ export class RecordingController {
 
     const keyPrefix = await this.recording.getRecordingKeyPrefix(broadcastId);
     const key = `${keyPrefix}/${relativePath}`;
+
+    if (relativePath.endsWith('.m3u8')) {
+      try {
+        const body = await this.s3.getObjectText(key);
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.send(body);
+      } catch {
+        res.status(404).json({ message: 'Playlist not found' });
+      }
+      return;
+    }
+
     const url = await this.s3.getPresignedUrl(key);
     res.redirect(302, url);
   }
