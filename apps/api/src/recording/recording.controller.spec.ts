@@ -14,6 +14,7 @@ const mockRecordingService = {
 };
 const mockS3 = {
   getPresignedUrl: jest.fn().mockResolvedValue('https://s3.example.com/signed-url'),
+  getObjectText: jest.fn().mockResolvedValue('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=5000000\nslot-1/index.m3u8\n'),
 };
 
 function makeRes() {
@@ -33,6 +34,7 @@ function makeRes() {
   });
   res.setHeader = jest.fn();
   res.redirect = jest.fn();
+  res.send = jest.fn();
   res.end = jest.fn();
   return res;
 }
@@ -120,7 +122,7 @@ describe('RecordingController', () => {
     });
   });
 
-  describe('serveHlsNamed — archive HLS presigned redirect', () => {
+  describe('serveHlsNamed — archive HLS (playlist proxy + segment presigned redirect)', () => {
     it('looks up broadcast with named streamSlug filter', async () => {
       mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
       mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/foo/b1');
@@ -146,15 +148,45 @@ describe('RecordingController', () => {
       expect(res.redirect).not.toHaveBeenCalled();
     });
 
-    it('redirects to a presigned S3 URL built from key prefix + relative path', async () => {
+    it('PROXIES .m3u8 playlists through the API (no redirect) so relative URIs resolve against the API base', async () => {
+      // Критично для играбельности: hls.js резолвит относительные URI против
+      // финального URL ответа. Редирект плейлиста на S3 сломал бы подпись
+      // у всех вложенных сегментов (см. serveArchiveHlsImpl JSDoc).
       mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
       mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/foo/b1');
       const res = makeRes();
 
       await controller.serveHlsNamed('org1', 'foo', 'b1', 'master.m3u8', res);
 
-      expect(mockS3.getPresignedUrl).toHaveBeenCalledWith('archive/org1/foo/b1/master.m3u8');
+      expect(mockS3.getObjectText).toHaveBeenCalledWith('archive/org1/foo/b1/master.m3u8');
+      expect(res.send).toHaveBeenCalledWith(expect.stringContaining('#EXTM3U'));
+      expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/vnd.apple.mpegurl');
+      expect(res.redirect).not.toHaveBeenCalled();
+      expect(mockS3.getPresignedUrl).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the playlist object is missing in S3', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/foo/b1');
+      mockS3.getObjectText.mockRejectedValueOnce(new Error('NoSuchKey'));
+      const res = makeRes();
+
+      await controller.serveHlsNamed('org1', 'foo', 'b1', 'slot-1/index.m3u8', res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.redirect).not.toHaveBeenCalled();
+    });
+
+    it('redirects SEGMENTS (.mp4) to a per-object presigned S3 URL', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/foo/b1');
+      const res = makeRes();
+
+      await controller.serveHlsNamed('org1', 'foo', 'b1', 'slot-1/seg-0001.mp4', res);
+
+      expect(mockS3.getPresignedUrl).toHaveBeenCalledWith('archive/org1/foo/b1/slot-1/seg-0001.mp4');
       expect(res.redirect).toHaveBeenCalledWith(302, 'https://s3.example.com/signed-url');
+      expect(mockS3.getObjectText).not.toHaveBeenCalled();
     });
 
     it('rejects disallowed file extensions with 403', async () => {

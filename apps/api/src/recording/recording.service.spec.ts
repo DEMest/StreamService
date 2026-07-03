@@ -322,6 +322,14 @@ describe('RecordingService', () => {
   });
 
   describe('retryFailed', () => {
+    const failedRow = {
+      id: 'rec-resume',
+      broadcastId: 'bcast-resume',
+      slotIndex: 1,
+      status: 'failed',
+      broadcast: { stream: { slug: 'court-a', org: { slug: 'org1' } } },
+    };
+
     it('skips recordings where broadcast.stream is null', async () => {
       mockPrisma.recording.findMany.mockResolvedValue([
         {
@@ -334,6 +342,60 @@ describe('RecordingService', () => {
       ]);
       await expect(service.retryFailed()).resolves.not.toThrow();
       expect(mockPrisma.recording.update).not.toHaveBeenCalled();
+    });
+
+    it('resumes a failed UPLOAD from the archive scratch dir (segments no longer in live/)', async () => {
+      // Регрессия на находку karen: после первой попытки convertRecording уже
+      // перенёс сегменты из live/ в archive-scratch. Если заливка упала, старый
+      // retry смотрел только в live/ (пусто) и молча пропускал запись навсегда.
+      mockPrisma.recording.findMany.mockResolvedValue([failedRow]);
+      mockPrisma.recording.update.mockResolvedValue({});
+      // master.m3u8 существует в scratch → resume-ветка; live/ не проверяется.
+      spyExistsSync.mockImplementation((p: any) => String(p).endsWith('master.m3u8'));
+      jest.spyOn(fs, 'readFileSync').mockReturnValue(
+        '#EXTM3U\n#EXTINF:10.5,\nseg-0001.mp4\n#EXTINF:9.5,\nseg-0002.mp4\n' as any,
+      );
+
+      await service.retryFailed();
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setImmediate(r));
+      }
+
+      expect(mockS3.uploadDirectory).toHaveBeenCalledWith(
+        expect.stringContaining(path.join('archive', 'org1/court-a', 'bcast-resume')),
+        'archive/org1/court-a/bcast-resume',
+      );
+      expect(mockPrisma.recording.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'rec-resume' },
+          data: expect.objectContaining({
+            status: 'ready',
+            manifestPath: 'archive/org1/court-a/bcast-resume/master.m3u8',
+            duration: 20,
+          }),
+        }),
+      );
+      // Полный пайплайн (перенос сегментов из live/) НЕ запускался.
+      expect(spyRenameSync).not.toHaveBeenCalled();
+    });
+
+    it('marks the recording failed again when the resumed upload also fails', async () => {
+      mockPrisma.recording.findMany.mockResolvedValue([failedRow]);
+      mockPrisma.recording.update.mockResolvedValue({});
+      spyExistsSync.mockImplementation((p: any) => String(p).endsWith('master.m3u8'));
+      mockS3.uploadDirectory.mockRejectedValueOnce(new Error('S3 still unreachable'));
+
+      await service.retryFailed();
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setImmediate(r));
+      }
+
+      // Без возврата в 'failed' запись зависла бы в 'processing' навсегда —
+      // следующий прогон крона её не увидел бы.
+      expect(mockPrisma.recording.update).toHaveBeenCalledWith({
+        where: { id: 'rec-resume' },
+        data: { status: 'failed' },
+      });
     });
   });
 

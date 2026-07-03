@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   S3Client,
-  PutObjectCommand,
   GetObjectCommand,
   ListObjectsV2Command,
   DeleteObjectsCommand,
 } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -29,40 +29,65 @@ function metaFor(relPath: string): UploadMeta {
  * Тонкая DI-обёртка над S3-совместимым объектным хранилищем (AWS SDK v3).
  * Работает с любым провайдером, реализующим S3 API — endpoint/ключи через env.
  * Используется ТОЛЬКО для готового архива трансляций; live-эфир хранится локально.
+ *
+ * Два клиента:
+ *  - `client` (S3_ENDPOINT) — серверные операции (upload/list/delete/get) по
+ *    внутренней сети (в docker-стеке это `http://minio:9000`).
+ *  - `presignClient` (S3_PUBLIC_ENDPOINT, по умолчанию = S3_ENDPOINT) — ТОЛЬКО
+ *    для генерации presigned-ссылок: подпись SigV4 включает Host, поэтому URL
+ *    должен строиться против адреса, до которого дотянется БРАУЗЕР (локально —
+ *    `http://localhost:9000`, в проде — публичный endpoint провайдера).
  */
 @Injectable()
 export class S3Service {
   private readonly logger = new Logger(S3Service.name);
   private readonly client: S3Client;
+  private readonly presignClient: S3Client;
   private readonly bucket: string;
 
   constructor() {
     this.bucket = process.env.S3_BUCKET ?? '';
-    this.client = new S3Client({
-      endpoint: process.env.S3_ENDPOINT || undefined,
+    const common = {
       region: process.env.S3_REGION || 'us-east-1',
       forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true',
       credentials: {
         accessKeyId: process.env.S3_ACCESS_KEY_ID ?? '',
         secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? '',
       },
+    };
+    this.client = new S3Client({
+      ...common,
+      endpoint: process.env.S3_ENDPOINT || undefined,
+    });
+    this.presignClient = new S3Client({
+      ...common,
+      endpoint: process.env.S3_PUBLIC_ENDPOINT || process.env.S3_ENDPOINT || undefined,
     });
   }
 
-  /** Рекурсивно заливает все файлы localDir под keyPrefix, сохраняя относительную структуру. */
+  /**
+   * Рекурсивно заливает все файлы localDir под keyPrefix, сохраняя относительную
+   * структуру. Потоковая multipart-заливка (`@aws-sdk/lib-storage`) — сегменты
+   * MediaMTX режутся по 3 часа и на высоком битрейте превышают и лимит Buffer
+   * (2 GiB), и потолок одиночного PutObject (5 GB); readFileSync здесь нельзя.
+   */
   async uploadDirectory(localDir: string, keyPrefix: string): Promise<void> {
     const relFiles = this.listFilesRecursive(localDir, localDir);
     for (const relPath of relFiles) {
       const fullPath = path.join(localDir, relPath);
       const key = `${keyPrefix}/${relPath.split(path.sep).join('/')}`;
       const meta = metaFor(relPath);
-      await this.client.send(new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
-        Body: fs.readFileSync(fullPath),
-        ContentType: meta.contentType,
-        CacheControl: meta.cacheControl,
-      }));
+      const upload = new Upload({
+        client: this.client,
+        params: {
+          Bucket: this.bucket,
+          Key: key,
+          Body: fs.createReadStream(fullPath),
+          ContentType: meta.contentType,
+          CacheControl: meta.cacheControl,
+        },
+      });
+      await upload.done();
     }
     this.logger.log(`Uploaded ${relFiles.length} file(s) to s3://${this.bucket}/${keyPrefix}`);
   }
@@ -87,7 +112,20 @@ export class S3Service {
   }
 
   /**
-   * Presigned GET-ссылка на объект (по умолчанию 5 минут жизни).
+   * Тело объекта как строка (для проксирования HLS-плейлистов через API —
+   * крошечный текст; сегменты, наоборот, отдаются presigned-редиректом).
+   */
+  async getObjectText(key: string): Promise<string> {
+    const res = await this.client.send(new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+    }));
+    return await res.Body!.transformToString();
+  }
+
+  /**
+   * Presigned GET-ссылка на объект (по умолчанию 5 минут жизни), построенная
+   * против ПУБЛИЧНОГО endpoint'а (см. presignClient в шапке класса).
    * `responseContentDisposition` — переопределяет Content-Disposition в ответе
    * S3 (используется для скачивания с человекочитаемым именем файла).
    */
@@ -100,7 +138,7 @@ export class S3Service {
       Key: key,
       ResponseContentDisposition: opts?.responseContentDisposition,
     });
-    return getSignedUrl(this.client, command, { expiresIn: opts?.expiresInSeconds ?? 300 });
+    return getSignedUrl(this.presignClient, command, { expiresIn: opts?.expiresInSeconds ?? 300 });
   }
 
   /** Листинг + пакетное удаление всех объектов под префиксом (аналог rm -rf для S3). */
