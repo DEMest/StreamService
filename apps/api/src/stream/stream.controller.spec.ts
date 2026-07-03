@@ -258,7 +258,7 @@ describe('StreamController', () => {
       });
       // findUnique (rotateKey → getStreamWithOrg) — основная загрузка.
       mockPrisma.stream.findUnique.mockResolvedValue({
-        id: 'st-1', orgId: 'org-1', slug: '',
+        id: 'st-1', orgId: 'org-1', slug: '', recordingEnabled: true,
         org: { slug: 'club' },
       });
       mockPrisma.stream.update.mockResolvedValue({
@@ -268,7 +268,7 @@ describe('StreamController', () => {
       const r = await controller.rotateKey(orgAdmin, 'st-1');
       expect(r.ingestKey).toBe('new-key');
       expect(mockMediamtx.replaceStreamPaths).toHaveBeenCalledWith(
-        'club', '', expect.any(String),
+        'club', '', expect.any(String), true,
       );
     });
 
@@ -380,6 +380,7 @@ describe('StreamController', () => {
       isPublic: true, previewKey: null, previewMode: 'multicam',
       previewImagePath: null, isLive: false, autoStartMode: 'public',
       currentBroadcastId: null, createdAt: new Date(),
+      recordingEnabled: true, recordingMode: 'auto',
       ...overrides,
     });
 
@@ -404,9 +405,9 @@ describe('StreamController', () => {
         }),
       }));
 
-      // MediaMTX путь зарегистрирован с тем же ingestKey что в БД.
+      // MediaMTX путь зарегистрирован с тем же ingestKey и recordingEnabled что в БД.
       expect(mockMediamtx.addStreamPaths).toHaveBeenCalledWith(
-        'club', 'cam-a', expect.any(String),
+        'club', 'cam-a', expect.any(String), true,
       );
     });
 

@@ -83,4 +83,12 @@ describe('AdminService', () => {
     expect(mockMediamtx.deleteStreamPaths).toHaveBeenCalledWith('club', '');
     expect(mockMediamtx.deleteStreamPaths).toHaveBeenCalledWith('club', 'tournament');
   });
+
+  it('restore (onModuleInit) передаёт recordingEnabled из БД в addStreamPaths', async () => {
+    mockPrisma.stream.findMany.mockResolvedValue([
+      { slug: 'a', ingestKey: 'k', recordingEnabled: false, org: { slug: 'club' } },
+    ]);
+    await service.onModuleInit();
+    expect(mockMediamtx.addStreamPaths).toHaveBeenCalledWith('club', 'a', 'k', false);
+  });
 });

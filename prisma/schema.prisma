@@ -65,6 +65,9 @@ model Broadcast {
   description String?
   startedAt   DateTime
   endedAt     DateTime?
+  // Склеиваемая пауза (manual-режим записи): стрим оборвался, но Broadcast
+  // не закрыт — следующий publish продолжит его. NULL = в эфире или закрыт.
+  pausedAt    DateTime?
   createdAt   DateTime    @default(now())
   recordings  Recording[]
 }

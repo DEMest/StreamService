@@ -25,6 +25,13 @@ const mockPrisma = {
     findMany: jest.fn(),
     delete: jest.fn(),
   },
+  broadcast: {
+    findMany: jest.fn(),
+    update: jest.fn(),
+  },
+  stream: {
+    update: jest.fn(),
+  },
 };
 
 const mockS3 = {
@@ -396,6 +403,52 @@ describe('RecordingService', () => {
         where: { id: 'rec-resume' },
         data: { status: 'failed' },
       });
+    });
+  });
+
+  describe('finalizeStaleGlue', () => {
+    it('финализирует просроченную паузу: endedAt=pausedAt, отвязка от Stream, onStreamEnded', async () => {
+      const pausedAt = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 часа назад
+      mockPrisma.broadcast.findMany.mockResolvedValue([{
+        id: 'b1', pausedAt,
+        stream: { id: 's1', slug: 'court-a', currentBroadcastId: 'b1', org: { slug: 'club' } },
+      }]);
+      mockPrisma.broadcast.update.mockResolvedValue({});
+      mockPrisma.stream.update.mockResolvedValue({});
+      const spyEnd = jest.spyOn(service, 'onStreamEnded').mockResolvedValue(undefined);
+
+      await service.finalizeStaleGlue();
+
+      expect(mockPrisma.broadcast.update).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { endedAt: pausedAt, pausedAt: null },
+      });
+      expect(mockPrisma.stream.update).toHaveBeenCalledWith({
+        where: { id: 's1' },
+        data: { currentBroadcastId: null },
+      });
+      expect(spyEnd).toHaveBeenCalledWith('b1', 'club/court-a');
+    });
+
+    it('запрос выбирает только просроченные паузы (endedAt=null, pausedAt < cutoff)', async () => {
+      mockPrisma.broadcast.findMany.mockResolvedValue([]);
+      await service.finalizeStaleGlue();
+      const where = mockPrisma.broadcast.findMany.mock.calls[0][0].where;
+      expect(where.endedAt).toBeNull();
+      expect(where.pausedAt).toEqual({ not: null, lt: expect.any(Date) });
+    });
+
+    it('чужой currentBroadcastId (Stream уже на другом Broadcast) — указатель не трогается', async () => {
+      mockPrisma.broadcast.findMany.mockResolvedValue([{
+        id: 'b-old', pausedAt: new Date(0),
+        stream: { id: 's1', slug: 'court-a', currentBroadcastId: 'b-new', org: { slug: 'club' } },
+      }]);
+      mockPrisma.broadcast.update.mockResolvedValue({});
+      jest.spyOn(service, 'onStreamEnded').mockResolvedValue(undefined);
+
+      await service.finalizeStaleGlue();
+
+      expect(mockPrisma.stream.update).not.toHaveBeenCalled();
     });
   });
 

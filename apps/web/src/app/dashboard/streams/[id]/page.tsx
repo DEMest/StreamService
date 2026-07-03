@@ -40,6 +40,7 @@ interface StreamDetail {
   ingestKeyCreatedAt?: string;
   recordingEnabled: boolean;
   recordingMode: RecordingMode;
+  currentBroadcastId: string | null;
 }
 
 interface OrgProfile {
@@ -267,6 +268,16 @@ export default function StreamDetailPage() {
               available={true}
             />
           </div>
+
+          {stream.recordingMode === 'manual' && stream.recordingEnabled && !stream.isLive && stream.currentBroadcastId && (
+            <div
+              className="flex items-center gap-1.5 mb-4 px-2.5 py-1.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-medium w-fit"
+              title="Стрим оборвался, но запись не завершена: следующий эфир продолжит эту же запись. Чтобы завершить и опубликовать в архив — выключите запись."
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+              Запись на паузе — ждёт возврата стрима
+            </div>
+          )}
 
           {/* Protocol tabs */}
           <div className="flex gap-1 mb-4 bg-surface-primary rounded-lg p-1">

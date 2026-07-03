@@ -15,6 +15,7 @@ const RECORDINGS_ROOT = '/recordings';
 const ARCHIVE_ROOT = '/recordings/archive';
 const FFPROBE_TIMEOUT_MS = 30_000;
 const FFMPEG_CONCAT_TIMEOUT_MS = 120_000;
+const GLUE_TIMEOUT_MINUTES = parseInt(process.env.RECORDING_GLUE_TIMEOUT_MINUTES ?? '60', 10);
 
 @Injectable()
 export class RecordingService {
@@ -336,6 +337,49 @@ export class RecordingService {
       this.convertRecording(rec.id, basePath, rec.broadcastId, rec.slotIndex, files, segmentsDir).catch(err => {
         this.logger.error(`Retry conversion failed for ${rec.id}: ${err.message}`);
       });
+    }
+  }
+
+  /**
+   * Страховка склеиваемых пауз (manual-запись): если стрим не вернулся за
+   * GLUE_TIMEOUT_MINUTES, открытый Broadcast закрывается (endedAt = момент
+   * обрыва, не текущее время) и финализируется. Дублирует DB-часть
+   * StreamService.finalizeGluedBroadcast сознательно: обратная инъекция
+   * StreamService сюда создала бы цикл модулей (Stream → Recording → Stream).
+   */
+  @Cron('*/5 * * * *')
+  async finalizeStaleGlue(): Promise<void> {
+    const cutoff = new Date(Date.now() - GLUE_TIMEOUT_MINUTES * 60_000);
+    const stale = await this.prisma.broadcast.findMany({
+      where: { endedAt: null, pausedAt: { not: null, lt: cutoff } },
+      select: {
+        id: true, pausedAt: true,
+        stream: {
+          select: {
+            id: true, slug: true, currentBroadcastId: true,
+            org: { select: { slug: true } },
+          },
+        },
+      },
+    });
+
+    for (const b of stale) {
+      if (!b.stream) continue;
+      await this.prisma.broadcast.update({
+        where: { id: b.id },
+        data: { endedAt: b.pausedAt ?? new Date(), pausedAt: null },
+      });
+      if (b.stream.currentBroadcastId === b.id) {
+        await this.prisma.stream.update({
+          where: { id: b.stream.id },
+          data: { currentBroadcastId: null },
+        });
+      }
+      const basePath = b.stream.slug === '' ? b.stream.org.slug : `${b.stream.org.slug}/${b.stream.slug}`;
+      this.logger.log(`Glue timeout: finalizing broadcast ${b.id} (paused since ${b.pausedAt?.toISOString()})`);
+      this.onStreamEnded(b.id, basePath).catch((err) =>
+        this.logger.error(`glue-timeout onStreamEnded failed for ${b.id}: ${err?.message ?? err}`),
+      );
     }
   }
 

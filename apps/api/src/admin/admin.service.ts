@@ -40,12 +40,12 @@ export class AdminService implements OnModuleInit {
     try {
       const streams = await this.prisma.stream.findMany({
         select: {
-          slug: true, ingestKey: true,
+          slug: true, ingestKey: true, recordingEnabled: true,
           org: { select: { slug: true } },
         },
       });
       await Promise.all(streams.map((s) =>
-        this.mediamtx.addStreamPaths(s.org.slug, s.slug, s.ingestKey),
+        this.mediamtx.addStreamPaths(s.org.slug, s.slug, s.ingestKey, s.recordingEnabled),
       ));
       if (streams.length > 0) {
         console.log(`✅ Восстановлено путей для ${streams.length} Stream'ов в MediaMTX`);

@@ -56,6 +56,13 @@ describe('MediamtxService', () => {
       expect(mockedAxios.post).toHaveBeenCalledTimes(1);
       expect(postUrls()[0]).toMatch(/\/paths\/replace\/live\/club\/tournament$/);
     });
+
+    it('record передаётся в теле запроса, когда указан явно', async () => {
+      await service.replaceStreamPaths('club', 'foo', 'key', false);
+      expect(mockedAxios.post).toHaveBeenCalledTimes(1);
+      expect(postUrls()[0]).toMatch(/\/paths\/replace\/live\/club\/foo$/);
+      expect(postBodies()[0]).toEqual({ srtPublishPassphrase: 'key', record: false });
+    });
   });
 
   describe('deleteStreamPaths', () => {

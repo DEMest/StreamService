@@ -180,7 +180,7 @@ export class StreamService {
       data: { ingestKey, ingestKeyCreatedAt: new Date() },
       select: { id: true, slug: true, ingestKey: true, ingestKeyCreatedAt: true },
     });
-    await this.mediamtx.replaceStreamPaths(stream.org.slug, stream.slug, ingestKey);
+    await this.mediamtx.replaceStreamPaths(stream.org.slug, stream.slug, ingestKey, stream.recordingEnabled);
     return updated;
   }
 
@@ -221,10 +221,28 @@ export class StreamService {
   async startBroadcast(streamId: string) {
     const stream = await this.prisma.stream.findUnique({
       where: { id: streamId },
-      select: { id: true, name: true, description: true, isLive: true },
+      select: { id: true, name: true, description: true, isLive: true, currentBroadcastId: true },
     });
     if (!stream) throw new NotFoundException('Stream not found');
     if (stream.isLive) return { alreadyLive: true };
+
+    // Возобновление склеиваемой записи (manual): открытый Broadcast в паузе →
+    // продолжаем его, а не создаём новый. endedAt=null проверяем отдельно —
+    // указатель может протухнуть, если cron финализировал паузу между
+    // unpublish и повторным publish.
+    if (stream.currentBroadcastId) {
+      const open = await this.prisma.broadcast.findFirst({
+        where: { id: stream.currentBroadcastId, endedAt: null },
+        select: { id: true },
+      });
+      if (open) {
+        await this.prisma.broadcast.update({ where: { id: open.id }, data: { pausedAt: null } });
+        await this.prisma.stream.update({ where: { id: streamId }, data: { isLive: true } });
+        return { ok: true, broadcastId: open.id, resumed: true };
+      }
+      // Протухший указатель — чистим и создаём новый Broadcast ниже.
+      await this.prisma.stream.update({ where: { id: streamId }, data: { currentBroadcastId: null } });
+    }
 
     const broadcast = await this.prisma.broadcast.create({
       data: {
@@ -243,23 +261,55 @@ export class StreamService {
     return { ok: true, broadcastId: broadcast.id };
   }
 
+  /**
+   * Unpublish / явный stop. Поведение зависит от режима записи:
+   *  - manual + запись включена → склеиваемая ПАУЗА: зритель видит оффлайн
+   *    (isLive=false), Broadcast остаётся открытым (pausedAt=now) — следующий
+   *    publish продолжит его, сегменты лягут в ту же папку. Финализация —
+   *    по выключению REC (setRecording) или cron-таймауту (finalizeStaleGlue).
+   *  - auto → закрыть + финализировать + выключить запись (REC гаснет вместе
+   *    с эфиром; следующий publish включит снова через ensureAutoRecording).
+   *  - manual + запись выключена → закрыть + финализировать: если в течение
+   *    сессии запись включалась, сегменты будут собраны; если нет —
+   *    onStreamEnded не найдёт файлов и Recording не создаст (корректно).
+   */
   async endBroadcast(streamId: string) {
     const stream = await this.prisma.stream.findUnique({
       where: { id: streamId },
       select: {
         id: true, slug: true,
         isLive: true, currentBroadcastId: true,
+        recordingEnabled: true, recordingMode: true,
         org: { select: { slug: true } },
       },
     });
     if (!stream || !stream.isLive || !stream.currentBroadcastId) return { alreadyOff: true };
 
     const broadcastId = stream.currentBroadcastId;
-    await this.prisma.broadcast.update({ where: { id: broadcastId }, data: { endedAt: new Date() } });
+
+    if (stream.recordingMode === 'manual' && stream.recordingEnabled) {
+      await this.prisma.broadcast.update({ where: { id: broadcastId }, data: { pausedAt: new Date() } });
+      await this.prisma.stream.update({ where: { id: streamId }, data: { isLive: false } });
+      return { paused: true };
+    }
+
+    await this.prisma.broadcast.update({
+      where: { id: broadcastId },
+      data: { endedAt: new Date(), pausedAt: null },
+    });
     await this.prisma.stream.update({
       where: { id: streamId },
       data: { isLive: false, currentBroadcastId: null },
     });
+
+    if (stream.recordingMode === 'auto' && stream.recordingEnabled) {
+      try {
+        await this.mediamtx.setStreamRecording(stream.org.slug, stream.slug, false);
+        await this.prisma.stream.update({ where: { id: streamId }, data: { recordingEnabled: false } });
+      } catch (e: any) {
+        this.logger.warn(`auto recording off failed for ${streamId}: ${e?.message ?? e}`);
+      }
+    }
 
     const basePath = mediamtxPathForStream(stream.org.slug, stream.slug);
     this.recording.onStreamEnded(broadcastId, basePath).catch((err) =>
@@ -267,6 +317,41 @@ export class StreamService {
     );
 
     return { ok: true };
+  }
+
+  /**
+   * Финализация склеиваемой записи (manual): закрыть открытый Broadcast
+   * (endedAt = момент последнего обрыва, не время финализации), отвязать от
+   * Stream'а, запустить сборку архива. Вызывается из setRecording (REC off /
+   * смена режима на auto при открытой паузе). Cron-таймаут делает то же самое
+   * на стороне RecordingService (см. finalizeStaleGlue).
+   */
+  private async finalizeGluedBroadcast(stream: {
+    id: string;
+    slug: string;
+    currentBroadcastId: string | null;
+    org: { slug: string };
+  }): Promise<void> {
+    if (!stream.currentBroadcastId) return;
+    const broadcast = await this.prisma.broadcast.findFirst({
+      where: { id: stream.currentBroadcastId, endedAt: null },
+      select: { id: true, pausedAt: true },
+    });
+    if (!broadcast) return;
+
+    await this.prisma.broadcast.update({
+      where: { id: broadcast.id },
+      data: { endedAt: broadcast.pausedAt ?? new Date(), pausedAt: null },
+    });
+    await this.prisma.stream.update({
+      where: { id: stream.id },
+      data: { currentBroadcastId: null },
+    });
+
+    const basePath = mediamtxPathForStream(stream.org.slug, stream.slug);
+    this.recording.onStreamEnded(broadcast.id, basePath).catch((err) =>
+      this.logger.error(`glue finalize onStreamEnded failed for ${broadcast.id}: ${err?.message ?? err}`),
+    );
   }
 
   /**
@@ -496,6 +581,25 @@ export class StreamService {
     const updated = Object.keys(patch).length
       ? await this.prisma.stream.update({ where: { id: streamId }, data: patch })
       : stream;
+
+    // Финализация склеиваемой паузы: REC выключили ИЛИ режим сменили на auto,
+    // при этом стрим НЕ в эфире, а Broadcast открыт (= пауза). Пауза бывает
+    // только в manual, так что доп. проверка режима не нужна. Если стрим В
+    // ЭФИРЕ — только флаги: финализация случится при закрытии Broadcast'а.
+    const wantsFinalize = body.enabled === false || body.mode === 'auto';
+    if (wantsFinalize) {
+      const fresh = await this.prisma.stream.findUnique({
+        where: { id: streamId },
+        select: {
+          id: true, slug: true, isLive: true, currentBroadcastId: true,
+          org: { select: { slug: true } },
+        },
+      });
+      if (fresh && !fresh.isLive && fresh.currentBroadcastId) {
+        await this.finalizeGluedBroadcast(fresh);
+      }
+    }
+
     return this.toDto(updated);
   }
 
@@ -557,7 +661,7 @@ export class StreamService {
 
     // 4) MediaMTX add. При падении — откатываем Prisma (orphan row хуже чем 500).
     try {
-      await this.mediamtx.addStreamPaths(org.slug, slug, ingestKey);
+      await this.mediamtx.addStreamPaths(org.slug, slug, ingestKey, created.recordingEnabled);
     } catch (err: any) {
       try {
         await this.prisma.stream.delete({ where: { id: created.id } });
