@@ -3,7 +3,9 @@ apiAddress: :9997
 
 hls: false
 
-record: yes
+# Запись включается ТОЛЬКО явно через API-patch пути (source of truth — БД).
+# Глобальный yes приводил к записи «вопреки настройке» после рестартов/rotate-key.
+record: no
 recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
 recordFormat: fmp4
 recordSegmentDuration: 3h

@@ -45,9 +45,12 @@ export class MediamtxService {
 
   /**
    * Перезаписать (replace) passphrase пути Stream'а. Используется при rotate-key.
+   * `record` передаётся ОБЯЗАТЕЛЬНО из БД вызывающей стороной: replace затирает
+   * весь per-path конфиг, и без явного record путь сбросился бы на глобальный
+   * default mediamtx.yml вопреки настройке Stream'а.
    */
-  async replaceStreamPaths(orgSlug: string, streamSlug: string, ingestKey: string): Promise<void> {
-    await this.replaceSinglePath(this.streamBasePath(orgSlug, streamSlug), ingestKey);
+  async replaceStreamPaths(orgSlug: string, streamSlug: string, ingestKey: string, record?: boolean): Promise<void> {
+    await this.replaceSinglePath(this.streamBasePath(orgSlug, streamSlug), ingestKey, record);
   }
 
   /**

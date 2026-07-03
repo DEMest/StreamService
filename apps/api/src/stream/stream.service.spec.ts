@@ -27,6 +27,10 @@ const mockPrisma = {
     create: jest.fn(),
     update: jest.fn(),
     findMany: jest.fn(),
+    findFirst: jest.fn(),
+  },
+  organization: {
+    findUniqueOrThrow: jest.fn(),
   },
 };
 const mockMediamtx = {
@@ -73,9 +77,9 @@ describe('StreamService', () => {
   });
 
   describe('rotateKey', () => {
-    it('regenerates ingestKey and calls mediamtx.replaceStreamPaths (3 args)', async () => {
+    it('regenerates ingestKey and calls mediamtx.replaceStreamPaths (4 args, record from DB)', async () => {
       mockPrisma.stream.findUnique.mockResolvedValue({
-        id: 's1', orgId: 'o1', slug: '',
+        id: 's1', orgId: 'o1', slug: '', recordingEnabled: true,
         org: { slug: 'club' },
       });
       mockPrisma.stream.update.mockResolvedValue({
@@ -83,14 +87,14 @@ describe('StreamService', () => {
       });
       const result = await service.rotateKey('s1');
       expect(mockMediamtx.replaceStreamPaths).toHaveBeenCalledWith(
-        'club', '', expect.any(String),
+        'club', '', expect.any(String), true,
       );
       expect(result.ingestKey).toBeDefined();
     });
 
-    it('replaces passphrase for named Stream', async () => {
+    it('replaces passphrase for named Stream, passing recordingEnabled=false through', async () => {
       mockPrisma.stream.findUnique.mockResolvedValue({
-        id: 's2', orgId: 'o1', slug: 'tournament',
+        id: 's2', orgId: 'o1', slug: 'tournament', recordingEnabled: false,
         org: { slug: 'club' },
       });
       mockPrisma.stream.update.mockResolvedValue({
@@ -98,7 +102,7 @@ describe('StreamService', () => {
       });
       await service.rotateKey('s2');
       expect(mockMediamtx.replaceStreamPaths).toHaveBeenCalledWith(
-        'club', 'tournament', expect.any(String),
+        'club', 'tournament', expect.any(String), false,
       );
     });
   });
@@ -133,7 +137,7 @@ describe('StreamService', () => {
   describe('startBroadcast', () => {
     it('creates Broadcast and sets stream.isLive=true', async () => {
       mockPrisma.stream.findUnique.mockResolvedValue({
-        id: 's1', name: 'My Stream', description: null, isLive: false,
+        id: 's1', name: 'My Stream', description: null, isLive: false, currentBroadcastId: null,
       });
       mockPrisma.broadcast.create.mockResolvedValue({ id: 'b1' });
       mockPrisma.stream.update.mockResolvedValue({});
@@ -157,7 +161,7 @@ describe('StreamService', () => {
 
     it('creates Broadcast without eventId linking', async () => {
       mockPrisma.stream.findUnique.mockResolvedValue({
-        id: 's1', name: 'Mat A', description: null, isLive: false,
+        id: 's1', name: 'Mat A', description: null, isLive: false, currentBroadcastId: null,
       });
       mockPrisma.broadcast.create.mockResolvedValue({ id: 'b1' });
       mockPrisma.stream.update.mockResolvedValue({});
@@ -179,6 +183,7 @@ describe('StreamService', () => {
       mockPrisma.stream.findUnique.mockResolvedValue({
         id: 's1', orgId: 'o1', slug: '',
         isLive: true, currentBroadcastId: 'b1',
+        recordingEnabled: false, recordingMode: 'manual',
         org: { slug: 'myorg' },
       });
       mockPrisma.broadcast.update.mockResolvedValue({});
@@ -202,6 +207,164 @@ describe('StreamService', () => {
       });
       const r = await service.endBroadcast('s1');
       expect(r).toEqual({ alreadyOff: true });
+    });
+  });
+
+  describe('endBroadcast — режимы записи', () => {
+    const baseStream = {
+      id: 's1', slug: 'court-a', isLive: true, currentBroadcastId: 'b1',
+      org: { slug: 'club' },
+    };
+
+    it('auto: закрывает Broadcast, финализирует и ВЫКЛЮЧАЕТ запись', async () => {
+      mockPrisma.stream.findUnique.mockResolvedValue({
+        ...baseStream, recordingMode: 'auto', recordingEnabled: true,
+      });
+      mockPrisma.broadcast.update.mockResolvedValue({});
+      mockPrisma.stream.update.mockResolvedValue({});
+
+      const r = await service.endBroadcast('s1');
+
+      expect(r).toEqual({ ok: true });
+      expect(mockPrisma.broadcast.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'b1' },
+        data: expect.objectContaining({ endedAt: expect.any(Date) }),
+      }));
+      expect(mockMediamtx.setStreamRecording).toHaveBeenCalledWith('club', 'court-a', false);
+      expect(mockPrisma.stream.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: { recordingEnabled: false },
+      }));
+      expect(mockRecording.onStreamEnded).toHaveBeenCalledWith('b1', 'club/court-a');
+    });
+
+    it('manual + запись включена: ПАУЗА — Broadcast открыт, isLive=false, финализации нет', async () => {
+      mockPrisma.stream.findUnique.mockResolvedValue({
+        ...baseStream, recordingMode: 'manual', recordingEnabled: true,
+      });
+      mockPrisma.broadcast.update.mockResolvedValue({});
+      mockPrisma.stream.update.mockResolvedValue({});
+
+      const r = await service.endBroadcast('s1');
+
+      expect(r).toEqual({ paused: true });
+      expect(mockPrisma.broadcast.update).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { pausedAt: expect.any(Date) },
+      });
+      expect(mockPrisma.stream.update).toHaveBeenCalledWith({
+        where: { id: 's1' },
+        data: { isLive: false },
+      });
+      expect(mockRecording.onStreamEnded).not.toHaveBeenCalled();
+      expect(mockMediamtx.setStreamRecording).not.toHaveBeenCalled();
+    });
+
+    it('manual + запись выключена: закрывает и финализирует (сегменты могли быть записаны ранее)', async () => {
+      mockPrisma.stream.findUnique.mockResolvedValue({
+        ...baseStream, recordingMode: 'manual', recordingEnabled: false,
+      });
+      mockPrisma.broadcast.update.mockResolvedValue({});
+      mockPrisma.stream.update.mockResolvedValue({});
+
+      const r = await service.endBroadcast('s1');
+
+      expect(r).toEqual({ ok: true });
+      expect(mockRecording.onStreamEnded).toHaveBeenCalledWith('b1', 'club/court-a');
+      expect(mockMediamtx.setStreamRecording).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('startBroadcast — resume склейки', () => {
+    it('открытый currentBroadcastId → resume: pausedAt=null, isLive=true, новый Broadcast не создаётся', async () => {
+      mockPrisma.stream.findUnique.mockResolvedValue({
+        id: 's1', name: 'X', description: null, isLive: false, currentBroadcastId: 'b1',
+      });
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      mockPrisma.broadcast.update.mockResolvedValue({});
+      mockPrisma.stream.update.mockResolvedValue({});
+
+      const r = await service.startBroadcast('s1');
+
+      expect(r).toEqual({ ok: true, broadcastId: 'b1', resumed: true });
+      expect(mockPrisma.broadcast.create).not.toHaveBeenCalled();
+      expect(mockPrisma.broadcast.update).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { pausedAt: null },
+      });
+    });
+
+    it('протухший указатель (Broadcast уже закрыт кроном) → чистит и создаёт новый', async () => {
+      mockPrisma.stream.findUnique.mockResolvedValue({
+        id: 's1', name: 'X', description: null, isLive: false, currentBroadcastId: 'b-stale',
+      });
+      mockPrisma.broadcast.findFirst.mockResolvedValue(null);
+      mockPrisma.broadcast.create.mockResolvedValue({ id: 'b2' });
+      mockPrisma.stream.update.mockResolvedValue({});
+
+      const r = await service.startBroadcast('s1');
+
+      expect(r).toEqual({ ok: true, broadcastId: 'b2' });
+      expect(mockPrisma.broadcast.create).toHaveBeenCalled();
+    });
+  });
+
+  describe('setRecording — финализация склейки', () => {
+    it('REC off при открытой паузе (не в эфире) → Broadcast закрывается endedAt=pausedAt и финализируется', async () => {
+      // loadForOrg → findFirst; далее setRecording делает findUniqueOrThrow(org), update, findUnique(fresh)
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        id: 's1', orgId: 'o1', slug: 'court-a', org: { slug: 'club' },
+      });
+      mockPrisma.organization.findUniqueOrThrow = jest.fn().mockResolvedValue({ slug: 'club' });
+      mockPrisma.stream.update.mockResolvedValue({ id: 's1', slug: 'court-a' });
+      const pausedAt = new Date('2026-07-03T10:00:00Z');
+      mockPrisma.stream.findUnique.mockResolvedValue({
+        id: 's1', slug: 'court-a', isLive: false, currentBroadcastId: 'b1',
+        org: { slug: 'club' },
+      });
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1', pausedAt });
+      mockPrisma.broadcast.update.mockResolvedValue({});
+
+      await service.setRecording('o1', 's1', { enabled: false });
+
+      expect(mockPrisma.broadcast.update).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { endedAt: pausedAt, pausedAt: null },
+      });
+      expect(mockRecording.onStreamEnded).toHaveBeenCalledWith('b1', 'club/court-a');
+    });
+
+    it('REC off когда стрим В ЭФИРЕ → только флаги, финализации нет', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        id: 's1', orgId: 'o1', slug: 'court-a', org: { slug: 'club' },
+      });
+      mockPrisma.organization.findUniqueOrThrow = jest.fn().mockResolvedValue({ slug: 'club' });
+      mockPrisma.stream.update.mockResolvedValue({ id: 's1', slug: 'court-a' });
+      mockPrisma.stream.findUnique.mockResolvedValue({
+        id: 's1', slug: 'court-a', isLive: true, currentBroadcastId: 'b1',
+        org: { slug: 'club' },
+      });
+
+      await service.setRecording('o1', 's1', { enabled: false });
+
+      expect(mockRecording.onStreamEnded).not.toHaveBeenCalled();
+      expect(mockMediamtx.setStreamRecording).toHaveBeenCalledWith('club', 'court-a', false);
+    });
+
+    it('смена режима на auto при открытой паузе → финализация', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        id: 's1', orgId: 'o1', slug: 'court-a', org: { slug: 'club' },
+      });
+      mockPrisma.stream.update.mockResolvedValue({ id: 's1', slug: 'court-a' });
+      mockPrisma.stream.findUnique.mockResolvedValue({
+        id: 's1', slug: 'court-a', isLive: false, currentBroadcastId: 'b1',
+        org: { slug: 'club' },
+      });
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1', pausedAt: new Date() });
+      mockPrisma.broadcast.update.mockResolvedValue({});
+
+      await service.setRecording('o1', 's1', { mode: 'auto' });
+
+      expect(mockRecording.onStreamEnded).toHaveBeenCalledWith('b1', 'club/court-a');
     });
   });
 
@@ -294,7 +457,7 @@ describe('StreamService', () => {
       });
       // startBroadcast: findUnique для проверки isLive
       mockPrisma.stream.findUnique.mockResolvedValueOnce({
-        id: 's1', name: 'Stream', description: null, isLive: false,
+        id: 's1', name: 'Stream', description: null, isLive: false, currentBroadcastId: null,
       });
       mockPrisma.broadcast.create.mockResolvedValueOnce({ id: 'b1' });
       mockPrisma.stream.update.mockResolvedValueOnce({});
@@ -315,7 +478,7 @@ describe('StreamService', () => {
       });
       // startBroadcast: stream уже live → alreadyLive
       mockPrisma.stream.findUnique.mockResolvedValueOnce({
-        id: 's1', name: 'Stream', description: null, isLive: true,
+        id: 's1', name: 'Stream', description: null, isLive: true, currentBroadcastId: null,
       });
 
       await service.handleWebhook('live/a', 'publish');
@@ -330,6 +493,7 @@ describe('StreamService', () => {
       mockPrisma.stream.findUnique.mockResolvedValueOnce({
         id: 's1', orgId: 'o1', slug: '',
         isLive: true, currentBroadcastId: 'b1',
+        recordingEnabled: false, recordingMode: 'manual',
         org: { slug: 'a' },
       });
       mockPrisma.broadcast.update.mockResolvedValueOnce({});
@@ -382,9 +546,9 @@ describe('StreamService', () => {
       // Здесь проверяем что broadcast.create вызван только 1 раз.
       mockPrisma.stream.findUnique
         .mockResolvedValueOnce({ id: 's-race', slug: '', recordingEnabled: false, recordingMode: 'manual', org: { slug: 'a' } })
-        .mockResolvedValueOnce({ id: 's-race', name: 'Stream', description: null, isLive: false })
+        .mockResolvedValueOnce({ id: 's-race', name: 'Stream', description: null, isLive: false, currentBroadcastId: null })
         .mockResolvedValueOnce({ id: 's-race', slug: '', recordingEnabled: false, recordingMode: 'manual', org: { slug: 'a' } })
-        .mockResolvedValueOnce({ id: 's-race', name: 'Stream', description: null, isLive: true });
+        .mockResolvedValueOnce({ id: 's-race', name: 'Stream', description: null, isLive: true, currentBroadcastId: null });
       mockPrisma.broadcast.create.mockResolvedValue({ id: 'b-once' });
       mockPrisma.stream.update.mockResolvedValue({});
 
