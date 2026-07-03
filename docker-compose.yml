@@ -29,8 +29,11 @@ services:
     volumes:
       - minio_data:/data
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      # На хост наружу (0.0.0.0) не публикуем — api ходит в minio по имени
+      # контейнера через internal-сеть. 127.0.0.1 — для локальной админки/mc
+      # через SSH-туннель при необходимости.
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     healthcheck:
       # НЕ curl: свежие образы minio/minio его не содержат — healthcheck с curl
       # никогда не проходит, и api (depends_on: service_healthy) блокирует весь стек.
