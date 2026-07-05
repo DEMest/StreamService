@@ -24,6 +24,9 @@ model Organization {
   isActive       Boolean       @default(true)
   chatTtlMinutes Int           @default(180)
   chatEnabled    Boolean       @default(true)
+  // S3-ключ картинки организации (`images/org/<orgId>.jpg`); NULL — не загружена.
+  // Показывается на карточках каталога/архива вместо стримовых thumbnail'ов.
+  imagePath      String?
   createdAt      DateTime      @default(now())
   // Relations
   streams        Stream[]
@@ -45,8 +48,8 @@ model Stream {
   feedMode           String        @default("composite") // 'single' | 'composite'
   previewImagePath   String?
   isLive             Boolean       @default(false)
-  recordingEnabled   Boolean       @default(true)
-  recordingMode      String        @default("auto") // 'auto' | 'manual'
+  recordingEnabled   Boolean       @default(false)
+  recordingMode      String        @default("manual") // 'auto' | 'manual'
   autoStartMode      String        @default("public") // 'public' | 'test'
   currentBroadcastId String?       @unique
   createdAt          DateTime      @default(now())
@@ -58,18 +61,22 @@ model Stream {
 }
 
 model Broadcast {
-  id          String      @id @default(cuid())
-  streamId    String
-  stream      Stream      @relation(fields: [streamId], references: [id], onDelete: Cascade)
-  title       String
-  description String?
-  startedAt   DateTime
-  endedAt     DateTime?
+  id               String      @id @default(cuid())
+  streamId         String
+  stream           Stream      @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  title            String
+  description      String?
+  startedAt        DateTime
+  endedAt          DateTime?
   // Склеиваемая пауза (manual-режим записи): стрим оборвался, но Broadcast
   // не закрыт — следующий publish продолжит его. NULL = в эфире или закрыт.
-  pausedAt    DateTime?
-  createdAt   DateTime    @default(now())
-  recordings  Recording[]
+  pausedAt         DateTime?
+  // S3-ключ превью записи (`archive/<basePath>/<broadcastId>/preview.jpg`):
+  // авто-кадр из середины первого сегмента при финализации или ручная
+  // загрузка орг-админом. Лежит под префиксом записи — удаляется вместе с ней.
+  previewImagePath String?
+  createdAt        DateTime    @default(now())
+  recordings       Recording[]
 }
 
 model ChatMessage {

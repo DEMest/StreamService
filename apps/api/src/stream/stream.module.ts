@@ -4,9 +4,10 @@ import { StreamController } from './stream.controller';
 import { MediamtxModule } from '../mediamtx/mediamtx.module';
 import { RecordingModule } from '../recording/recording.module';
 import { ChatModule } from '../chat/chat.module';
+import { StorageModule } from '../storage/storage.module';
 
 @Module({
-  imports: [MediamtxModule, RecordingModule, ChatModule],
+  imports: [MediamtxModule, RecordingModule, ChatModule, StorageModule],
   controllers: [StreamController],
   providers: [StreamService],
   exports: [StreamService],

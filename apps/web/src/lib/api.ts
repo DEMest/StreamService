@@ -28,12 +28,19 @@ async function callRefresh(): Promise<boolean> {
   return refreshInFlight;
 }
 
+/**
+ * Принудительный уход на /login уместен только в приватных разделах.
+ * Публичные страницы (лендинг/каталог/watch/архив) обязаны работать для
+ * анонима: Header дёргает /v1/auth/me, получает 401 — это штатная ситуация
+ * «не залогинен», а не повод выкидывать зрителя на форму логина.
+ */
+const AUTH_REDIRECT_PREFIXES = ['/dashboard', '/admin'];
+
 function redirectToLogin() {
   if (typeof window === 'undefined') return;
-  const current = window.location.pathname + window.location.search;
-  // Не редиректим если мы УЖЕ на /login — иначе цикл
-  if (window.location.pathname.startsWith('/login')) return;
-  const next = encodeURIComponent(current);
+  const { pathname } = window.location;
+  if (!AUTH_REDIRECT_PREFIXES.some((p) => pathname.startsWith(p))) return;
+  const next = encodeURIComponent(pathname + window.location.search);
   window.location.href = `/login?next=${next}`;
 }
 

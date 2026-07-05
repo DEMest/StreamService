@@ -3,6 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import { PublicService } from './public.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ThumbnailService } from '../thumbnail/thumbnail.service';
+import { ImageService } from '../storage/image.service';
 
 const mockPrisma = {
   stream: {
@@ -11,6 +12,7 @@ const mockPrisma = {
   },
   broadcast: {
     findMany: jest.fn(),
+    findFirst: jest.fn(),
   },
   organization: {
     findMany: jest.fn(),
@@ -22,6 +24,8 @@ const mockThumbnail = {
   getSnapshot: jest.fn(),
 };
 
+const mockImages = { upload: jest.fn(), delete: jest.fn(), serve: jest.fn() };
+
 describe('PublicService', () => {
   let service: PublicService;
 
@@ -32,6 +36,7 @@ describe('PublicService', () => {
         PublicService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: ThumbnailService, useValue: mockThumbnail },
+        { provide: ImageService, useValue: mockImages },
       ],
     }).compile();
     service = module.get(PublicService);
@@ -131,110 +136,41 @@ describe('PublicService', () => {
     });
   });
 
-  // ───────────── Task 5: catalog aggregates by Org (one card per org) ─────────────
+  // ───────────── catalog aggregates by Org (one card per org) ─────────────
 
   describe('getCatalog — one card per Org', () => {
-    it('aggregates public Streams into a single card per org, with correct liveCount and representative fields', async () => {
-      const now = new Date('2026-05-01T12:00:00Z');
-      const later = new Date('2026-05-10T12:00:00Z');
+    it('aggregates public Streams into a single card per org, with correct liveCount and hasImage', async () => {
       mockPrisma.organization.findMany.mockResolvedValueOnce([
         {
           slug: 'club1',
-          name: 'Club One',
-          createdAt: now,
+          name: 'Клуб 1',
+          createdAt: new Date('2026-05-01T12:00:00Z'),
+          imagePath: 'images/org/o1.jpg',
           streams: [
-            {
-              slug: 'main',
-              isLive: true,
-              previewMode: 'multicam',
-              previewImagePath: null,
-              createdAt: now,
-            },
-            {
-              slug: 'mat-a',
-              isLive: true,
-              previewMode: 'cam1',
-              previewImagePath: 'club1/mat-a.jpg',
-              createdAt: later,
-            },
-            {
-              slug: 'mat-b',
-              isLive: false,
-              previewMode: 'cam2',
-              previewImagePath: null,
-              createdAt: later,
-            },
+            { isLive: true },
+            { isLive: false },
           ],
         },
       ]);
 
-      const result = await service.getCatalog();
+      const cards = await service.getCatalog();
 
-      // liveCount = 2 (два live Stream'а); representative — первый LIVE
-      // (первый в массиве live-стримов, previewMode='multicam', без кастомного превью, slug='main').
-      expect(result).toEqual([
-        {
-          orgSlug: 'club1',
-          orgName: 'Club One',
-          liveCount: 2,
-          previewMode: 'multicam',
-          hasCustomPreview: false,
-          representativeStreamSlug: 'main',
-        },
-      ]);
+      expect(cards[0]).toEqual({
+        orgSlug: 'club1', orgName: 'Клуб 1', liveCount: 1, hasImage: true,
+      });
 
       const callArgs = mockPrisma.organization.findMany.mock.calls[0][0];
       expect(callArgs.where).toEqual({ isActive: true });
       expect(callArgs.select.streams.where).toEqual({ isPublic: true });
     });
 
-    it('when no Stream is live, representative is the earliest by createdAt', async () => {
-      const earlier = new Date('2026-01-01T00:00:00Z');
-      const later = new Date('2026-02-01T00:00:00Z');
-      mockPrisma.organization.findMany.mockResolvedValueOnce([
-        {
-          slug: 'club2',
-          name: 'Club Two',
-          createdAt: earlier,
-          streams: [
-            {
-              slug: 'newer-cam',
-              isLive: false,
-              previewMode: 'cam1',
-              previewImagePath: null,
-              createdAt: later,
-            },
-            {
-              slug: 'archive-cam',
-              isLive: false,
-              previewMode: 'multicam',
-              previewImagePath: 'club2/preview.jpg',
-              createdAt: earlier,
-            },
-          ],
-        },
-      ]);
-
-      const result = await service.getCatalog();
-
-      expect(result).toEqual([
-        {
-          orgSlug: 'club2',
-          orgName: 'Club Two',
-          liveCount: 0,
-          previewMode: 'multicam',
-          hasCustomPreview: true,
-          representativeStreamSlug: 'archive-cam',
-        },
-      ]);
-    });
-
-    it('org with zero public Streams → previewMode falls back to "multicam", hasCustomPreview false', async () => {
+    it('org without image and zero public Streams → hasImage false, liveCount 0', async () => {
       mockPrisma.organization.findMany.mockResolvedValueOnce([
         {
           slug: 'club3',
           name: 'Club Three',
           createdAt: new Date('2026-01-01T00:00:00Z'),
+          imagePath: null,
           streams: [],
         },
       ]);
@@ -246,9 +182,7 @@ describe('PublicService', () => {
           orgSlug: 'club3',
           orgName: 'Club Three',
           liveCount: 0,
-          previewMode: 'multicam',
-          hasCustomPreview: false,
-          representativeStreamSlug: null,
+          hasImage: false,
         },
       ]);
     });
@@ -264,28 +198,32 @@ describe('PublicService', () => {
           slug: 'offline-newer',
           name: 'Offline Newer',
           createdAt: t3,
-          streams: [{ isLive: false, previewMode: 'multicam', previewImagePath: null, createdAt: t3 }],
+          imagePath: null,
+          streams: [{ isLive: false }],
         },
         // live org, created earlier than the other live org
         {
           slug: 'live-older',
           name: 'Live Older',
           createdAt: t1,
-          streams: [{ isLive: true, previewMode: 'multicam', previewImagePath: null, createdAt: t1 }],
+          imagePath: null,
+          streams: [{ isLive: true }],
         },
         // offline org, created earliest
         {
           slug: 'offline-older',
           name: 'Offline Older',
           createdAt: t2,
-          streams: [{ isLive: false, previewMode: 'multicam', previewImagePath: null, createdAt: t2 }],
+          imagePath: null,
+          streams: [{ isLive: false }],
         },
         // live org, created latest
         {
           slug: 'live-newer',
           name: 'Live Newer',
           createdAt: t4,
-          streams: [{ isLive: true, previewMode: 'multicam', previewImagePath: null, createdAt: t4 }],
+          imagePath: null,
+          streams: [{ isLive: true }],
         },
       ]);
 
@@ -309,10 +247,11 @@ describe('PublicService', () => {
           slug: 'many-live-older',
           name: 'Many Live Older',
           createdAt: older,
+          imagePath: null,
           streams: [
-            { isLive: true, previewMode: 'multicam', previewImagePath: null, createdAt: older },
-            { isLive: true, previewMode: 'multicam', previewImagePath: null, createdAt: older },
-            { isLive: true, previewMode: 'multicam', previewImagePath: null, createdAt: older },
+            { isLive: true },
+            { isLive: true },
+            { isLive: true },
           ],
         },
         // Более новая орга, но с МЕНЬШИМ liveCount (1). По правильному
@@ -321,8 +260,9 @@ describe('PublicService', () => {
           slug: 'one-live-newer',
           name: 'One Live Newer',
           createdAt: newer,
+          imagePath: null,
           streams: [
-            { isLive: true, previewMode: 'multicam', previewImagePath: null, createdAt: newer },
+            { isLive: true },
           ],
         },
       ]);
@@ -340,6 +280,34 @@ describe('PublicService', () => {
       await service.getCatalog();
       const callArgs = mockPrisma.organization.findMany.mock.calls[0][0];
       expect(callArgs.select.streams.where).toEqual({ isPublic: true });
+    });
+  });
+
+  describe('getOrgImage', () => {
+    it('returns buffer for active org with image', async () => {
+      mockPrisma.organization.findFirst.mockResolvedValue({ imagePath: 'images/org/o1.jpg' });
+      mockImages.serve.mockResolvedValue(Buffer.from('jpeg'));
+      await expect(service.getOrgImage('club1')).resolves.toEqual(Buffer.from('jpeg'));
+      expect(mockPrisma.organization.findFirst).toHaveBeenCalledWith({
+        where: { slug: 'club1', isActive: true },
+        select: { imagePath: true },
+      });
+    });
+
+    it('404 when org has no image', async () => {
+      mockPrisma.organization.findFirst.mockResolvedValue({ imagePath: null });
+      await expect(service.getOrgImage('club1')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('404 when org is missing/inactive', async () => {
+      mockPrisma.organization.findFirst.mockResolvedValue(null);
+      await expect(service.getOrgImage('ghost')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('404 when S3 object is gone', async () => {
+      mockPrisma.organization.findFirst.mockResolvedValue({ imagePath: 'images/org/o1.jpg' });
+      mockImages.serve.mockResolvedValue(null);
+      await expect(service.getOrgImage('club1')).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
@@ -509,6 +477,34 @@ describe('PublicService', () => {
       expect(mockPrisma.broadcast.findMany.mock.calls[0][0].where.streamId).toBe('s-foo');
     });
 
+    it('hasPreview: true когда есть previewImagePath, false когда нет', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValueOnce({
+        id: 's-foo',
+        isPublic: true,
+        previewKey: null,
+      });
+      mockPrisma.broadcast.findMany.mockResolvedValueOnce([
+        {
+          id: 'b1', title: null, description: null,
+          startedAt: new Date(), endedAt: new Date(),
+          previewImagePath: 'archive/org1/foo/b1/preview.jpg',
+          recordings: [],
+        },
+        {
+          id: 'b2', title: null, description: null,
+          startedAt: new Date(), endedAt: new Date(),
+          previewImagePath: null,
+          recordings: [],
+        },
+      ]);
+
+      const result = await service.getOrgBroadcasts('org1', 'foo');
+
+      expect(result[0].hasPreview).toBe(true);
+      expect(result[1].hasPreview).toBe(false);
+      expect((result[0] as any).previewImagePath).toBeUndefined();
+    });
+
     it('throws 404 when Stream not found', async () => {
       mockPrisma.stream.findFirst.mockResolvedValueOnce(null);
       await expect(service.getOrgBroadcasts('org1', 'ghost')).rejects.toBeInstanceOf(
@@ -549,6 +545,56 @@ describe('PublicService', () => {
       await expect(service.getThumbnail('org1', 'nonexistent')).rejects.toBeInstanceOf(
         NotFoundException,
       );
+    });
+
+    it('serves offline preview from S3 by stored key', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        isLive: false, previewMode: 'multicam', previewImagePath: 'images/stream/st-1.jpg',
+      });
+      mockImages.serve.mockResolvedValue(Buffer.from('jpeg'));
+      const r = await service.getThumbnail('club1', 'main');
+      expect(mockImages.serve).toHaveBeenCalledWith('images/stream/st-1.jpg');
+      expect(r).toEqual({ buffer: Buffer.from('jpeg'), maxAge: 300 });
+    });
+
+    it('404 when S3 object is missing', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        isLive: false, previewMode: 'multicam', previewImagePath: 'images/stream/st-1.jpg',
+      });
+      mockImages.serve.mockResolvedValue(null);
+      await expect(service.getThumbnail('club1', 'main')).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('getBroadcastPreview', () => {
+    const streamRow = { id: 'st-1', isPublic: true, previewKey: null };
+
+    it('отдаёт JPEG публичного стрима', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(streamRow);
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ previewImagePath: 'archive/club1/main/b1/preview.jpg' });
+      mockImages.serve.mockResolvedValue(Buffer.from('jpeg'));
+      await expect(service.getBroadcastPreview('club1', 'main', 'b1')).resolves.toEqual(Buffer.from('jpeg'));
+    });
+
+    it('404 для приватного стрима без ключа (существование не палим)', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({ id: 'st-1', isPublic: false, previewKey: 'sec' });
+      await expect(service.getBroadcastPreview('club1', 'main', 'b1'))
+        .rejects.toBeInstanceOf(NotFoundException);
+      expect(mockPrisma.broadcast.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('отдаёт приватному стриму по правильному key', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({ id: 'st-1', isPublic: false, previewKey: 'sec' });
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ previewImagePath: 'k' });
+      mockImages.serve.mockResolvedValue(Buffer.from('jpeg'));
+      await expect(service.getBroadcastPreview('club1', 'main', 'b1', 'sec')).resolves.toEqual(Buffer.from('jpeg'));
+    });
+
+    it('404 когда превью не сгенерировано', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(streamRow);
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ previewImagePath: null });
+      await expect(service.getBroadcastPreview('club1', 'main', 'b1'))
+        .rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

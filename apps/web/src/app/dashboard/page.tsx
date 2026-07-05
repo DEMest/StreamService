@@ -23,6 +23,7 @@ interface OrgProfile {
   createdAt: string;
   chatTtlMinutes: number;
   chatEnabled: boolean;
+  imagePath?: string | null;
 }
 
 const CHAT_TTL_PRESETS: { minutes: number; label: string }[] = [
@@ -96,6 +97,34 @@ export default function DashboardPage() {
   const updateSettingsMutation = useMutation({
     mutationFn: (data: Partial<Pick<OrgProfile, 'name' | 'chatTtlMinutes' | 'chatEnabled'>>) =>
       api.patch('/v1/org/settings', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-profile'] }),
+  });
+
+  const [imgBump, setImgBump] = useState(() => Date.now());
+
+  const uploadImageMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/org/image`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Не удалось загрузить' }));
+        throw new Error(err.message ?? 'Не удалось загрузить');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      setImgBump(Date.now());
+      qc.invalidateQueries({ queryKey: ['org-profile'] });
+    },
+  });
+
+  const deleteImageMutation = useMutation({
+    mutationFn: () => api.delete('/v1/org/image'),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['org-profile'] }),
   });
 
@@ -234,6 +263,43 @@ export default function DashboardPage() {
                 <p className="text-xs text-red-400">{nameErrorMessage}</p>
               )}
               <p className="text-xs text-zinc-600">Отображается зрителям; должно быть уникальным. Логин для входа не меняется.</p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-zinc-500">Картинка организации</label>
+              {profile?.imagePath ? (
+                <div className="flex items-start gap-3">
+                  <img
+                    src={`${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/public/orgs/${profile.slug}/image?t=${imgBump}`}
+                    alt="Картинка организации"
+                    className="w-44 aspect-video object-cover rounded-lg border border-zinc-800"
+                  />
+                  <button
+                    onClick={() => { if (confirm('Удалить картинку организации?')) deleteImageMutation.mutate(); }}
+                    disabled={deleteImageMutation.isPending}
+                    className="px-2.5 py-1.5 bg-red-900/30 hover:bg-red-900/60 text-red-400 hover:text-red-300 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                  >
+                    Удалить
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-600">Не загружена — карточка организации в каталоге показывается с заглушкой.</p>
+              )}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) uploadImageMutation.mutate(file);
+                  e.target.value = '';
+                }}
+                className="text-xs text-zinc-500 file:mr-3 file:px-3 file:py-1.5 file:bg-zinc-800 file:hover:bg-zinc-700 file:text-zinc-200 file:text-xs file:font-medium file:rounded-lg file:border-0 file:cursor-pointer cursor-pointer"
+              />
+              {uploadImageMutation.isPending && <p className="text-xs text-zinc-500">Загрузка...</p>}
+              {uploadImageMutation.isError && (
+                <p className="text-xs text-red-400">{uploadImageMutation.error?.message}</p>
+              )}
+              <p className="text-xs text-zinc-600">Показывается на карточке организации в каталоге и архиве. JPEG/PNG/WebP до 2 МБ, обрезается до 16:9.</p>
             </div>
 
             <div className="flex items-center justify-between gap-3">

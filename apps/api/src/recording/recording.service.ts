@@ -15,6 +15,7 @@ const RECORDINGS_ROOT = '/recordings';
 const ARCHIVE_ROOT = '/recordings/archive';
 const FFPROBE_TIMEOUT_MS = 30_000;
 const FFMPEG_CONCAT_TIMEOUT_MS = 120_000;
+const FFMPEG_FRAME_TIMEOUT_MS = 30_000;
 const GLUE_TIMEOUT_MINUTES = parseInt(process.env.RECORDING_GLUE_TIMEOUT_MINUTES ?? '60', 10);
 
 @Injectable()
@@ -117,13 +118,24 @@ export class RecordingService {
       // Step 4: собрать единый скачиваемый MP4 (один раз, пока сегменты локальные).
       await this.buildDownloadMp4(slotDir, broadcastDir);
 
+      // Step 4.5: превью записи — кадр из середины первого сегмента, кладётся
+      // в broadcastDir и уезжает в S3 общей заливкой ниже. НЕ-фатально:
+      // запись важнее картинки (превью можно потом загрузить вручную).
+      await this.buildPreviewJpeg(
+        path.join(slotDir, segments[0].filename),
+        segments[0].duration,
+        broadcastDir,
+      ).catch((err: any) =>
+        this.logger.warn(`Preview frame failed for ${broadcastId}: ${err?.message ?? err}`),
+      );
+
       // fileSize считаем только по slot-N/ (до заливки/удаления) — «честный»
       // расход данного Recording'а, не всего broadcastDir.
       const totalSize = this.getDirSize(slotDir);
 
       // Step 5-6: заливка в S3 + финализация (общий код с retry-путём).
       const keyPrefix = `archive/${mediamtxPath}/${broadcastId}`;
-      await this.uploadAndFinalize(recordingId, broadcastDir, keyPrefix, totalSize, Math.round(totalDuration));
+      await this.uploadAndFinalize(recordingId, broadcastId, broadcastDir, keyPrefix, totalSize, Math.round(totalDuration));
     } catch (err: any) {
       this.logger.error(`Conversion/upload failed for ${recordingId}: ${err.message}`);
       // Локальный broadcastDir НЕ удаляем при ошибке (ни конверсии, ни заливки) —
@@ -144,11 +156,14 @@ export class RecordingService {
    */
   private async uploadAndFinalize(
     recordingId: string,
+    broadcastId: string,
     broadcastDir: string,
     keyPrefix: string,
     fileSize: number,
     duration: number,
   ): Promise<void> {
+    // Проверить ДО rmSync: после заливки scratch удаляется.
+    const hasPreview = fs.existsSync(path.join(broadcastDir, 'preview.jpg'));
     await this.s3.uploadDirectory(broadcastDir, keyPrefix);
     fs.rmSync(broadcastDir, { recursive: true, force: true });
     await this.prisma.recording.update({
@@ -160,7 +175,32 @@ export class RecordingService {
         duration,
       },
     });
+    if (hasPreview) {
+      await this.prisma.broadcast.update({
+        where: { id: broadcastId },
+        data: { previewImagePath: `${keyPrefix}/preview.jpg` },
+      }).catch((err: any) =>
+        this.logger.warn(`Preview key update failed for ${broadcastId}: ${err?.message ?? err}`));
+    }
     this.logger.log(`Recording ${recordingId} ready (S3): ${keyPrefix}`);
+  }
+
+  /**
+   * Кадр из середины сегмента → broadcastDir/preview.jpg (640×360 cover, JPEG).
+   * Ресайз делает сам ffmpeg (scale+crop) — sharp здесь не нужен. Ключ в
+   * Broadcast.previewImagePath ставит uploadAndFinalize ПОСЛЕ успешной заливки.
+   */
+  private async buildPreviewJpeg(segmentPath: string, segmentDuration: number, broadcastDir: string): Promise<void> {
+    if (!fs.existsSync(segmentPath)) return;
+    const seek = Math.max(0, segmentDuration / 2).toFixed(2);
+    await execFileAsync('ffmpeg', [
+      '-ss', seek,
+      '-i', segmentPath,
+      '-frames:v', '1',
+      '-vf', 'scale=640:360:force_original_aspect_ratio=increase,crop=640:360',
+      '-q:v', '5',
+      '-y', path.join(broadcastDir, 'preview.jpg'),
+    ], { timeout: FFMPEG_FRAME_TIMEOUT_MS });
   }
 
   /** Суммарная длительность из #EXTINF-строк нашего же slot-плейлиста (без повторного ffprobe). */
@@ -277,6 +317,17 @@ export class RecordingService {
     for (const prefix of prefixes) {
       await this.s3.deleteByPrefix(prefix);
     }
+
+    // Превью записи лежит под тем же префиксом (deleteByPrefix его уже удалил) —
+    // обнуляем ключ, чтобы в БД не оставались висячие ссылки.
+    const broadcastIds = [...new Set(expired.map((rec) => rec.broadcastId))];
+    if (broadcastIds.length > 0) {
+      await this.prisma.broadcast.updateMany({
+        where: { id: { in: broadcastIds } },
+        data: { previewImagePath: null },
+      });
+    }
+
     for (const rec of expired) {
       await this.prisma.recording.delete({ where: { id: rec.id } });
       this.logger.log(`Deleted expired recording ${rec.id}`);
@@ -310,7 +361,7 @@ export class RecordingService {
         const keyPrefix = `archive/${basePath}/${rec.broadcastId}`;
         const fileSize = this.getDirSize(slotDir);
         const duration = this.parsePlaylistDuration(path.join(slotDir, 'index.m3u8'));
-        this.uploadAndFinalize(rec.id, broadcastDir, keyPrefix, fileSize, duration).catch(async (err) => {
+        this.uploadAndFinalize(rec.id, rec.broadcastId, broadcastDir, keyPrefix, fileSize, duration).catch(async (err) => {
           this.logger.error(`Retry upload failed for ${rec.id}: ${err.message}`);
           // Возвращаем в 'failed', иначе запись навсегда зависнет в 'processing'
           // и следующий прогон крона её не увидит.

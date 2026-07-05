@@ -26,6 +26,17 @@ export class PublicController {
     return this.pub.getCatalog();
   }
 
+  /** Картинка организации (S3-прокси) для карточек каталога/архива. */
+  @Get('orgs/:orgSlug/image')
+  async getOrgImage(@Param('orgSlug') orgSlug: string, @Res() res: Response) {
+    const buffer = await this.pub.getOrgImage(orgSlug);
+    res.set({
+      'Content-Type': 'image/jpeg',
+      'Cache-Control': 'public, max-age=300',
+    });
+    res.send(buffer);
+  }
+
   /** GET /v1/public/orgs/:orgSlug — обзор орги (список Stream'ов). */
   @Get('orgs/:orgSlug')
   getOrgOverview(@Param('orgSlug') orgSlug: string) {
@@ -57,6 +68,23 @@ export class PublicController {
     @Query('key') key?: string,
   ) {
     return this.pub.getOrgBroadcasts(orgSlug, streamSlug, key);
+  }
+
+  /** Превью записи (S3-прокси); для приватного стрима — ?key=<previewKey>. */
+  @Get('orgs/:orgSlug/streams/:streamSlug/broadcasts/:broadcastId/preview')
+  async getBroadcastPreview(
+    @Param('orgSlug') orgSlug: string,
+    @Param('streamSlug') streamSlug: string,
+    @Param('broadcastId') broadcastId: string,
+    @Query('key') key: string | undefined,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.pub.getBroadcastPreview(orgSlug, streamSlug, broadcastId, key);
+    res.set({
+      'Content-Type': 'image/jpeg',
+      'Cache-Control': 'public, max-age=300',
+    });
+    res.send(buffer);
   }
 
   @Get('orgs/:orgSlug/streams/:streamSlug/thumbnail')

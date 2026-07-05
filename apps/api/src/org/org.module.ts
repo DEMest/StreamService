@@ -6,9 +6,10 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { StreamModule } from '../stream/stream.module';
 import { RecordingModule } from '../recording/recording.module';
 import { ChatModule } from '../chat/chat.module';
+import { StorageModule } from '../storage/storage.module';
 
 @Module({
-  imports: [PrismaModule, StreamModule, RecordingModule, ChatModule],
+  imports: [PrismaModule, StreamModule, RecordingModule, ChatModule, StorageModule],
   providers: [OrgService],
   controllers: [OrgController, MediamtxWebhookController],
   exports: [OrgService],
