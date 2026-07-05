@@ -78,7 +78,6 @@ services:
     # host-порт не публикуем: nginx ходит в api по имени контейнера через сеть edge.
     volumes:
       - recordings_data:/recordings
-      - uploads_data:/app/uploads
       - hls_data:/hls
     environment:
       NODE_ENV: ${NODE_ENV:-production}
@@ -159,6 +158,5 @@ networks:
 volumes:
   postgres_data:
   recordings_data:
-  uploads_data:
   hls_data:
   minio_data:

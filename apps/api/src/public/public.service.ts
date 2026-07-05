@@ -1,8 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ThumbnailService } from '../thumbnail/thumbnail.service';
-import { promises as fs } from 'fs';
-import { join } from 'path';
+import { ImageService } from '../storage/image.service';
 
 /**
  * DTO `/v1/public/orgs/:orgSlug/streams/:streamSlug/stream` для viewer'а.
@@ -13,21 +12,15 @@ export interface PublicStreamDto {
 }
 
 /**
- * Карточка каталога — одна на орг (`GET /v1/public/orgs`).
+ * Карточка каталога — одна на орг (`GET /v1/public/orgs`). Превью карточки —
+ * ТОЛЬКО картинка орги (`/orgs/:orgSlug/image`); стримовые thumbnail'ы на
+ * карточках больше не используются (решение пользователя).
  */
 export interface CatalogOrgCard {
   orgSlug: string;
   orgName: string;
   liveCount: number;
-  previewMode: string;
-  hasCustomPreview: boolean;
-  /**
-   * slug репрезентативного Stream'а (см. `getCatalog`) — нужен фронту, чтобы
-   * построить per-stream thumbnail URL (`/orgs/:orgSlug/streams/:streamSlug/thumbnail`);
-   * org-level thumbnail route не существует. `null` — у орги нет ни одного
-   * публичного Stream'а (карточка без превью).
-   */
-  representativeStreamSlug: string | null;
+  hasImage: boolean;
 }
 
 /**
@@ -55,13 +48,13 @@ export class PublicService {
   constructor(
     private prisma: PrismaService,
     private thumbnail: ThumbnailService,
+    private images: ImageService,
   ) {}
 
   /**
    * Каталог — одна карточка на орг. `liveCount` — число текущих live
-   * публичных Stream'ов. `previewMode`/`hasCustomPreview` берутся с первого
-   * live Stream'а (или первого по порядку, если live нет — карточка офлайн-орги
-   * на `/organizations`).
+   * публичных Stream'ов. `hasImage` — есть ли у орги картинка
+   * (`/orgs/:orgSlug/image`) для превью карточки.
    */
   async getCatalog(): Promise<CatalogOrgCard[]> {
     const orgs = await this.prisma.organization.findMany({
@@ -70,34 +63,21 @@ export class PublicService {
         slug: true,
         name: true,
         createdAt: true,
+        imagePath: true,
         streams: {
           where: { isPublic: true },
-          select: {
-            slug: true,
-            isLive: true,
-            previewMode: true,
-            previewImagePath: true,
-            createdAt: true,
-          },
+          select: { isLive: true },
         },
       },
     });
 
-    const cards = orgs.map((org) => {
-      const streamsByCreatedAtAsc = [...org.streams].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-      const liveStreams = streamsByCreatedAtAsc.filter((s) => s.isLive);
-      const liveCount = liveStreams.length;
-      const representative = liveStreams[0] ?? streamsByCreatedAtAsc[0];
-      return {
-        orgSlug: org.slug,
-        orgName: org.name,
-        liveCount,
-        previewMode: representative?.previewMode ?? 'multicam',
-        hasCustomPreview: !!representative?.previewImagePath,
-        representativeStreamSlug: representative?.slug ?? null,
-        _createdAt: org.createdAt,
-      };
-    });
+    const cards = orgs.map((org) => ({
+      orgSlug: org.slug,
+      orgName: org.name,
+      liveCount: org.streams.filter((s) => s.isLive).length,
+      hasImage: !!org.imagePath,
+      _createdAt: org.createdAt,
+    }));
 
     // Сначала орги с liveCount > 0 (сами между собой — по createdAt DESC,
     // НЕ по величине liveCount), потом офлайн-орги (тоже по createdAt DESC).
@@ -153,6 +133,21 @@ export class PublicService {
   }
 
   /**
+   * Картинка орги для карточек каталога/архива.
+   * 404 — орги нет / неактивна / картинка не загружена / объект недоступен.
+   */
+  async getOrgImage(orgSlug: string): Promise<Buffer> {
+    const org = await this.prisma.organization.findFirst({
+      where: { slug: orgSlug, isActive: true },
+      select: { imagePath: true },
+    });
+    if (!org?.imagePath) throw new NotFoundException('Organization image not found');
+    const buf = await this.images.serve(org.imagePath);
+    if (!buf) throw new NotFoundException('Organization image not found');
+    return buf;
+  }
+
+  /**
    * Thumbnail для Stream'а. streamSlug ОБЯЗАТЕЛЕН — каждый Stream самостоятелен.
    */
   async getThumbnail(orgSlug: string, streamSlug: string): Promise<{ buffer: Buffer; maxAge: number }> {
@@ -170,8 +165,7 @@ export class PublicService {
     }
 
     if (stream.previewImagePath) {
-      const filePath = join(process.cwd(), 'uploads', stream.previewImagePath);
-      const buf = await fs.readFile(filePath).catch(() => null);
+      const buf = await this.images.serve(stream.previewImagePath);
       if (!buf) throw new NotFoundException('Preview image not found');
       return { buffer: buf, maxAge: 300 };
     }
@@ -277,11 +271,35 @@ export class PublicService {
           select: { id: true, status: true, fileSize: true, duration: true },
           take: 1,
         },
+        previewImagePath: true,
       },
     });
-    return broadcasts.map(({ recordings, ...rest }) => ({
+    return broadcasts.map(({ recordings, previewImagePath, ...rest }) => ({
       ...rest,
+      hasPreview: !!previewImagePath,
       recording: recordings[0] ?? null,
     }));
+  }
+
+  /**
+   * Превью записи (S3-прокси). Гейт как у списка broadcasts: приватный Stream
+   * без правильного key → 404 (существование не палим).
+   */
+  async getBroadcastPreview(orgSlug: string, streamSlug: string, broadcastId: string, key?: string): Promise<Buffer> {
+    const stream = await this.prisma.stream.findFirst({
+      where: { slug: streamSlug, org: { slug: orgSlug, isActive: true } },
+      select: { id: true, isPublic: true, previewKey: true },
+    });
+    if (!stream) throw new NotFoundException('Stream not found');
+    if (!stream.isPublic && stream.previewKey !== key) throw new NotFoundException('Stream not found');
+
+    const broadcast = await this.prisma.broadcast.findFirst({
+      where: { id: broadcastId, streamId: stream.id },
+      select: { previewImagePath: true },
+    });
+    if (!broadcast?.previewImagePath) throw new NotFoundException('Broadcast preview not found');
+    const buf = await this.images.serve(broadcast.previewImagePath);
+    if (!buf) throw new NotFoundException('Broadcast preview not found');
+    return buf;
   }
 }

@@ -55,6 +55,7 @@ interface BroadcastItem {
   description?: string;
   startedAt: string;
   endedAt?: string;
+  hasPreview?: boolean;
   recording?: {
     id: string;
     status: string;
@@ -150,6 +151,29 @@ export default function StreamDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream-broadcasts', id] }),
   });
 
+  const [previewBump, setPreviewBump] = useState(() => Date.now());
+
+  const uploadBroadcastPreview = useMutation({
+    mutationFn: async ({ bid, file }: { bid: string; file: File }) => {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/org/broadcasts/${bid}/preview`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Не удалось загрузить' }));
+        throw new Error(err.message ?? 'Не удалось загрузить');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      setPreviewBump(Date.now());
+      qc.invalidateQueries({ queryKey: ['org-stream-broadcasts', id] });
+    },
+  });
+
   const uploadPreview = useMutation({
     mutationFn: async (file: File) => {
       const formData = new FormData();
@@ -181,6 +205,11 @@ export default function StreamDetailPage() {
   const rtmpPort = process.env.NEXT_PUBLIC_RTMP_PORT ?? '1935';
   const orgSlug = profile?.slug ?? '';
   const streamSlug = stream?.slug ?? '';
+
+  const broadcastPreviewUrl = (bid: string) => {
+    const keyPart = stream && !stream.isPublic && stream.previewKey ? `key=${stream.previewKey}&` : '';
+    return `${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/public/orgs/${orgSlug}/streams/${streamSlug}/broadcasts/${bid}/preview?${keyPart}t=${previewBump}`;
+  };
 
   const srtStreamId = `publish:live/${orgSlug}/${streamSlug}`;
   const srtFullUrl =
@@ -653,15 +682,30 @@ export default function StreamDetailPage() {
           <div className="flex flex-col gap-2">
             {broadcasts?.map((b) => (
               <div key={b.id} className="bg-surface-primary rounded-lg p-3.5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <span className="font-semibold text-sm text-zinc-100">{b.title}</span>
-                    {b.description && (
-                      <span className="ml-2 text-zinc-600 text-xs">{b.description}</span>
+                <div className="flex items-center gap-3">
+                  <div className="relative w-28 shrink-0 aspect-video bg-zinc-900 rounded-md overflow-hidden hidden sm:block">
+                    {b.hasPreview ? (
+                      <img
+                        src={broadcastPreviewUrl(b.id)}
+                        alt=""
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <VideoCamera size={20} className="text-zinc-700" weight="thin" />
+                      </div>
                     )}
-                    <div className="text-xs text-zinc-600 mt-0.5 font-mono tabular-nums">
-                      {new Date(b.startedAt).toLocaleDateString('ru-RU')}
-                      {b.recording?.duration ? ` · ${formatTime(b.recording.duration)}` : ''}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="min-w-0">
+                      <span className="font-semibold text-sm text-zinc-100">{b.title}</span>
+                      {b.description && (
+                        <span className="ml-2 text-zinc-600 text-xs">{b.description}</span>
+                      )}
+                      <div className="text-xs text-zinc-600 mt-0.5 font-mono tabular-nums">
+                        {new Date(b.startedAt).toLocaleDateString('ru-RU')}
+                        {b.recording?.duration ? ` · ${formatTime(b.recording.duration)}` : ''}
+                      </div>
                     </div>
                   </div>
                   <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
@@ -682,6 +726,20 @@ export default function StreamDetailPage() {
                         Обрабатывается...
                       </span>
                     )}
+                    <label className="flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer">
+                      <ImageSquare size={12} />
+                      {uploadBroadcastPreview.isPending ? 'Загрузка...' : 'Заменить превью'}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) uploadBroadcastPreview.mutate({ bid: b.id, file });
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
                     <button
                       onClick={() => {
                         if (confirm(`Удалить запись "${b.title}"?`))

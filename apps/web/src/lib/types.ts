@@ -1,15 +1,13 @@
 /**
  * Карточка каталога (backend: `GET /v1/public/orgs`) — одна на орг.
- * Ссылка → `/watch/<orgSlug>` (обзор орги).
+ * Превью карточки — картинка орги (`/v1/public/orgs/<slug>/image`), если
+ * загружена; стримовые thumbnail'ы на карточках не используются.
  */
 export interface CatalogOrgCard {
   orgSlug: string;
   orgName: string;
   liveCount: number;
-  previewMode: string;
-  hasCustomPreview: boolean;
-  /** slug репрезентативного Stream'а для построения per-stream thumbnail URL; null — нет публичных Stream'ов. */
-  representativeStreamSlug: string | null;
+  hasImage: boolean;
 }
 
 export type CatalogItem = CatalogOrgCard;

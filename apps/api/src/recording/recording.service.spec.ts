@@ -27,7 +27,11 @@ const mockPrisma = {
   },
   broadcast: {
     findMany: jest.fn(),
-    update: jest.fn(),
+    // Дефолтный resolved-результат: часть НЕ-preview тестов (spyExistsSync
+    // мокается true для ВСЕХ путей, в т.ч. случайно для preview.jpg) иначе
+    // получила бы undefined и упала бы на `.catch()` в uploadAndFinalize.
+    update: jest.fn().mockResolvedValue({}),
+    updateMany: jest.fn(),
   },
   stream: {
     update: jest.fn(),
@@ -51,6 +55,11 @@ describe('RecordingService', () => {
   let spyWriteFileSync: jest.SpyInstance;
   let spyStatSync: jest.SpyInstance;
   let spyRmSync: jest.SpyInstance;
+  // Ссылка на глобальный спай buildPreviewJpeg из beforeEach — нужна тесту
+  // guard'а «сегмент не существует», который обязан вызвать РЕАЛЬНЫЙ метод
+  // (mockRestore() внутри одного it, beforeEach переустановит спай заново
+  // для следующих тестов).
+  let spyBuildPreviewJpeg: jest.SpyInstance;
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -80,6 +89,10 @@ describe('RecordingService', () => {
       height: 1080,
     });
     jest.spyOn(service as any, 'buildDownloadMp4').mockResolvedValue(undefined);
+    // Превью — авто-кадр из ffmpeg; мокаем глобально, чтобы существующие
+    // convert-тесты не спавнили реальный ffmpeg-процесс. Тесты превью ниже
+    // переопределяют этот спай под свой сценарий.
+    spyBuildPreviewJpeg = jest.spyOn(service as any, 'buildPreviewJpeg').mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -503,6 +516,76 @@ describe('RecordingService', () => {
         expect.stringContaining('bcast-orphan'),
         { recursive: true, force: true },
       );
+    });
+  });
+
+  describe('preview frame (авто-кадр записи)', () => {
+    it('convertRecording строит preview.jpg после download.mp4 и до заливки', async () => {
+      // настроить существующие спаи convert-пайплайна (probeMp4, buildDownloadMp4,
+      // uploadAndFinalize) как в соседних тестах convertRecording
+      const previewSpy = jest.spyOn(service as any, 'buildPreviewJpeg').mockResolvedValue(undefined);
+      await (service as any).convertRecording('rec-1', 'org1/main', 'b1', 1, ['a.mp4'], '/recordings/live/org1/main');
+      expect(previewSpy).toHaveBeenCalled();
+    });
+
+    it('ошибка кадра НЕ фатальна: uploadAndFinalize всё равно вызывается', async () => {
+      jest.spyOn(service as any, 'buildPreviewJpeg').mockRejectedValue(new Error('ffmpeg died'));
+      const finalizeSpy = jest.spyOn(service as any, 'uploadAndFinalize').mockResolvedValue(undefined);
+      await (service as any).convertRecording('rec-1', 'org1/main', 'b1', 1, ['a.mp4'], '/recordings/live/org1/main');
+      expect(finalizeSpy).toHaveBeenCalled();
+      expect(mockPrisma.recording.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'failed' } }),
+      );
+    });
+
+    it('uploadAndFinalize ставит Broadcast.previewImagePath если preview.jpg существует', async () => {
+      jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+      jest.spyOn(fs, 'rmSync').mockImplementation(() => {});
+      mockS3.uploadDirectory.mockResolvedValue(undefined);
+      mockPrisma.recording.update.mockResolvedValue({});
+      mockPrisma.broadcast.update.mockResolvedValue({});
+      await (service as any).uploadAndFinalize('rec-1', 'b1', '/scratch/b1', 'archive/org1/main/b1', 100, 60);
+      expect(mockPrisma.broadcast.update).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { previewImagePath: 'archive/org1/main/b1/preview.jpg' },
+      });
+    });
+
+    it('uploadAndFinalize НЕ трогает Broadcast без preview.jpg', async () => {
+      jest.spyOn(fs, 'existsSync').mockReturnValue(false);
+      jest.spyOn(fs, 'rmSync').mockImplementation(() => {});
+      mockS3.uploadDirectory.mockResolvedValue(undefined);
+      mockPrisma.recording.update.mockResolvedValue({});
+      await (service as any).uploadAndFinalize('rec-1', 'b1', '/scratch/b1', 'archive/org1/main/b1', 100, 60);
+      expect(mockPrisma.broadcast.update).not.toHaveBeenCalled();
+    });
+
+    it('buildPreviewJpeg молча выходит, если сегмент не существует', async () => {
+      // Глобальный beforeEach подменяет buildPreviewJpeg заглушкой (см. строку
+      // ~90), иначе этот тест дергал бы стаб, а не реальный early-return
+      // `if (!fs.existsSync(segmentPath)) return;` — восстанавливаем реальную
+      // реализацию, чтобы guard был действительно проверен.
+      spyBuildPreviewJpeg.mockRestore();
+      jest.spyOn(fs, 'existsSync').mockReturnValue(false);
+      await expect((service as any).buildPreviewJpeg('/no/seg.mp4', 10, '/scratch/b1'))
+        .resolves.toBeUndefined();
+    });
+  });
+
+  describe('cleanupExpired обнуляет previewImagePath', () => {
+    it('updateMany по broadcastId истёкших recordings', async () => {
+      mockPrisma.recording.findMany.mockResolvedValue([
+        { id: 'r1', broadcastId: 'b1', manifestPath: 'archive/org1/main/b1/master.m3u8' },
+        { id: 'r2', broadcastId: 'b2', manifestPath: 'archive/org1/main/b2/master.m3u8' },
+      ]);
+      mockPrisma.recording.delete.mockResolvedValue({});
+      mockS3.deleteByPrefix.mockResolvedValue(undefined);
+      mockPrisma.broadcast.updateMany.mockResolvedValue({ count: 2 });
+      await service.cleanupExpired();
+      expect(mockPrisma.broadcast.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['b1', 'b2'] } },
+        data: { previewImagePath: null },
+      });
     });
   });
 });

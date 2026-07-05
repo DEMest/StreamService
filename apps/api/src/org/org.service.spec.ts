@@ -3,6 +3,7 @@ import { OrgService } from './org.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecordingService } from '../recording/recording.service';
 import { ChatGateway } from '../chat/chat.gateway';
+import { ImageService } from '../storage/image.service';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 
 const mockPrisma = {
@@ -13,6 +14,7 @@ const mockRecording = { deleteRecordingByBroadcastId: jest.fn() };
 const mockChatGateway = {
   broadcastChatEnabled: jest.fn(),
 };
+const mockImages = { upload: jest.fn(), delete: jest.fn(), serve: jest.fn() };
 
 describe('OrgService', () => {
   let service: OrgService;
@@ -25,6 +27,7 @@ describe('OrgService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: RecordingService, useValue: mockRecording },
         { provide: ChatGateway, useValue: mockChatGateway },
+        { provide: ImageService, useValue: mockImages },
       ],
     }).compile();
     service = module.get(OrgService);
@@ -34,12 +37,12 @@ describe('OrgService', () => {
     it('returns org profile without stream-fields', async () => {
       mockPrisma.organization.findUnique.mockResolvedValue({
         id: 'o1', slug: 'org', name: 'Org', isActive: true, createdAt: new Date(),
-        chatTtlMinutes: 180, chatEnabled: true,
+        chatTtlMinutes: 180, chatEnabled: true, imagePath: null,
       });
       const r = await service.getProfile('o1');
       expect(r).toEqual({
         id: 'o1', slug: 'org', name: 'Org', isActive: true, createdAt: expect.any(Date),
-        chatTtlMinutes: 180, chatEnabled: true,
+        chatTtlMinutes: 180, chatEnabled: true, imagePath: null,
       });
       expect((r as any).streamTitle).toBeUndefined();
       expect((r as any).ingestKey).toBeUndefined();
@@ -155,6 +158,64 @@ describe('OrgService', () => {
       await expect(service.deleteBroadcast('o1', 'bcast1')).rejects.toBeInstanceOf(NotFoundException);
       expect(mockRecording.deleteRecordingByBroadcastId).not.toHaveBeenCalled();
       expect(mockPrisma.broadcast.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('uploadBroadcastPreview', () => {
+    it('404 для чужого broadcast, upload не вызывается', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue(null);
+      await expect(service.uploadBroadcastPreview('o1', 'b-alien', Buffer.from('x')))
+        .rejects.toBeInstanceOf(NotFoundException);
+      expect(mockImages.upload).not.toHaveBeenCalled();
+    });
+
+    it('заливает по ключу archive/<org>/<stream>/<broadcastId>/preview.jpg и ставит previewImagePath', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue({
+        id: 'b1',
+        stream: { slug: 'main', org: { slug: 'club1' } },
+      });
+      mockPrisma.broadcast.update.mockResolvedValue({});
+      const r = await service.uploadBroadcastPreview('o1', 'b1', Buffer.from('img'));
+      expect(mockImages.upload).toHaveBeenCalledWith('archive/club1/main/b1/preview.jpg', Buffer.from('img'));
+      expect(mockPrisma.broadcast.update).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { previewImagePath: 'archive/club1/main/b1/preview.jpg' },
+      });
+      expect(r).toEqual({ ok: true });
+    });
+
+    it('легаси-запись со slug="" — ключ без сегмента стрима', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue({
+        id: 'b1',
+        stream: { slug: '', org: { slug: 'club1' } },
+      });
+      mockPrisma.broadcast.update.mockResolvedValue({});
+      await service.uploadBroadcastPreview('o1', 'b1', Buffer.from('img'));
+      expect(mockImages.upload).toHaveBeenCalledWith('archive/club1/b1/preview.jpg', Buffer.from('img'));
+    });
+  });
+
+  describe('uploadImage / deleteImage', () => {
+    it('uploads to images/org/<orgId>.jpg and stores imagePath', async () => {
+      mockPrisma.organization.update.mockResolvedValue({});
+      const r = await service.uploadImage('o1', Buffer.from('img'));
+      expect(mockImages.upload).toHaveBeenCalledWith('images/org/o1.jpg', Buffer.from('img'));
+      expect(mockPrisma.organization.update).toHaveBeenCalledWith({
+        where: { id: 'o1' },
+        data: { imagePath: 'images/org/o1.jpg' },
+      });
+      expect(r).toEqual({ ok: true });
+    });
+
+    it('deleteImage removes object and clears imagePath', async () => {
+      mockPrisma.organization.update.mockResolvedValue({});
+      const r = await service.deleteImage('o1');
+      expect(mockImages.delete).toHaveBeenCalledWith('images/org/o1.jpg');
+      expect(mockPrisma.organization.update).toHaveBeenCalledWith({
+        where: { id: 'o1' },
+        data: { imagePath: null },
+      });
+      expect(r).toEqual({ ok: true });
     });
   });
 });

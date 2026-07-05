@@ -10,10 +10,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
 import { ChatService } from '../chat/chat.service';
+import { ImageService } from '../storage/image.service';
 import { randomBytes } from 'crypto';
-import * as sharp from 'sharp';
-import { promises as fsPromises } from 'fs';
-import { join } from 'path';
 
 const VALID_PREVIEW_MODES = ['multicam', 'cam1', 'cam2', 'cam3', 'cam4'];
 
@@ -161,6 +159,7 @@ export class StreamService {
     private mediamtx: MediamtxService,
     private recording: RecordingService,
     private chatService: ChatService,
+    private images: ImageService,
   ) {}
 
   async getStreamWithOrg(streamId: string) {
@@ -512,10 +511,12 @@ export class StreamService {
           select: { id: true, status: true, fileSize: true, duration: true },
           take: 1,
         },
+        previewImagePath: true,
       },
     });
-    return broadcasts.map(({ recordings, ...rest }) => ({
+    return broadcasts.map(({ recordings, previewImagePath, ...rest }) => ({
       ...rest,
+      hasPreview: !!previewImagePath,
       recording: recordings[0] ?? null,
     }));
   }
@@ -772,41 +773,25 @@ export class StreamService {
     return this.toDto(updated);
   }
 
-  private getPreviewUploadsDir(): string {
-    return join(process.cwd(), 'uploads', 'previews');
-  }
-
   /**
-   * Загрузка статичного превью Stream'а (показывается когда Stream offline).
-   * Файл именуется по Stream.id (не по slug — slug можно поменять переименованием,
-   * id стабилен). Cross-tenant → 404.
+   * Статичное превью Stream'а (показывается когда Stream offline).
+   * Хранится в S3 (`images/stream/<streamId>.jpg`) — ключ по Stream.id
+   * (slug можно переименовать, id стабилен). Cross-tenant → 404.
    */
   async uploadPreviewForOrg(orgId: string, streamId: string, fileBuffer: Buffer): Promise<{ ok: true; previewImagePath: string }> {
     await this.loadForOrg(orgId, streamId);
-    const dir = this.getPreviewUploadsDir();
-    await fsPromises.mkdir(dir, { recursive: true });
-
-    const filename = `${streamId}.jpg`;
-    const filePath = join(dir, filename);
-
-    await sharp(fileBuffer)
-      .resize(640, 360, { fit: 'cover' })
-      .jpeg({ quality: 80 })
-      .toFile(filePath);
-
-    const relativePath = `previews/${filename}`;
+    const key = `images/stream/${streamId}.jpg`;
+    await this.images.upload(key, fileBuffer);
     await this.prisma.stream.update({
       where: { id: streamId },
-      data: { previewImagePath: relativePath },
+      data: { previewImagePath: key },
     });
-
-    return { ok: true, previewImagePath: relativePath };
+    return { ok: true, previewImagePath: key };
   }
 
   async deletePreviewForOrg(orgId: string, streamId: string): Promise<{ ok: true }> {
     await this.loadForOrg(orgId, streamId);
-    const filePath = join(this.getPreviewUploadsDir(), `${streamId}.jpg`);
-    await fsPromises.unlink(filePath).catch(() => {});
+    await this.images.delete(`images/stream/${streamId}.jpg`);
     await this.prisma.stream.update({
       where: { id: streamId },
       data: { previewImagePath: null },

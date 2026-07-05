@@ -5,6 +5,7 @@ import {
   GetObjectCommand,
   ListObjectsV2Command,
   DeleteObjectsCommand,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { S3Service } from './s3.service';
 import * as fs from 'fs';
@@ -173,6 +174,37 @@ describe('S3Service', () => {
       expect(s3Mock.commandCalls(ListObjectsV2Command).length).toBe(2);
       const call = s3Mock.commandCalls(DeleteObjectsCommand)[0];
       expect(call.args[0].input.Delete?.Objects).toEqual([{ Key: 'a' }, { Key: 'b' }]);
+    });
+  });
+
+  describe('putObject / getObjectBuffer / deleteObject', () => {
+    it('putObject sends PutObjectCommand with body, contentType and cache-control', async () => {
+      s3Mock.on(PutObjectCommand).resolves({});
+      await service.putObject('images/org/o1.jpg', Buffer.from('jpeg'), 'image/jpeg');
+      const calls = s3Mock.commandCalls(PutObjectCommand);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].args[0].input).toMatchObject({
+        Key: 'images/org/o1.jpg',
+        ContentType: 'image/jpeg',
+        CacheControl: 'public, max-age=300',
+      });
+    });
+
+    it('getObjectBuffer returns object body as Buffer', async () => {
+      s3Mock.on(GetObjectCommand).resolves({
+        Body: { transformToByteArray: async () => new Uint8Array([1, 2, 3]) } as any,
+      });
+      const buf = await service.getObjectBuffer('images/org/o1.jpg');
+      expect(Buffer.isBuffer(buf)).toBe(true);
+      expect([...buf]).toEqual([1, 2, 3]);
+    });
+
+    it('deleteObject sends DeleteObjectCommand for the key', async () => {
+      s3Mock.on(DeleteObjectCommand).resolves({});
+      await service.deleteObject('images/org/o1.jpg');
+      expect(s3Mock.commandCalls(DeleteObjectCommand)[0].args[0].input).toMatchObject({
+        Key: 'images/org/o1.jpg',
+      });
     });
   });
 });

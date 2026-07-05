@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { PrismaService } from '../prisma/prisma.service';
 import { RecordingService } from '../recording/recording.service';
 import { ChatGateway } from '../chat/chat.gateway';
+import { ImageService } from '../storage/image.service';
 
 /**
  * OrgService — только org-уровневые операции. Всё, что раньше делегировалось
@@ -14,6 +15,7 @@ export class OrgService {
     private prisma: PrismaService,
     private recording: RecordingService,
     private chatGateway: ChatGateway,
+    private images: ImageService,
   ) {}
 
   async getProfile(orgId: string) {
@@ -27,6 +29,7 @@ export class OrgService {
         createdAt: true,
         chatTtlMinutes: true,
         chatEnabled: true,
+        imagePath: true,
       },
     });
     if (!org) throw new NotFoundException('Organization not found');
@@ -85,6 +88,52 @@ export class OrgService {
     if (!broadcast) throw new NotFoundException('Broadcast not found');
     await this.recording.deleteRecordingByBroadcastId(broadcastId);
     await this.prisma.broadcast.delete({ where: { id: broadcastId } });
+    return { ok: true };
+  }
+
+  /**
+   * Ручная замена превью записи (перезапись того же S3-ключа, по которому
+   * финализация кладёт авто-кадр). Ключ живёт под префиксом записи —
+   * удаляется вместе с ней. Tenant-scope как у updateBroadcast: 404 для чужих.
+   */
+  async uploadBroadcastPreview(orgId: string, broadcastId: string, fileBuffer: Buffer): Promise<{ ok: true }> {
+    const broadcast = await this.prisma.broadcast.findFirst({
+      where: { id: broadcastId, stream: { orgId } },
+      select: { id: true, stream: { select: { slug: true, org: { select: { slug: true } } } } },
+    });
+    if (!broadcast?.stream) throw new NotFoundException('Broadcast not found');
+    const { stream } = broadcast;
+    // Паритет с retryFailed: slug='' — легаси default-Stream, путь без сегмента стрима.
+    const basePath = stream.slug === '' ? stream.org.slug : `${stream.org.slug}/${stream.slug}`;
+    const key = `archive/${basePath}/${broadcastId}/preview.jpg`;
+    await this.images.upload(key, fileBuffer);
+    await this.prisma.broadcast.update({
+      where: { id: broadcastId },
+      data: { previewImagePath: key },
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Картинка организации — показывается на карточках каталога/архива.
+   * Хранится в S3 (`images/org/<orgId>.jpg`), перезапись по тому же ключу.
+   */
+  async uploadImage(orgId: string, fileBuffer: Buffer): Promise<{ ok: true }> {
+    const key = `images/org/${orgId}.jpg`;
+    await this.images.upload(key, fileBuffer);
+    await this.prisma.organization.update({
+      where: { id: orgId },
+      data: { imagePath: key },
+    });
+    return { ok: true };
+  }
+
+  async deleteImage(orgId: string): Promise<{ ok: true }> {
+    await this.images.delete(`images/org/${orgId}.jpg`);
+    await this.prisma.organization.update({
+      where: { id: orgId },
+      data: { imagePath: null },
+    });
     return { ok: true };
   }
 }

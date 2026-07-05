@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { OrgService } from './org.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -70,5 +71,43 @@ export class OrgController {
   @Delete('broadcasts/:id')
   deleteBroadcast(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.org.deleteBroadcast(user.orgId!, id);
+  }
+
+  /**
+   * POST /v1/org/broadcasts/:id/preview — заменить превью записи
+   * (авто-кадр или предыдущую ручную картинку). Отдельного DELETE нет.
+   */
+  @Post('broadcasts/:id/preview')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 } }))
+  uploadBroadcastPreview(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+      throw new BadRequestException('Only JPEG, PNG and WebP images are allowed');
+    }
+    return this.org.uploadBroadcastPreview(user.orgId!, id, file.buffer);
+  }
+
+  /**
+   * POST /v1/org/image — загрузить картинку организации (multipart `file`).
+   * Нормализуется в JPEG 640×360 и хранится в S3.
+   */
+  @Post('image')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 } }))
+  uploadImage(@CurrentUser() user: JwtPayload, @UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+      throw new BadRequestException('Only JPEG, PNG and WebP images are allowed');
+    }
+    return this.org.uploadImage(user.orgId!, file.buffer);
+  }
+
+  /** DELETE /v1/org/image — удалить картинку организации. */
+  @Delete('image')
+  deleteImage(@CurrentUser() user: JwtPayload) {
+    return this.org.deleteImage(user.orgId!);
   }
 }

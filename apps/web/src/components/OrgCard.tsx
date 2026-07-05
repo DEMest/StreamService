@@ -13,9 +13,8 @@ import { API_BASE } from '@/lib/types';
 export function OrgCard({ org, thumbKey, href }: { org: CatalogOrgCard; thumbKey: number; href?: string }) {
   const [imgError, setImgError] = useState(false);
   const isLive = org.liveCount > 0;
-  const hasThumbnail = (isLive || org.hasCustomPreview) && !!org.representativeStreamSlug;
-  const thumbUrl = hasThumbnail
-    ? `${API_BASE}/v1/public/orgs/${org.orgSlug}/streams/${org.representativeStreamSlug}/thumbnail?t=${thumbKey}`
+  const thumbUrl = org.hasImage
+    ? `${API_BASE}/v1/public/orgs/${org.orgSlug}/image?t=${thumbKey}`
     : null;
 
   useEffect(() => { setImgError(false); }, [thumbKey]);

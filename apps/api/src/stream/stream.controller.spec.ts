@@ -1,11 +1,3 @@
-jest.mock('sharp', () => {
-  return jest.fn(() => ({
-    resize: jest.fn().mockReturnThis(),
-    jpeg: jest.fn().mockReturnThis(),
-    toFile: jest.fn().mockResolvedValue(undefined),
-  }));
-});
-
 import { Test } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -21,10 +13,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
 import { ChatService } from '../chat/chat.service';
+import { ImageService } from '../storage/image.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { JwtPayload } from '../auth/auth.service';
-import { promises as fsPromises } from 'fs';
 
 /**
  * Тесты идут «снаружи» через контроллер, но сам JwtAuthGuard / RolesGuard не
@@ -63,6 +55,7 @@ const mockMediamtx = {
 
 const mockRecording = { onStreamEnded: jest.fn().mockResolvedValue(undefined) };
 const mockChatService = { clearMessagesByStream: jest.fn() };
+const mockImages = { upload: jest.fn(), delete: jest.fn(), serve: jest.fn() };
 
 const orgAdmin: JwtPayload = {
   sub: 'u1',
@@ -76,11 +69,6 @@ describe('StreamController', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    // spy on fs.promises methods individually (not jest.mock('fs', ...)) —
-    // сохраняет реальный fs для остальной инфраструктуры, см. паттерн в
-    // recording.service.spec.ts.
-    jest.spyOn(fsPromises, 'mkdir').mockResolvedValue(undefined as any);
-    jest.spyOn(fsPromises, 'unlink').mockResolvedValue(undefined as any);
     const module = await Test.createTestingModule({
       controllers: [StreamController],
       providers: [
@@ -89,6 +77,7 @@ describe('StreamController', () => {
         { provide: MediamtxService, useValue: mockMediamtx },
         { provide: RecordingService, useValue: mockRecording },
         { provide: ChatService, useValue: mockChatService },
+        { provide: ImageService, useValue: mockImages },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -620,10 +609,10 @@ describe('StreamController', () => {
 
       const r = await controller.uploadPreview(orgAdmin, 'st-1', fakeFile());
 
-      expect(r).toEqual({ ok: true, previewImagePath: 'previews/st-1.jpg' });
+      expect(r).toEqual({ ok: true, previewImagePath: 'images/stream/st-1.jpg' });
       expect(mockPrisma.stream.update).toHaveBeenCalledWith({
         where: { id: 'st-1' },
-        data: { previewImagePath: 'previews/st-1.jpg' },
+        data: { previewImagePath: 'images/stream/st-1.jpg' },
       });
     });
 

@@ -4,6 +4,8 @@ import {
   GetObjectCommand,
   ListObjectsV2Command,
   DeleteObjectsCommand,
+  PutObjectCommand,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -21,6 +23,11 @@ function metaFor(relPath: string): UploadMeta {
   }
   if (relPath.endsWith('.mp4')) {
     return { contentType: 'video/mp4', cacheControl: 'public, max-age=31536000, immutable' };
+  }
+  if (relPath.endsWith('.jpg')) {
+    // Превью записи (preview.jpg в broadcastDir) — картинка меняется при
+    // ручной замене, поэтому короткий max-age, а не immutable.
+    return { contentType: 'image/jpeg', cacheControl: 'public, max-age=300' };
   }
   return { contentType: 'video/mp2t', cacheControl: 'public, max-age=31536000, immutable' };
 }
@@ -121,6 +128,37 @@ export class S3Service {
       Key: key,
     }));
     return await res.Body!.transformToString();
+  }
+
+  /**
+   * Одиночный маленький объект (картинки-превью). Для больших файлов —
+   * uploadDirectory (потоковый multipart).
+   */
+  async putObject(key: string, body: Buffer, contentType: string): Promise<void> {
+    await this.client.send(new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+      CacheControl: 'public, max-age=300',
+    }));
+  }
+
+  /** Тело объекта как Buffer — для проксирования картинок через API. */
+  async getObjectBuffer(key: string): Promise<Buffer> {
+    const res = await this.client.send(new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+    }));
+    return Buffer.from(await res.Body!.transformToByteArray());
+  }
+
+  /** Удаление одного объекта. Отсутствующий ключ — не ошибка (S3-семантика). */
+  async deleteObject(key: string): Promise<void> {
+    await this.client.send(new DeleteObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+    }));
   }
 
   /**

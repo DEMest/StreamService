@@ -19,6 +19,7 @@ interface BroadcastItem {
   description?: string;
   startedAt: string;
   endedAt: string;
+  hasPreview?: boolean;
   recording?: {
     id: string;
     status: string;
@@ -54,7 +55,7 @@ interface ArchiveViewProps {
  * URL'ы endpoint'ов:
  *   /v1/public/orgs/<org>/streams/<stream>/broadcasts
  *   /api/v1/public/orgs/<org>/streams/<stream>/broadcasts/<id>/recording/hls/master.m3u8
- *   /v1/public/orgs/<org>/streams/<stream>/thumbnail
+ *   /v1/public/orgs/<org>/streams/<stream>/broadcasts/<id>/preview
  *
  * Кнопка «← к стриму» ведёт на watch-страницу `/watch/<org>/<stream>`.
  */
@@ -106,7 +107,6 @@ export function ArchiveView({ orgSlug, streamSlug }: ArchiveViewProps) {
 
   const watchBasePath = `/watch/${orgSlug}/${streamSlug}`;
   const watchLink = previewKey ? `${watchBasePath}?key=${previewKey}` : watchBasePath;
-  const thumbUrl = `${API_BASE}${apiBasePath}/thumbnail`;
 
   useEffect(() => {
     const onChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -356,7 +356,15 @@ export function ArchiveView({ orgSlug, streamSlug }: ArchiveViewProps) {
               >
                 {/* Thumbnail */}
                 <div className="relative aspect-video bg-zinc-900 overflow-hidden">
-                  <ThumbnailImage src={thumbUrl} />
+                  {b.hasPreview ? (
+                    <ThumbnailImage
+                      src={`${API_BASE}${apiBasePath}/broadcasts/${b.id}/preview${previewKey ? `?key=${previewKey}` : ''}`}
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <Monitor size={48} className="text-zinc-800" weight="thin" />
+                    </div>
+                  )}
                   {isReady && b.recording?.duration && (
                     <span className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-black/80 text-zinc-300 text-[0.65rem] font-mono rounded">
                       {formatTime(b.recording.duration)}
