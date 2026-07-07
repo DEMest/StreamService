@@ -1,0 +1,39 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1c1c1f"/>
+      <stop offset="100%" stop-color="#0b0b0d"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f2543a"/>
+      <stop offset="100%" stop-color="#c81f1f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#2a1512" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#0b0b0d" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="96" fill="url(#glow)"/>
+
+  <!-- Four camera-angle segments forming a ring (multi-camera concept) -->
+  <g opacity="0.9">
+    <path d="M 256 96 A 160 160 0 0 1 411 231 L 340 245 A 88 88 0 0 0 256 168 Z" fill="url(#accent)"/>
+    <path d="M 411 281 A 160 160 0 0 1 281 411 L 267 340 A 88 88 0 0 0 344 267 Z" fill="url(#accent)" opacity="0.75"/>
+    <path d="M 231 411 A 160 160 0 0 1 101 256 L 172 244 A 88 88 0 0 0 245 344 Z" fill="url(#accent)" opacity="0.55"/>
+    <path d="M 101 231 A 160 160 0 0 1 231 101 L 245 172 A 88 88 0 0 0 168 245 Z" fill="url(#accent)" opacity="0.35"/>
+  </g>
+
+  <!-- Center dark circle -->
+  <circle cx="256" cy="256" r="82" fill="#0d1024"/>
+  <circle cx="256" cy="256" r="82" fill="none" stroke="url(#accent)" stroke-width="4"/>
+
+  <!-- Play triangle -->
+  <path d="M 230 208 L 230 304 L 312 256 Z" fill="#ffffff"/>
+
+  <!-- Live dot -->
+  <circle cx="392" cy="120" r="26" fill="#f2543a"/>
+  <circle cx="392" cy="120" r="26" fill="none" stroke="#0d1024" stroke-width="6"/>
+</svg>
