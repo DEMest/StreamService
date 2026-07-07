@@ -32,7 +32,9 @@ export class MediamtxWebhookController {
     const streamSlug = segments.slice(1).join('/');
 
     const params = new URLSearchParams(body.query ?? '');
-    const key = params.get('key') || body.password;
+    // vMix строит адрес как URL + "/" + <Stream Name or Key>: при пустом поле ключа
+    // к query приклеивается хвостовой "/" — не считаем его частью ключа.
+    const key = (params.get('key') || body.password)?.replace(/\/+$/, '');
     const pathLabel = `"${orgSlug}/${streamSlug}"`;
     if (!key) {
       this.logger.warn(`RTMP auth rejected for ${pathLabel}: no key (${body.ip})`);

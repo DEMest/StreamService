@@ -478,7 +478,14 @@ export default function StreamDetailPage() {
             )}
             {protocol === 'rtmp' && (
               <div className="pt-3 border-t border-zinc-800/40">
-                <p className="text-xs text-zinc-500 mb-1.5">Полная ссылка для vMix (поле «URL»):</p>
+                <p className="text-xs text-zinc-500 mb-1.5">
+                  vMix / OBS: в поле «URL» («Сервер») вставьте Сервер, в поле «Stream Name or
+                  Key» («Ключ потока») — Ключ потока. Не вставляйте полную ссылку в поле «URL»
+                  vMix: он допишет «/» в конец, и сервер отклонит ключ.
+                </p>
+                <p className="text-xs text-zinc-500 mb-1.5">
+                  Полная ссылка (для клиентов с одним полем адреса, например ffmpeg):
+                </p>
                 <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
                   <code className="flex-1 text-xs text-zinc-300 font-mono break-all">
                     {rtmpFullUrl ||
