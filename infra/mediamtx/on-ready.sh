@@ -17,23 +17,29 @@ curl -sf -X POST "$API_BASE_URL/v1/internal/mediamtx/webhook" \
 # Composite Stream — master.m3u8 + HD (+ optional LQ fallback).
 mkdir -p "$HLS_DIR/hd"
 if [ "$HLS_LQ_ENABLED" = "true" ]; then
-  mkdir -p "$HLS_DIR/lq"
+  mkdir -p "$HLS_DIR/p720" "$HLS_DIR/p480" "$HLS_DIR/p240"
   cat > "$HLS_DIR/master.m3u8" <<EOF
 #EXTM3U
 #EXT-X-VERSION:3
 
-#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080,NAME="HD"
+#EXT-X-STREAM-INF:BANDWIDTH=6500000,RESOLUTION=1920x1080,NAME="Оригинал"
 hd/index.m3u8
 
-#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=960x540,NAME="LQ"
-lq/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1280x720,NAME="720p"
+p720/index.m3u8
+
+#EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=854x480,NAME="480p"
+p480/index.m3u8
+
+#EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=426x240,NAME="240p"
+p240/index.m3u8
 EOF
 else
   cat > "$HLS_DIR/master.m3u8" <<EOF
 #EXTM3U
 #EXT-X-VERSION:3
 
-#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080,NAME="HD"
+#EXT-X-STREAM-INF:BANDWIDTH=6500000,RESOLUTION=1920x1080,NAME="HD"
 hd/index.m3u8
 EOF
 fi
@@ -46,26 +52,43 @@ if [ "$HLS_LQ_ENABLED" = "true" ]; then
     -fflags nobuffer -flags low_delay \
     -rtsp_transport tcp \
     -i "rtsp://localhost:8554/$MTX_PATH" \
+    -filter_complex "[0:v]fps=30,split=3[s720][s480][s240];[s720]scale=-2:720[v720];[s480]scale=-2:480[v480];[s240]scale=-2:240[v240]" \
     -map 0:v -map 0:a -c:v copy -c:a aac \
-      -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 5 \
+      -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 40 \
       -hls_flags delete_segments+temp_file \
       -hls_segment_filename "$HLS_DIR/hd/seg%05d.ts" \
       "$HLS_DIR/hd/index.m3u8" \
-    -map 0:v -map 0:a \
-      -vf "scale=ceil(iw/4)*2:ceil(ih/4)*2" \
-      -c:v libx264 -preset fast -crf 28 \
-      -c:a aac -b:a 96k \
-      -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 5 \
+    -map "[v720]" -map 0:a \
+      -c:v libx264 -preset veryfast -crf 25 -maxrate 3000k -bufsize 6000k \
+      -r 30 -g 60 -keyint_min 60 -sc_threshold 0 \
+      -c:a aac -b:a 128k \
+      -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 40 \
       -hls_flags delete_segments+temp_file \
-      -hls_segment_filename "$HLS_DIR/lq/seg%05d.ts" \
-      "$HLS_DIR/lq/index.m3u8"
+      -hls_segment_filename "$HLS_DIR/p720/seg%05d.ts" \
+      "$HLS_DIR/p720/index.m3u8" \
+    -map "[v480]" -map 0:a \
+      -c:v libx264 -preset veryfast -crf 26 -maxrate 1400k -bufsize 2800k \
+      -r 30 -g 60 -keyint_min 60 -sc_threshold 0 \
+      -c:a aac -b:a 96k \
+      -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 40 \
+      -hls_flags delete_segments+temp_file \
+      -hls_segment_filename "$HLS_DIR/p480/seg%05d.ts" \
+      "$HLS_DIR/p480/index.m3u8" \
+    -map "[v240]" -map 0:a \
+      -c:v libx264 -preset veryfast -crf 28 -maxrate 500k -bufsize 1000k \
+      -r 30 -g 60 -keyint_min 60 -sc_threshold 0 \
+      -c:a aac -b:a 64k \
+      -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 40 \
+      -hls_flags delete_segments+temp_file \
+      -hls_segment_filename "$HLS_DIR/p240/seg%05d.ts" \
+      "$HLS_DIR/p240/index.m3u8"
 else
   exec ffmpeg \
     -fflags nobuffer -flags low_delay \
     -rtsp_transport tcp \
     -i "rtsp://localhost:8554/$MTX_PATH" \
     -map 0:v -map 0:a -c:v copy -c:a aac \
-      -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 5 \
+      -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 40 \
       -hls_flags delete_segments+temp_file \
       -hls_segment_filename "$HLS_DIR/hd/seg%05d.ts" \
       "$HLS_DIR/hd/index.m3u8"
