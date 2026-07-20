@@ -151,6 +151,18 @@ export default function StreamDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream-broadcasts', id] }),
   });
 
+  // Мультивыбор для массового удаления записей.
+  const [selectedBroadcasts, setSelectedBroadcasts] = useState<Set<string>>(new Set());
+  const bulkDeleteBroadcasts = useMutation({
+    mutationFn: (ids: string[]) => Promise.all(ids.map((bid) => api.delete(`/v1/org/broadcasts/${bid}`))),
+    onSuccess: () => {
+      setSelectedBroadcasts(new Set());
+      qc.invalidateQueries({ queryKey: ['org-stream-broadcasts', id] });
+    },
+  });
+  // На дашборде скрываем пустые сессии (эфиры без записи) — показываем только записи.
+  const visibleBroadcasts = broadcasts?.filter((b) => b.recording) ?? [];
+
   const [previewBump, setPreviewBump] = useState(() => Date.now());
 
   const uploadBroadcastPreview = useMutation({
@@ -679,17 +691,63 @@ export default function StreamDetailPage() {
             Архив трансляций
           </h2>
 
-          {broadcasts?.length === 0 && (
+          {visibleBroadcasts.length === 0 && (
             <div className="flex flex-col items-center py-8 gap-2 opacity-40">
               <VideoCamera size={32} className="text-zinc-600" weight="thin" />
               <p className="text-zinc-500 text-sm">Записей пока нет</p>
             </div>
           )}
 
+          {visibleBroadcasts.length > 0 && (
+            <div className="flex items-center justify-between mb-3">
+              <label className="flex items-center gap-2 text-xs text-zinc-500 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="accent-brand"
+                  checked={selectedBroadcasts.size === visibleBroadcasts.length}
+                  onChange={(e) =>
+                    setSelectedBroadcasts(
+                      e.target.checked ? new Set(visibleBroadcasts.map((b) => b.id)) : new Set(),
+                    )
+                  }
+                />
+                Выбрать все
+              </label>
+              {selectedBroadcasts.size > 0 && (
+                <button
+                  onClick={() => {
+                    if (confirm(`Удалить выбранные записи (${selectedBroadcasts.size})?`))
+                      bulkDeleteBroadcasts.mutate(Array.from(selectedBroadcasts));
+                  }}
+                  disabled={bulkDeleteBroadcasts.isPending}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-red-900/30 hover:bg-red-900/60 text-red-400 hover:text-red-300 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                >
+                  <Trash size={12} />
+                  {bulkDeleteBroadcasts.isPending
+                    ? 'Удаление...'
+                    : `Удалить выбранные (${selectedBroadcasts.size})`}
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-col gap-2">
-            {broadcasts?.map((b) => (
+            {visibleBroadcasts.map((b) => (
               <div key={b.id} className="bg-surface-primary rounded-lg p-3.5">
                 <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    className="accent-brand shrink-0"
+                    checked={selectedBroadcasts.has(b.id)}
+                    onChange={(e) =>
+                      setSelectedBroadcasts((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(b.id);
+                        else next.delete(b.id);
+                        return next;
+                      })
+                    }
+                  />
                   <div className="relative w-28 shrink-0 aspect-video bg-zinc-900 rounded-md overflow-hidden hidden sm:block">
                     {b.hasPreview ? (
                       <img
