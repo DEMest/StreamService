@@ -124,10 +124,29 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
     seekToLive() {
       const video = primaryVideoRef.current;
       if (!video) return;
-      if (primaryHlsRef.current) {
-        video.currentTime = primaryHlsRef.current.liveSyncPosition ?? video.duration;
-      } else {
-        video.currentTime = video.duration;
+      // На архивном плеере «прыжок к эфиру» — no-op (как и во внутренней версии).
+      if (isArchive) return;
+      // Ищем живой край надёжно: liveSyncPosition часто null (например сразу
+      // после BUFFER_STALLED, пока hls.js не пересчитал позицию). Тогда берём
+      // конец доступного диапазона seekable, иначе конец buffered, иначе duration.
+      let target = primaryHlsRef.current?.liveSyncPosition ?? null;
+      if (target == null || !Number.isFinite(target)) {
+        const seekable = video.seekable;
+        if (seekable.length > 0) {
+          target = seekable.end(seekable.length - 1);
+        } else {
+          const buffered = video.buffered;
+          if (buffered.length > 0) {
+            target = buffered.end(buffered.length - 1);
+          }
+        }
+      }
+      if (target == null || !Number.isFinite(target)) {
+        target = video.duration;
+      }
+      // Прыгаем только на конечную цель, иначе currentTime = NaN сломает плеер.
+      if (Number.isFinite(target)) {
+        video.currentTime = target;
       }
     },
     pause() {
@@ -204,10 +223,16 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
       hls = new Hls({
         liveDurationInfinity: true,
         lowLatencyMode: false,
-        liveSyncDuration: 4,
-        liveMaxLatencyDuration: 600,
-        maxBufferLength: 30,
+        liveSyncDuration: 20,
+        // Отстали больше ~40c (≈ окну сегментов на сервере) → догоняем эфир,
+        // а не ждём уже удалённый сегмент (иначе стоп-кадр в бесконечность).
+        liveMaxLatencyDuration: 40,
+        // Плавный догон ускорением до 1.5x вместо резкого прыжка, когда отставание умеренное.
+        maxLiveSyncPlaybackRate: 1.5,
+        maxBufferLength: 45,
         maxMaxBufferLength: 60,
+        // Перепрыгивать дыры до 1c (пропущенные/битые сегменты), а не вставать на них.
+        maxBufferHole: 1,
         backBufferLength: 600,
         startLevel: -1,
       });
@@ -224,11 +249,45 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
         onQualityChange?.(data.level);
       });
+      // Прыжок к живому краю: спасает от вечного стоп-кадра, когда буфер опустел
+      // и нужный сегмент уже стёрт с сервера (плеер иначе ждёт его бесконечно).
+      const seekToLive = () => {
+        if (isArchive) return;
+        // Основной ориентир — liveSyncPosition от hls.js.
+        let pos = hls?.liveSyncPosition ?? null;
+        // Фолбэк: hls.js часто отдаёт null (например сразу после BUFFER_STALLED,
+        // пока не пересчитал позицию). В этом случае живой край — это конец
+        // доступного диапазона seekable, а если его нет — конец buffered.
+        if (pos == null || !Number.isFinite(pos)) {
+          const seekable = video.seekable;
+          if (seekable.length > 0) {
+            pos = seekable.end(seekable.length - 1);
+          } else {
+            const buffered = video.buffered;
+            if (buffered.length > 0) {
+              pos = buffered.end(buffered.length - 1);
+            }
+          }
+        }
+        // Прыгаем только если цель конечна и заметно опережает текущую позицию.
+        if (pos != null && Number.isFinite(pos) && pos - video.currentTime > 1) {
+          video.currentTime = pos;
+          video.play().catch(() => {});
+        }
+      };
+
       hls.on(Hls.Events.ERROR, (_event, data) => {
+        // Застревание буфера у hls.js — НЕ фатально, но на живом стриме требует
+        // прыжка к эфиру, иначе плеер молча стоит на месте.
+        if (!isArchive && data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+          seekToLive();
+          return;
+        }
         if (!data.fatal) return;
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
             hls!.startLoad();
+            seekToLive();
             break;
           case Hls.ErrorTypes.MEDIA_ERROR:
             hls!.recoverMediaError();
