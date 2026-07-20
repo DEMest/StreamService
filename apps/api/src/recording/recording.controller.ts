@@ -17,6 +17,10 @@ const HLS_LIVE_ROOT = '/hls/live';
 export class RecordingController {
   private readonly logger = new Logger(RecordingController.name);
 
+  // Кэш {isPublic, previewKey} по стриму: снимает запрос в Postgres с каждого HLS-сегмента.
+  private readonly liveAuthCache = new Map<string, { isPublic: boolean; previewKey: string | null; expires: number }>();
+  private readonly LIVE_AUTH_TTL_MS = 5000;
+
   constructor(
     private recording: RecordingService,
     private s3: S3Service,
@@ -120,7 +124,7 @@ export class RecordingController {
     @Query('key') key: string | undefined,
     @Res() res: Response,
   ) {
-    this.logger.log(`serveLiveHlsNamed: orgSlug=${orgSlug} streamSlug=${streamSlug} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
+    this.logger.debug(`serveLiveHlsNamed: orgSlug=${orgSlug} streamSlug=${streamSlug} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
     await this.serveLiveHlsImpl(orgSlug, streamSlug, wildcard, key, res);
   }
 
@@ -137,15 +141,31 @@ export class RecordingController {
     key: string | undefined,
     res: Response,
   ) {
-    const stream = await this.prisma.stream.findFirst({
-      where: { slug: streamSlug, org: { slug: orgSlug, isActive: true } },
-      select: { isPublic: true, previewKey: true },
-    });
-    if (!stream) {
-      res.status(404).json({ message: 'Stream not found' });
-      return;
+    const authKey = `${orgSlug}/${streamSlug}`;
+    const now = Date.now();
+    let auth = this.liveAuthCache.get(authKey);
+    if (auth && auth.expires < now) {
+      this.liveAuthCache.delete(authKey);
+      auth = undefined;
     }
-    if (!stream.isPublic && stream.previewKey !== key) {
+    if (!auth) {
+      const stream = await this.prisma.stream.findFirst({
+        where: { slug: streamSlug, org: { slug: orgSlug, isActive: true } },
+        select: { isPublic: true, previewKey: true },
+      });
+      if (!stream) {
+        // Несуществующие стримы НЕ кэшируем — иначе перебор slug'ов раздувает Map.
+        res.status(404).json({ message: 'Stream not found' });
+        return;
+      }
+      auth = {
+        isPublic: stream.isPublic,
+        previewKey: stream.previewKey ?? null,
+        expires: now + this.LIVE_AUTH_TTL_MS,
+      };
+      this.liveAuthCache.set(authKey, auth);
+    }
+    if (!auth.isPublic && auth.previewKey !== key) {
       res.status(404).json({ message: 'Stream not found' });
       return;
     }
