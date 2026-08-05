@@ -619,7 +619,9 @@ describe('StreamService', () => {
         {
           id: 'b1', title: 'Broadcast 1', description: null,
           startedAt: now, endedAt: now,
-          recordings: [{ id: 'r1', status: 'ready', fileSize: 1024, duration: 3600 }],
+          // fileSize приходит из Prisma как BigInt (колонка bigint) —
+          // наружу обязан уехать number, иначе ответ не сериализуется.
+          recordings: [{ id: 'r1', status: 'ready', fileSize: 1024n, duration: 3600 }],
         },
         {
           id: 'b2', title: 'Broadcast 2', description: null,

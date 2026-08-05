@@ -11,8 +11,15 @@ import { randomBytes } from 'crypto';
 import { buildHlsVodPlaylist, buildMasterPlaylist, FmpSegment } from './hls-vod';
 
 const execFileAsync = promisify(execFile);
-const RECORDINGS_ROOT = '/recordings';
+export const RECORDINGS_ROOT = '/recordings';
 const ARCHIVE_ROOT = '/recordings/archive';
+/**
+ * Срок жизни записи (`Recording.expiresAt`), после которого cleanupExpired
+ * (крон 03:00) сносит её префикс из S3. Экспортируется, потому что метрика
+ * хранилища в дашборде орги показывает то же число — дублировать «7» в двух
+ * местах нельзя, иначе они разъедутся.
+ */
+export const RECORDING_RETENTION_DAYS = 7;
 const FFPROBE_TIMEOUT_MS = 30_000;
 const FFMPEG_CONCAT_TIMEOUT_MS = 120_000;
 const FFMPEG_FRAME_TIMEOUT_MS = 30_000;
@@ -32,7 +39,7 @@ export class RecordingService {
     basePath: string,
   ): Promise<void> {
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
+    expiresAt.setDate(expiresAt.getDate() + RECORDING_RETENTION_DAYS);
 
     // Segments lie directly in /recordings/live/<basePath>/.
     const segmentsDir = path.join(RECORDINGS_ROOT, 'live', basePath);

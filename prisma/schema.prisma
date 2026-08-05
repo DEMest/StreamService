@@ -103,7 +103,12 @@ model Recording {
   broadcast    Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
   status       String    @default("processing")
   manifestPath String?
-  fileSize     Int?
+  // BigInt, а не Int: int4 упирается в 2.15 ГБ, а час записи на 6 Мбит/с —
+  // это уже ~2.7 ГБ сегментов. На Int финализация падала бы на «value out of
+  // range for type integer» ПОСЛЕ успешной заливки в S3 и удаления локального
+  // scratch, оставляя запись навсегда failed без manifestPath.
+  // Наружу отдаётся как number — см. toRecordingSummary (BigInt не сериализуется в JSON).
+  fileSize     BigInt?
   duration     Int?
   expiresAt    DateTime
   createdAt    DateTime  @default(now())

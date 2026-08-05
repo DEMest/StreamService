@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ThumbnailService } from '../thumbnail/thumbnail.service';
 import { ImageService } from '../storage/image.service';
+import { toRecordingSummary } from '../recording/recording-summary';
 
 /**
  * DTO `/v1/public/orgs/:orgSlug/streams/:streamSlug/stream` для viewer'а.
@@ -277,7 +278,7 @@ export class PublicService {
     return broadcasts.map(({ recordings, previewImagePath, ...rest }) => ({
       ...rest,
       hasPreview: !!previewImagePath,
-      recording: recordings[0] ?? null,
+      recording: toRecordingSummary(recordings[0]),
     }));
   }
 

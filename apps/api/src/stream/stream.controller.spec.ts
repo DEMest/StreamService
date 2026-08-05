@@ -333,7 +333,7 @@ describe('StreamController', () => {
         {
           id: 'b1', title: 'B1', description: null,
           startedAt: now, endedAt: now,
-          recordings: [{ id: 'r1', status: 'ready', fileSize: 512, duration: 1800 }],
+          recordings: [{ id: 'r1', status: 'ready', fileSize: 512n, duration: 1800 }],
         },
       ]);
 

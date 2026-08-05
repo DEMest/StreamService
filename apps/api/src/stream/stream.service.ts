@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
+import { toRecordingSummary } from '../recording/recording-summary';
 import { ChatService } from '../chat/chat.service';
 import { ImageService } from '../storage/image.service';
 import { randomBytes } from 'crypto';
@@ -517,7 +518,7 @@ export class StreamService {
     return broadcasts.map(({ recordings, previewImagePath, ...rest }) => ({
       ...rest,
       hasPreview: !!previewImagePath,
-      recording: recordings[0] ?? null,
+      recording: toRecordingSummary(recordings[0]),
     }));
   }
 

@@ -34,6 +34,15 @@ export class OrgController {
   }
 
   /**
+   * GET /v1/org/storage — метрика хранилища: занято архивом орги, свободно на
+   * диске сервера, прогноз «сколько часов записи ещё влезет» и срок хранения.
+   */
+  @Get('storage')
+  getStorage(@CurrentUser() user: JwtPayload) {
+    return this.org.getStorage(user.orgId!);
+  }
+
+  /**
    * PATCH /v1/org/settings — отображаемое имя орги + настройки чата.
    * `name` уникально в БД (409 при занятом имени).
    */
