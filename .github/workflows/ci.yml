@@ -40,7 +40,6 @@ jobs:
       # Версию pnpm corepack берёт из "packageManager" в корневом package.json.
       - name: Активация pnpm
         run: |
-          corepack enable
           corepack prepare --activate
           pnpm --version
 
@@ -68,7 +67,6 @@ jobs:
 
       - name: Активация pnpm
         run: |
-          corepack enable
           corepack prepare --activate
           pnpm --version
 
