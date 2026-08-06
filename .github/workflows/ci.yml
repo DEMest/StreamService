@@ -9,16 +9,20 @@ on:
   push:
     branches: [main]
 
-# Новый пуш в ветку отменяет предыдущий незавершённый прогон — не держим
-# очередь ради результата, который уже никому не нужен.
+# Новый пуш в PR отменяет предыдущий незавершённый прогон — не держим очередь
+# ради результата, который уже никому не нужен. На main НЕ отменяем: история
+# проверок самой основной ветки должна быть полной.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   api:
     name: API — сборка и тесты
-    runs-on: ubuntu-latest
+    # Свой раннер (infra/ci-runner). Хостовые перестали выдаваться: джобы
+    # висели в очереди и отменялись с "The job was not acquired by Runner of
+    # type hosted even after multiple attempts".
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +53,7 @@ jobs:
 
   web:
     name: Web — типы и сборка
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
