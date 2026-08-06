@@ -132,6 +132,10 @@ services:
         NEXT_PUBLIC_SRT_PORT: ${MEDIAMTX_SRT_PORT:-8890}
         NEXT_PUBLIC_RTMP_PORT: ${MEDIAMTX_RTMP_PORT:-1935}
         NEXT_PUBLIC_HLS_PORT: ${MEDIAMTX_HLS_PORT:-8888}
+        # Демо-ролик лендинга: отдаётся из публичного бакета объектного
+        # хранилища, в репозитории/образе его нет. Пусто — лендинг не ломается,
+        # блок демо показывает статичную заглушку.
+        NEXT_PUBLIC_DEMO_VIDEO_URL: ${NEXT_PUBLIC_DEMO_VIDEO_URL:-}
     container_name: ${COMPOSE_PROJECT_NAME:-streamservice}-web
     # host-порт не публикуем: nginx ходит в web по имени контейнера через сеть edge.
     environment:

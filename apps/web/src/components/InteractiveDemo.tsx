@@ -15,6 +15,20 @@ const CAMERAS: { id: CamId; label: string; shortLabel: string; col: number; row:
 ];
 
 /*
+ * Демо-ролик (~97 МБ) лежит в объектном хранилище, а не в git и не в
+ * apps/web/public — иначе он попадает в образ и раздувает репозиторий.
+ * Прод: публичный бакет MinIO за edge-nginx (location /static/, см.
+ * infra/deploy/nginx-streamservice.conf) — стабильный URL с immutable-кэшем.
+ *
+ * NEXT_PUBLIC_* инлайнится на build-time, поэтому после смены значения нужен
+ * `docker compose build web`, а не просто restart.
+ *
+ * Переменная не задана — это НЕ поломка лендинга: блок рендерится статичной
+ * заглушкой (см. hasVideo ниже), интерактив с квадрантами продолжает работать.
+ */
+const DEMO_VIDEO_URL = process.env.NEXT_PUBLIC_DEMO_VIDEO_URL ?? '';
+
+/*
  * translate 51% (вместо 50%) сдвигает центральную границу видео
  * на ~5px за край контейнера, скрывая стык между камерами.
  * scale(2.04) компенсирует лишний сдвиг, чтобы внешние края
@@ -29,12 +43,17 @@ function getTransform(mode: ViewMode): string {
 }
 
 export function InteractiveDemo() {
+  const hasVideo = DEMO_VIDEO_URL !== '';
   const [mode, setMode] = useState<ViewMode>('multicam');
   const [hasInteracted, setHasInteracted] = useState(false);
-  const [videoReady, setVideoReady] = useState(false);
+  // Без URL спиннер не показываем вовсе — иначе он крутился бы вечно.
+  const [videoReady, setVideoReady] = useState(!hasVideo);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const handleCanPlay = useCallback(() => setVideoReady(true), []);
+  // Хранилище недоступно или URL битый — гасим спиннер и оставляем тёмную
+  // подложку с сеткой вместо бесконечной «Загрузки видео».
+  const handleVideoError = useCallback(() => setVideoReady(true), []);
 
   function selectCam(cam: CamId) {
     setMode(cam);
@@ -54,22 +73,25 @@ export function InteractiveDemo() {
         }`}
         onClick={handleContainerClick}
       >
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          loop
-          playsInline
-          src="/video.mp4"
-          onCanPlay={handleCanPlay}
-          className={`w-full h-full object-cover will-change-transform transition-opacity duration-500 ${
-            videoReady ? 'opacity-100' : 'opacity-0'
-          }`}
-          style={{
-            transform: getTransform(mode),
-            transition: `transform 0.7s cubic-bezier(0.16, 1, 0.3, 1)${videoReady ? '' : ', opacity 0.5s ease'}`,
-          }}
-        />
+        {hasVideo && (
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            loop
+            playsInline
+            src={DEMO_VIDEO_URL}
+            onCanPlay={handleCanPlay}
+            onError={handleVideoError}
+            className={`w-full h-full object-cover will-change-transform transition-opacity duration-500 ${
+              videoReady ? 'opacity-100' : 'opacity-0'
+            }`}
+            style={{
+              transform: getTransform(mode),
+              transition: `transform 0.7s cubic-bezier(0.16, 1, 0.3, 1)${videoReady ? '' : ', opacity 0.5s ease'}`,
+            }}
+          />
+        )}
 
         {/* Loading state */}
         <AnimatePresence>
