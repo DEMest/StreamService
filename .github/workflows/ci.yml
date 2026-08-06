@@ -32,14 +32,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Версия pnpm берётся из "packageManager" в корневом package.json,
-      # так что здесь её дублировать не нужно.
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
+      # Намеренно НЕ используем pnpm/action-setup и actions/setup-node: каждое
+      # действие качается с codeload.github.com при прогоне, а Node 20 и
+      # corepack уже лежат в образе раннера (infra/ci-runner/Dockerfile).
+      # Меньше внешних зависимостей — меньше поводов упасть; на аварии
+      # 2026-08-06 джоба намертво вставала именно на скачивании action'ов.
+      # Версию pnpm corepack берёт из "packageManager" в корневом package.json.
+      - name: Активация pnpm
+        run: |
+          corepack enable
+          corepack prepare --activate
+          pnpm --version
 
       - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
@@ -63,12 +66,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
+      - name: Активация pnpm
+        run: |
+          corepack enable
+          corepack prepare --activate
+          pnpm --version
 
       - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
