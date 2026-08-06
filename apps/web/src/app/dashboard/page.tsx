@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { DashboardLayout } from '@/components/DashboardLayout';
+import { StorageCard } from '@/components/dashboard/StorageCard';
 import { Gear, Trash, VideoCamera, ArrowRight, Stack, Plus, DotsThreeVertical, PencilSimple, X, Warning } from '@phosphor-icons/react';
 
 interface OrgStreamSummary {
@@ -234,6 +235,9 @@ export default function DashboardPage() {
             </div>
           )}
         </section>
+
+        {/* Storage metrics — сколько места осталось под запись трансляций */}
+        <StorageCard />
 
         {/* Org-level settings (chat policy) */}
         <section className="bg-surface-elevated border border-zinc-800/50 rounded-xl p-5">

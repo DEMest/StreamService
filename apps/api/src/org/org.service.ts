@@ -1,8 +1,65 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import * as fs from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
-import { RecordingService } from '../recording/recording.service';
+import {
+  RecordingService,
+  RECORDINGS_ROOT,
+  RECORDING_RETENTION_DAYS,
+} from '../recording/recording.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { ImageService } from '../storage/image.service';
+import { ARCHIVE_OVERHEAD, hourlyRate, hoursLeft } from './storage-estimate';
+
+/**
+ * Метрика хранилища для дашборда орги (`GET /v1/org/storage`).
+ *
+ * `disk` — null в двух РАЗНЫХ случаях, поэтому рядом идёт `diskStatus`: без
+ * него фронт не мог отличить «архив во внешнем S3, места мы не меряем» от
+ * «мерить не удалось», и во втором случае показывал орге заведомую неправду.
+ */
+export type DiskStatus = 'ok' | 'external' | 'unavailable';
+
+export interface OrgStorageDto {
+  disk: { totalBytes: number; freeBytes: number } | null;
+  diskStatus: DiskStatus;
+  archive: { usedBytes: number; recordingsCount: number; durationSeconds: number };
+  estimate: {
+    bytesPerHour: number;
+    bitrateMbps: number;
+    /** true — расход посчитан по записям самой орги, false — по дефолтному битрейту. */
+    fromHistory: boolean;
+    /** Часов записи до исчерпания свободного места; null — когда disk===null. */
+    hoursLeft: number | null;
+  };
+  retentionDays: number;
+}
+
+/**
+ * Архив лежит в MinIO из этого же docker-стека (том `minio_data` на том же
+ * LVM-разделе, что и `recordings_data`), поэтому statfs по `/recordings`
+ * показывает ровно тот запас, в который упрётся заливка записи. Если
+ * `S3_ENDPOINT` указывает на внешнего провайдера — связи больше нет.
+ *
+ * Разбираем именно hostname, а не строку целиком: имя сервиса в compose может
+ * быть и `minio`, и `streamservice-minio` — regex по всему URL на втором
+ * варианте молча давал false и метрика исчезала без единого лога.
+ */
+function isLocalS3(): boolean {
+  const endpoint = process.env.S3_ENDPOINT;
+  if (!endpoint) return false;
+  let hostname: string;
+  try {
+    hostname = new URL(endpoint).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+  // Внешний провайдер всегда приходит FQDN'ом с точками, docker-имя сервиса —
+  // всегда одна метка. Так `minio.s3-provider.com` не будет принят за свой.
+  if (hostname.includes('.')) return false;
+  // `minio`, `streamservice-minio`, `minio-1`, `minio2`.
+  return /(^|-)minio[-\d]*$/.test(hostname);
+}
 
 /**
  * OrgService — только org-уровневые операции. Всё, что раньше делегировалось
@@ -11,6 +68,8 @@ import { ImageService } from '../storage/image.service';
  */
 @Injectable()
 export class OrgService {
+  private readonly logger = new Logger(OrgService.name);
+
   constructor(
     private prisma: PrismaService,
     private recording: RecordingService,
@@ -34,6 +93,80 @@ export class OrgService {
     });
     if (!org) throw new NotFoundException('Organization not found');
     return org;
+  }
+
+  /**
+   * GET /v1/org/storage — занятое место архива орги + свободное место на диске
+   * сервера + прогноз «сколько ещё часов записи влезет». Нужен орге, чтобы до
+   * начала трансляции понимать, поместится ли она.
+   *
+   * Считаем только `status='ready'`: у processing/failed `fileSize` ещё NULL,
+   * а их scratch живёт в `/recordings`, а не в архиве.
+   */
+  async getStorage(orgId: string): Promise<OrgStorageDto> {
+    const agg = await this.prisma.recording.aggregate({
+      where: { status: 'ready', broadcast: { stream: { orgId } } },
+      _sum: { fileSize: true, duration: true },
+      _count: { _all: true },
+    });
+
+    // fileSize учитывает только slot-N/; в S3 рядом лежит ещё download.mp4
+    // такого же размера — отсюда ARCHIVE_OVERHEAD (см. storage-estimate.ts).
+    // Number() — _sum по BigInt-колонке возвращает bigint, а дальше идёт
+    // обычная арифметика и JSON-ответ (BigInt не сериализуется).
+    const usedBytes = Number(agg._sum.fileSize ?? 0) * ARCHIVE_OVERHEAD;
+    const durationSeconds = agg._sum.duration ?? 0;
+
+    const { disk, diskStatus } = this.readDiskStats();
+    const rate = hourlyRate(usedBytes, durationSeconds);
+
+    return {
+      disk,
+      diskStatus,
+      archive: {
+        usedBytes,
+        recordingsCount: agg._count._all,
+        durationSeconds,
+      },
+      estimate: {
+        bytesPerHour: rate.bytesPerHour,
+        bitrateMbps: Math.round(rate.bitrateMbps * 10) / 10,
+        fromHistory: rate.fromHistory,
+        hoursLeft: disk ? hoursLeft(disk.freeBytes, rate.bytesPerHour) : null,
+      },
+      retentionDays: RECORDING_RETENTION_DAYS,
+    };
+  }
+
+  /**
+   * Свободное место тома, на котором лежит архив.
+   *
+   * `bavail` (а не `bfree`) — блоки, доступные непривилегированному процессу:
+   * ext4 резервирует ~5% под root, и записать их сервис всё равно не сможет.
+   * Из `totalBytes` этот же root-резерв вычитается, иначе процент занятого
+   * расходится с тем, что показывает `df` (38% против 36%).
+   */
+  private readDiskStats(): {
+    disk: { totalBytes: number; freeBytes: number } | null;
+    diskStatus: DiskStatus;
+  } {
+    if (!isLocalS3()) return { disk: null, diskStatus: 'external' };
+    try {
+      const st = fs.statfsSync(RECORDINGS_ROOT);
+      const rootReserved = st.bfree - st.bavail;
+      return {
+        disk: {
+          totalBytes: (st.blocks - rootReserved) * st.bsize,
+          freeBytes: st.bavail * st.bsize,
+        },
+        diskStatus: 'ok',
+      };
+    } catch (err: any) {
+      // Не 500-им весь дашборд из-за метрики: на dev-машине без /recordings
+      // (api запущен вне docker) statfs кинет ENOENT — это штатная ситуация.
+      this.logger.warn(`statfs(${RECORDINGS_ROOT}) failed: ${err?.message ?? err}`);
+      return { disk: null, diskStatus: 'unavailable' };
+    }
   }
 
   /**

@@ -49,6 +49,7 @@ fi
 # -hls_time 2 / -hls_init_time 1 / -hls_list_size 5: короткие сегменты для быстрого старта
 if [ "$HLS_LQ_ENABLED" = "true" ]; then
   exec ffmpeg \
+    -progress "$HLS_DIR/progress.log" -stats_period 1 \
     -fflags nobuffer -flags low_delay \
     -rtsp_transport tcp \
     -i "rtsp://localhost:8554/$MTX_PATH" \
@@ -84,6 +85,7 @@ if [ "$HLS_LQ_ENABLED" = "true" ]; then
       "$HLS_DIR/p240/index.m3u8"
 else
   exec ffmpeg \
+    -progress "$HLS_DIR/progress.log" -stats_period 1 \
     -fflags nobuffer -flags low_delay \
     -rtsp_transport tcp \
     -i "rtsp://localhost:8554/$MTX_PATH" \

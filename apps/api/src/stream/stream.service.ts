@@ -9,7 +9,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
+import { toRecordingSummary } from '../recording/recording-summary';
+import { StatsService } from '../stats/stats.service';
+import { StreamStatsSnapshot } from '../stats/stats.types';
 import { ChatService } from '../chat/chat.service';
+import { ChatGateway } from '../chat/chat.gateway';
 import { ImageService } from '../storage/image.service';
 import { randomBytes } from 'crypto';
 
@@ -160,7 +164,19 @@ export class StreamService {
     private recording: RecordingService,
     private chatService: ChatService,
     private images: ImageService,
+    private stats: StatsService,
+    private chatGateway: ChatGateway,
   ) {}
+
+  /**
+   * Живая статистика эфира Stream'а (tenant-scoped). Cross-tenant → 404.
+   * Путь MediaMTX выводим из орги и слага — тот же, что при создании пути.
+   */
+  async getStatsForOrg(orgId: string, streamId: string): Promise<StreamStatsSnapshot> {
+    const stream = await this.loadForOrg(orgId, streamId);
+    const basePath = mediamtxPathForStream(stream.org.slug, stream.slug);
+    return this.stats.getSnapshot(`live/${basePath}`, this.chatGateway.getViewers(stream.id));
+  }
 
   async getStreamWithOrg(streamId: string) {
     const stream = await this.prisma.stream.findUnique({
@@ -517,7 +533,7 @@ export class StreamService {
     return broadcasts.map(({ recordings, previewImagePath, ...rest }) => ({
       ...rest,
       hasPreview: !!previewImagePath,
-      recording: recordings[0] ?? null,
+      recording: toRecordingSummary(recordings[0]),
     }));
   }
 
