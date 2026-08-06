@@ -40,4 +40,9 @@ pnpm-debug.log*
 # lock files (keep pnpm-lock.yaml)
 package-lock.json
 yarn.lock
+
+# медиа-ассеты: в git не кладём, раздаём из объектного хранилища.
+# Демо-ролик лендинга (~97 МБ) живёт в публичном бакете S3/MinIO,
+# URL приходит через NEXT_PUBLIC_DEMO_VIDEO_URL (см. .env.example).
+*.mp4
 AGENTS.md
