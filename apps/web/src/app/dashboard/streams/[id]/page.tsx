@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { RecordingControl, type RecordingMode } from '@/components/dashboard/RecordingControl';
+import { StreamStats } from '@/components/dashboard/StreamStats';
 import {
   Broadcast,
   Gear,
@@ -297,6 +298,9 @@ export default function StreamDetailPage() {
         </div>
 
         {/* Section: Broadcast Parameters */}
+        {/* Живые метрики эфира: битрейт, транскодер, пропуск кадров, графики */}
+        <StreamStats streamId={id} />
+
         <section className="bg-surface-elevated border border-zinc-800/50 rounded-xl p-5">
           <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
             <h2 className="flex items-center gap-2 text-base font-medium text-zinc-300">

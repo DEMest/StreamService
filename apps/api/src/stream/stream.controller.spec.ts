@@ -14,6 +14,8 @@ import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
 import { ChatService } from '../chat/chat.service';
 import { ImageService } from '../storage/image.service';
+import { StatsService } from '../stats/stats.service';
+import { ChatGateway } from '../chat/chat.gateway';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { JwtPayload } from '../auth/auth.service';
@@ -56,6 +58,8 @@ const mockMediamtx = {
 const mockRecording = { onStreamEnded: jest.fn().mockResolvedValue(undefined) };
 const mockChatService = { clearMessagesByStream: jest.fn() };
 const mockImages = { upload: jest.fn(), delete: jest.fn(), serve: jest.fn() };
+const mockStats = { getSnapshot: jest.fn() };
+const mockChatGateway = { getViewers: jest.fn().mockReturnValue(0) };
 
 const orgAdmin: JwtPayload = {
   sub: 'u1',
@@ -78,6 +82,8 @@ describe('StreamController', () => {
         { provide: RecordingService, useValue: mockRecording },
         { provide: ChatService, useValue: mockChatService },
         { provide: ImageService, useValue: mockImages },
+        { provide: StatsService, useValue: mockStats },
+        { provide: ChatGateway, useValue: mockChatGateway },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -320,6 +326,40 @@ describe('StreamController', () => {
   // ────────────────────────────────────────────────────────────────────────
   // GET /:id/broadcasts
   // ────────────────────────────────────────────────────────────────────────
+
+  describe('GET /:id/stats', () => {
+    it('строит MediaMTX-путь из орги и слага и подмешивает зрителей из чата', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        id: 'st-1', orgId: 'org-1', slug: 'court-a', org: { slug: 'club' },
+      });
+      mockChatGateway.getViewers.mockReturnValue(42);
+      mockStats.getSnapshot.mockResolvedValue({ path: 'live/club/court-a', live: true });
+
+      await controller.getStats(orgAdmin, 'st-1');
+
+      expect(mockStats.getSnapshot).toHaveBeenCalledWith('live/club/court-a', 42);
+      expect(mockChatGateway.getViewers).toHaveBeenCalledWith('st-1');
+    });
+
+    it('для default Stream (slug="") путь без второго сегмента', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({
+        id: 'st-0', orgId: 'org-1', slug: '', org: { slug: 'club' },
+      });
+      mockChatGateway.getViewers.mockReturnValue(0);
+      mockStats.getSnapshot.mockResolvedValue({ path: 'live/club', live: false });
+
+      await controller.getStats(orgAdmin, 'st-0');
+
+      expect(mockStats.getSnapshot).toHaveBeenCalledWith('live/club', 0);
+    });
+
+    it('чужой Stream → 404, статистика не запрашивается', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(null);
+      await expect(controller.getStats(orgAdmin, 'st-foreign'))
+        .rejects.toBeInstanceOf(NotFoundException);
+      expect(mockStats.getSnapshot).not.toHaveBeenCalled();
+    });
+  });
 
   describe('GET /:id/broadcasts', () => {
     it('delegates to listBroadcastsForOrg(user.orgId, id)', async () => {

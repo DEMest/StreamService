@@ -11,6 +11,7 @@ import { ChatModule } from './chat/chat.module';
 import { RecordingModule } from './recording/recording.module';
 import { ThumbnailModule } from './thumbnail/thumbnail.module';
 import { StreamModule } from './stream/stream.module';
+import { StatsModule } from './stats/stats.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { StreamModule } from './stream/stream.module';
     RecordingModule,
     ThumbnailModule,
     StreamModule,
+    StatsModule,
   ],
   controllers: [HealthController],
 })

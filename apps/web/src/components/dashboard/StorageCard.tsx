@@ -42,18 +42,11 @@ function formatBytes(bytes: number): string {
 
 /** Часы → «13,5 ч» либо «6 сут 13 ч», когда счёт пошёл на сутки. */
 function formatHours(hours: number): string {
-  if (!Number.isFinite(hours) || hours <= 0) return '0 мин';
-  if (hours < 1) {
-    // 0.999 ч округляется до 60 минут — показываем как час, а не «60 мин».
-    const minutes = Math.round(hours * 60);
-    return minutes >= 60 ? '1,0 ч' : `${minutes} мин`;
-  }
-  if (hours < 48) return `${hours.toFixed(1).replace('.', ',')} ч`;
-  // Округляем ДО разбора на сутки: иначе остаток 23.6 ч даёт «N сут 24 ч».
-  const total = Math.round(hours);
-  const days = Math.floor(total / 24);
-  const rest = total % 24;
-  return rest > 0 ? `${days} сут ${rest} ч` : `${days} сут`;
+  if (!Number.isFinite(hours) || hours <= 0) return '0 ч';
+  // Только часы, без перевода в сутки: орга планирует эфир в часах, и «3 сут
+  // 4 ч» заставляет её пересчитывать обратно.
+  if (hours < 100) return `${hours.toFixed(1).replace('.', ',')} ч`;
+  return `${Math.round(hours)} ч`;
 }
 
 function plural(n: number, one: string, few: string, many: string): string {
@@ -132,7 +125,6 @@ export function StorageCard() {
                 <span className={`text-2xl font-semibold tabular-nums tracking-tight ${tone.text}`}>
                   {formatHours(data.estimate.hoursLeft)}
                 </span>
-                <span className="text-sm text-zinc-500">записи ещё поместится</span>
               </div>
 
               <div

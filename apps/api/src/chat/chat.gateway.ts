@@ -138,6 +138,18 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
    * org-level настройка, поэтому матчим все актуальные rooms где есть
    * зрители этой орги.
    */
+  /**
+   * Сколько зрителей сейчас на странице просмотра этого Stream'а.
+   *
+   * Считаем по сокетам чата, а НЕ по запросам HLS: edge-nginx микро-кэширует
+   * `.ts`/`.m3u8` с ключом `$uri|$arg_key` без учёта клиента, поэтому до API
+   * доходит один запрос на всю аудиторию, и счётчик по нему всегда показывал
+   * бы единицу. Сокет же открывает каждый зритель персонально.
+   */
+  getViewers(streamId: string): number {
+    return this.roomViewers.get(chatRoomKey(streamId)) ?? 0;
+  }
+
   broadcastChatEnabled(orgSlug: string, enabled: boolean) {
     for (const room of this.roomsForOrg(orgSlug)) {
       this.server.to(room).emit('chat_enabled', enabled);
