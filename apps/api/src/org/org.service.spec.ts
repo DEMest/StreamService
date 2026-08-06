@@ -9,6 +9,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 const mockPrisma = {
   organization: { findUnique: jest.fn(), update: jest.fn() },
   broadcast: { findFirst: jest.fn(), update: jest.fn(), delete: jest.fn() },
+  recording: { aggregate: jest.fn() },
 };
 const mockRecording = { deleteRecordingByBroadcastId: jest.fn() };
 const mockChatGateway = {
@@ -51,6 +52,91 @@ describe('OrgService', () => {
     it('throws NotFoundException when org does not exist', async () => {
       mockPrisma.organization.findUnique.mockResolvedValue(null);
       await expect(service.getProfile('missing')).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('getStorage', () => {
+    const OLD_ENDPOINT = process.env.S3_ENDPOINT;
+    afterAll(() => {
+      if (OLD_ENDPOINT === undefined) delete process.env.S3_ENDPOINT;
+      else process.env.S3_ENDPOINT = OLD_ENDPOINT;
+    });
+
+    it('удваивает fileSize (сегменты + download.mp4) и считает только ready', async () => {
+      process.env.S3_ENDPOINT = 'http://minio:9000';
+      mockPrisma.recording.aggregate.mockResolvedValue({
+        // _sum по bigint-колонке Prisma возвращает BigInt — арифметика ниже
+        // обязана его нормализовать, иначе TypeError на смешивании типов.
+        _sum: { fileSize: 1_000_000_000n, duration: 3600 },
+        _count: { _all: 3 },
+      });
+
+      const r = await service.getStorage('o1');
+
+      expect(mockPrisma.recording.aggregate).toHaveBeenCalledWith({
+        where: { status: 'ready', broadcast: { stream: { orgId: 'o1' } } },
+        _sum: { fileSize: true, duration: true },
+        _count: { _all: true },
+      });
+      expect(r.archive.usedBytes).toBe(2_000_000_000);
+      expect(r.archive.recordingsCount).toBe(3);
+      expect(r.archive.durationSeconds).toBe(3600);
+      expect(r.retentionDays).toBe(7);
+      // час эфира на 2 ГБ архива → расход считается по истории орги
+      expect(r.estimate.fromHistory).toBe(true);
+      expect(r.estimate.bytesPerHour).toBe(2_000_000_000);
+    });
+
+    it('переживает пустой архив (aggregate вернул NULL-суммы)', async () => {
+      process.env.S3_ENDPOINT = 'http://minio:9000';
+      mockPrisma.recording.aggregate.mockResolvedValue({
+        _sum: { fileSize: null, duration: null },
+        _count: { _all: 0 },
+      });
+
+      const r = await service.getStorage('o1');
+
+      expect(r.archive).toEqual({ usedBytes: 0, recordingsCount: 0, durationSeconds: 0 });
+      expect(r.estimate.fromHistory).toBe(false);
+      expect(r.estimate.bitrateMbps).toBe(4);
+    });
+
+    it('не показывает диск, когда архив во внешнем S3', async () => {
+      process.env.S3_ENDPOINT = 'https://s3.eu-central-1.amazonaws.com';
+      mockPrisma.recording.aggregate.mockResolvedValue({
+        _sum: { fileSize: 500n, duration: 10 },
+        _count: { _all: 1 },
+      });
+
+      const r = await service.getStorage('o1');
+
+      expect(r.disk).toBeNull();
+      expect(r.diskStatus).toBe('external');
+      expect(r.estimate.hoursLeft).toBeNull();
+    });
+
+    it.each([
+      ['http://minio:9000', 'ok'],
+      ['http://streamservice-minio:9000', 'ok'],
+      ['http://minio-1:9000', 'ok'],
+      ['http://127.0.0.1:9000', 'ok'],
+      ['http://localhost:9000', 'ok'],
+      ['https://s3.eu-central-1.amazonaws.com', 'external'],
+      ['https://minio.s3-provider.com', 'external'],
+      ['not-a-url', 'external'],
+    ])('распознаёт локальное хранилище: %s → %s', async (endpoint, expected) => {
+      process.env.S3_ENDPOINT = endpoint;
+      mockPrisma.recording.aggregate.mockResolvedValue({
+        _sum: { fileSize: null, duration: null },
+        _count: { _all: 0 },
+      });
+
+      const r = await service.getStorage('o1');
+
+      // 'ok' достижим только если statfs('/recordings') отработал; вне docker
+      // он кинет ENOENT → 'unavailable'. Проверяем, что это НЕ 'external'.
+      if (expected === 'ok') expect(r.diskStatus).not.toBe('external');
+      else expect(r.diskStatus).toBe('external');
     });
   });
 

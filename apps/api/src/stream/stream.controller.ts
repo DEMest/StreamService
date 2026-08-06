@@ -90,6 +90,16 @@ export class StreamController {
   }
 
   /**
+   * GET /v1/org/streams/:id/stats — живая статистика эфира: входящий битрейт,
+   * кодеки, состояние транскодера (fps/speed/пропуск кадров), зрители и
+   * история за последние ~10 минут для графиков.
+   */
+  @Get(':id/stats')
+  getStats(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.streams.getStatsForOrg(user.orgId!, id);
+  }
+
+  /**
    * GET /v1/org/streams/:id/broadcasts — завершённые трансляции Stream'а (tenant-scoped).
    */
   @Get(':id/broadcasts')

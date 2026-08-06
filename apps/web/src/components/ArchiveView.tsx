@@ -23,8 +23,9 @@ interface BroadcastItem {
   recording?: {
     id: string;
     status: string;
-    fileSize?: number;
-    duration?: number;
+    // null у processing/failed — см. toRecordingSummary на бэкенде.
+    fileSize?: number | null;
+    duration?: number | null;
   };
 }
 

@@ -1,0 +1,13 @@
+-- Recording.fileSize: integer (int4) → bigint.
+--
+-- Потолок int4 — 2 147 483 647 байт (2.15 ГБ). fileSize считается по каталогу
+-- сегментов slot-N/, и час записи на 6 Мбит/с (реальный битрейт пуша орги)
+-- весит ~2.7 ГБ. На int4 финализация записи падала с
+-- «value out of range for type integer» уже ПОСЛЕ того, как архив залит в S3
+-- и локальный scratch удалён: manifestPath не проставлялся, status уходил в
+-- 'failed', а retryFailed починить её не мог — пересобирать больше не из чего.
+--
+-- ALTER TYPE int4 → int8 переписывает таблицу под ACCESS EXCLUSIVE, но
+-- Recording живёт 7 дней (cleanupExpired) и держит десятки строк — блокировка
+-- на доли секунды.
+ALTER TABLE "Recording" ALTER COLUMN "fileSize" TYPE BIGINT;

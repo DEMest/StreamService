@@ -5,6 +5,8 @@ import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
 import { ChatService } from '../chat/chat.service';
 import { ImageService } from '../storage/image.service';
+import { StatsService } from '../stats/stats.service';
+import { ChatGateway } from '../chat/chat.gateway';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 const mockPrisma = {
@@ -36,6 +38,8 @@ const mockMediamtx = {
 const mockRecording = { onStreamEnded: jest.fn().mockResolvedValue(undefined) };
 const mockChatService = { clearMessagesByStream: jest.fn() };
 const mockImages = { upload: jest.fn(), delete: jest.fn(), serve: jest.fn() };
+const mockStats = { getSnapshot: jest.fn() };
+const mockChatGateway = { getViewers: jest.fn().mockReturnValue(0) };
 
 describe('StreamService', () => {
   let service: StreamService;
@@ -51,6 +55,8 @@ describe('StreamService', () => {
         { provide: RecordingService, useValue: mockRecording },
         { provide: ChatService, useValue: mockChatService },
         { provide: ImageService, useValue: mockImages },
+        { provide: StatsService, useValue: mockStats },
+        { provide: ChatGateway, useValue: mockChatGateway },
       ],
     }).compile();
     service = module.get(StreamService);
@@ -619,7 +625,9 @@ describe('StreamService', () => {
         {
           id: 'b1', title: 'Broadcast 1', description: null,
           startedAt: now, endedAt: now,
-          recordings: [{ id: 'r1', status: 'ready', fileSize: 1024, duration: 3600 }],
+          // fileSize приходит из Prisma как BigInt (колонка bigint) —
+          // наружу обязан уехать number, иначе ответ не сериализуется.
+          recordings: [{ id: 'r1', status: 'ready', fileSize: 1024n, duration: 3600 }],
         },
         {
           id: 'b2', title: 'Broadcast 2', description: null,
