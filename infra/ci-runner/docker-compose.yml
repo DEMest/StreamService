@@ -1,0 +1,45 @@
+# Поднимается ОТДЕЛЬНО от основного стека:
+#   cd infra/ci-runner && docker compose up -d --build
+#
+# Намеренно НЕ часть корневого docker-compose.yml: раннер не имеет отношения к
+# работе продукта, и `docker compose down` в корне не должен уносить CI.
+
+services:
+  runner:
+    build:
+      context: .
+      args:
+        RUNNER_VERSION: ${RUNNER_VERSION:-2.336.0}
+    container_name: ${RUNNER_NAME:-streamservice-ci}
+    restart: unless-stopped
+
+    environment:
+      REPO_URL: ${REPO_URL:?укажите REPO_URL в infra/ci-runner/.env}
+      # Токен регистрации живёт 1 час и нужен ТОЛЬКО при первом запуске:
+      # дальше раннер держит собственные креды на томе runner-work.
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+      RUNNER_NAME: ${RUNNER_NAME:-streamservice-ci}
+      RUNNER_LABELS: ${RUNNER_LABELS:-self-hosted,linux,x64}
+
+    # Никаких хостовых монтирований и никакого докер-сокета. Раннер выполняет
+    # содержимое workflow из любой ветки — доступа к .env, базе и продовым
+    # контейнерам у него быть не должно.
+    volumes:
+      - runner-work:/home/runner/actions-runner
+
+    # Машина отдаёт живое видео. Без потолка параллельный jest на 80 ядрах
+    # отбирает CPU у транскодеров FFmpeg, и зрители получают рассыпающийся HLS.
+    # 8 ядер с запасом хватает: в замерах весь прогон занимает ~2 минуты.
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 8G
+
+    # Раннер общается с GitHub только исходящими соединениями — входящие порты
+    # не нужны, наружу ничего не публикуем.
+    networks:
+      - default
+
+volumes:
+  runner-work:

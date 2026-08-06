@@ -1,0 +1,84 @@
+name: CI
+
+# Проверки гоняются на каждый PR в main и на сам main после слияния.
+# Прогон на main нужен, чтобы поймать поломку от семантического конфликта:
+# два PR по отдельности зелёные, а вместе — нет.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  # Ручной запуск. Нужен не для удобства: push и pull_request зависят от
+  # доставки событий, а workflow_dispatch дёргается прямым вызовом API — это
+  # запасной путь, когда доставка событий у GitHub деградирует (проверено на
+  # аварии 2026-08-06, когда пуши перестали порождать прогоны).
+  # Работает только для workflow, лежащего на ветке по умолчанию.
+  workflow_dispatch:
+
+# Новый пуш в PR отменяет предыдущий незавершённый прогон — не держим очередь
+# ради результата, который уже никому не нужен. На main НЕ отменяем: история
+# проверок самой основной ветки должна быть полной.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  api:
+    name: API — сборка и тесты
+    # Свой раннер (infra/ci-runner). Хостовые перестали выдаваться: джобы
+    # висели в очереди и отменялись с "The job was not acquired by Runner of
+    # type hosted even after multiple attempts".
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      # Версия pnpm берётся из "packageManager" в корневом package.json,
+      # так что здесь её дублировать не нужно.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Установка зависимостей
+        run: pnpm install --frozen-lockfile
+
+      # Схема лежит в корне репозитория; путь прописан в apps/api/package.json
+      # ("prisma": { "schema": "../../prisma/schema.prisma" }).
+      # Без generate нет типов @prisma/client — не соберётся ни nest, ни jest.
+      - name: Генерация клиента Prisma
+        run: pnpm --filter api exec prisma generate
+
+      # nest build прогоняет tsc — отдельная проверка типов не нужна.
+      - name: Сборка (она же проверка типов)
+        run: pnpm --filter api build
+
+      - name: Тесты
+        run: pnpm --filter api test
+
+  web:
+    name: Web — типы и сборка
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Установка зависимостей
+        run: pnpm install --frozen-lockfile
+
+      # Отдельный проход tsc: next build проверяет только то, что достижимо
+      # из страниц, а tsc — весь src, включая пока не подключённые компоненты.
+      - name: Проверка типов
+        run: pnpm --filter web exec tsc --noEmit
+
+      # NEXT_PUBLIC_* не задаём намеренно: в сборке должны работать дефолты из
+      # кода. Если сборка без них падает — это баг, и его надо видеть здесь.
+      - name: Сборка
+        run: pnpm --filter web build
