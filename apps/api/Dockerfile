@@ -13,8 +13,11 @@ RUN corepack enable
 # Разрешаем pnpm скачивать бинарники Prisma
 RUN pnpm config set ignore-scripts false
 
-# Копируем конфиги для установки
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# Копируем конфиги для установки.
+# .npmrc обязателен ДО install: в нём public-hoist-pattern для @prisma/client.
+# Без него раскладка node_modules другая, prisma не находит клиент и лезет
+# доустанавливать себя сама (`pnpm add prisma` прямо во время сборки).
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 
@@ -27,40 +30,24 @@ RUN pnpm config set fetch-retries 5 && \
     pnpm config set fetch-retry-maxtimeout 120000 && \
     pnpm install --frozen-lockfile
 
-# Убиваем ЛЮБУЮ самодеятельность Prisma.
-# Явно добавляем в корень и CLI, и сам клиент.
-# Теперь генератор увидит обе зависимости и ничего не будет скачивать сам.
-RUN pnpm add -w -D prisma@6.19.3
-RUN pnpm add -w @prisma/client@6.19.3
-
-# bcrypt в корень — seed.ts (в /app/prisma/) импортирует его, а в workspace-репе
-# bcrypt живёт только в apps/api/node_modules, недоступен ts-node компилятору сверху.
-RUN pnpm add -w bcrypt@^6.0.0
-RUN pnpm add -w -D @types/bcrypt@^6.0.0
-
 # Копируем весь остальной код (чтобы Nest.js было что собирать)
 COPY . .
 
-# Генерируем типы (теперь автоустановка клиента не триггернется)
-RUN pnpm exec prisma generate
+# Генерируем типы. Через --filter api, потому что prisma — devDependency
+# именно apps/api; в корневом node_modules/.bin её нет и быть не должно.
+RUN pnpm --filter api exec prisma generate
 
 # Собираем Nest.js
 RUN pnpm --filter api build
 
 # Прекомпилируем seed в .js, чтобы не зависеть от ts-node / ESM-loader на runtime.
-RUN pnpm --filter api exec tsc \
-        --outDir /app/seed-out \
-        --rootDir /app/prisma \
-        --esModuleInterop \
-        --skipLibCheck \
-        --resolveJsonModule \
-        --target es2020 \
-        --module commonjs \
-        /app/prisma/seed.ts
+# Настройки вынесены в prisma/tsconfig.seed.json — там же объяснено, почему
+# bcrypt требует явного paths-маппинга (флагом --paths tsc задать нельзя).
+RUN pnpm --filter api exec tsc -p /app/prisma/tsconfig.seed.json
 
 ENV API_PORT=3001
 ENV STREAM_URL=/hls/live/stream/index.m3u8
 
 EXPOSE 3001
 
-CMD ["sh", "-c", "pnpm exec prisma migrate deploy && NODE_PATH=/app/apps/api/node_modules node /app/seed-out/seed.js && node apps/api/dist/main.js"]
+CMD ["sh", "-c", "pnpm --filter api exec prisma migrate deploy && NODE_PATH=/app/apps/api/node_modules node /app/seed-out/seed.js && node apps/api/dist/main.js"]

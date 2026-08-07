@@ -1,0 +1,38 @@
+{
+  // Компиляция prisma/seed.ts в /app/seed-out/seed.js на сборке образа
+  // (apps/api/Dockerfile). Нужна, чтобы не тащить ts-node в рантайм.
+  //
+  // Проблема, которую решает этот файл: seed.ts лежит в корневом пакете
+  // воркспейса, а импортирует bcrypt, который объявлен зависимостью apps/api.
+  // tsc ищет модули вверх от файла — то есть в /app/node_modules, где bcrypt
+  // нет, и падает с TS2307. Раньше это лечилось `pnpm add -w bcrypt` прямо в
+  // Dockerfile: пакет доустанавливался в корень на этапе сборки образа, из-за
+  // чего pnpm-lock.yaml внутри образа расходился с репозиторием и две сборки
+  // из одного коммита могли дать разные зависимости.
+  //
+  // Здесь то же самое сделано явно и только для типов. В рантайме резолвинг
+  // обеспечивает NODE_PATH=/app/apps/api/node_modules (см. CMD в Dockerfile).
+  "compilerOptions": {
+    "outDir": "../seed-out",
+    "rootDir": ".",
+    "module": "commonjs",
+    "target": "es2020",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "baseUrl": "..",
+    "paths": {
+      "bcrypt": ["apps/api/node_modules/bcrypt"]
+    },
+    // typeRoots по умолчанию отсчитываются от расположения этого tsconfig,
+    // то есть /app/prisma/node_modules/@types — там пусто. Раньше tsc
+    // запускался без конфига и брал типы от cwd (apps/api), теперь указываем
+    // явно. Без этого seed.ts не видит даже global `process`.
+    "typeRoots": ["../apps/api/node_modules/@types", "../node_modules/@types"],
+    // Без этого tsc подтянет ВСЕ пакеты типов из apps/api (@types/sharp,
+    // @types/express и прочее) и упадёт на первом же, чей рантайм-пакет
+    // отсюда не резолвится. Seed'у из глобальных типов нужен только node.
+    "types": ["node"]
+  },
+  "files": ["seed.ts"]
+}
