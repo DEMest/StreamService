@@ -30,7 +30,10 @@ jobs:
     # type hosted even after multiple attempts".
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      # v7, а не v4: v4 собран под Node 20, раннер уже принудительно гоняет его
+      # на Node 24 и пишет предупреждение о снятии с поддержки. v7 требует
+      # раннера не ниже 2.327.1 — в образе 2.336.0 (infra/ci-runner/Dockerfile).
+      - uses: actions/checkout@v7
 
       # Намеренно НЕ используем pnpm/action-setup и actions/setup-node: каждое
       # действие качается с codeload.github.com при прогоне, а Node 20 и
@@ -63,7 +66,7 @@ jobs:
     name: Web — типы и сборка
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Активация pnpm
         run: |
