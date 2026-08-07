@@ -1,6 +1,6 @@
 'use client';
 import { useParams } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -48,6 +48,17 @@ interface OrgProfile {
   id: string;
   slug: string;
   name: string;
+}
+
+/**
+ * Адрес и порты для энкодера, приезжают из `GET /v1/org/ingest-config`.
+ * `host: null` — норма: значит ингест на том же хосте, где открыт дашборд,
+ * и адрес надо брать из `window.location`.
+ */
+interface IngestConfig {
+  host: string | null;
+  srtPort: number;
+  rtmpPort: number;
 }
 
 interface BroadcastItem {
@@ -125,6 +136,14 @@ export default function StreamDetailPage() {
   const { data: profile, isLoading: profileLoading } = useQuery({
     queryKey: ['org-profile'],
     queryFn: () => api.get<OrgProfile>('/v1/org/me'),
+  });
+
+  // Конфигурация стенда, а не орги: меняется только с перезапуском API.
+  // Держим долго — перезапрашивать её на каждом заходе в стрим незачем.
+  const { data: ingest } = useQuery({
+    queryKey: ['org-ingest-config'],
+    queryFn: () => api.get<IngestConfig>('/v1/org/ingest-config'),
+    staleTime: 60 * 60 * 1000,
   });
 
   // ── Mutations ──
@@ -215,9 +234,19 @@ export default function StreamDetailPage() {
 
   // ── Derived ingest URLs ──
 
-  const serverIp = process.env.NEXT_PUBLIC_SERVER_IP ?? '';
-  const srtPort = process.env.NEXT_PUBLIC_SRT_PORT ?? '8890';
-  const rtmpPort = process.env.NEXT_PUBLIC_RTMP_PORT ?? '1935';
+  // Хост берём из адресной строки, а не из конфига: дашборд открыт по тому же
+  // адресу, по которому доступен и ингест — для развёртывания «всё на одной
+  // машине» это верно всегда и не требует настройки. INGEST_HOST на бэкенде
+  // перебивает это, когда медиа-сервер вынесен отдельно.
+  //
+  // Через useEffect, а не напрямую: на сервере window нет, и чтение его при
+  // рендере дало бы расхождение разметки при гидрации.
+  const [browserHost, setBrowserHost] = useState('');
+  useEffect(() => setBrowserHost(window.location.hostname), []);
+
+  const serverHost = ingest?.host ?? browserHost;
+  const srtPort = String(ingest?.srtPort ?? '');
+  const rtmpPort = String(ingest?.rtmpPort ?? '');
   const orgSlug = profile?.slug ?? '';
   const streamSlug = stream?.slug ?? '';
 
@@ -226,16 +255,21 @@ export default function StreamDetailPage() {
     return `${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/public/orgs/${orgSlug}/streams/${streamSlug}/broadcasts/${bid}/preview?${keyPart}t=${previewBump}`;
   };
 
+  // Адрес показываем только когда известны И хост, И порт: строка с пустым
+  // портом (`srt://host:?streamid=…`) выглядит рабочей, копируется одной
+  // кнопкой и молча не подключается.
+  const ingestReady = Boolean(serverHost && ingest);
+
   const srtStreamId = `publish:live/${orgSlug}/${streamSlug}`;
   const srtFullUrl =
-    serverIp && stream?.ingestKey
-      ? `srt://${serverIp}:${srtPort}?streamid=${srtStreamId}&passphrase=${stream.ingestKey}`
+    ingestReady && stream?.ingestKey
+      ? `srt://${serverHost}:${srtPort}?streamid=${srtStreamId}&passphrase=${stream.ingestKey}`
       : '';
-  const rtmpServer = serverIp ? `rtmp://${serverIp}:${rtmpPort}/live` : '';
+  const rtmpServer = ingestReady ? `rtmp://${serverHost}:${rtmpPort}/live` : '';
   const rtmpStreamKey = `${orgSlug}/${streamSlug}?key=${stream?.ingestKey ?? ''}`;
   const rtmpFullUrl =
-    serverIp && stream?.ingestKey
-      ? `rtmp://${serverIp}:${rtmpPort}/live/${orgSlug}/${streamSlug}?key=${stream.ingestKey}`
+    ingestReady && stream?.ingestKey
+      ? `rtmp://${serverHost}:${rtmpPort}/live/${orgSlug}/${streamSlug}?key=${stream.ingestKey}`
       : '';
 
   // ── Loading / 404 ──
@@ -347,11 +381,11 @@ export default function StreamDetailPage() {
                 <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
                   <span className="w-28 shrink-0 text-xs text-zinc-500">Сервер</span>
                   <span className="flex-1 font-mono text-sm text-zinc-300">
-                    {serverIp || <span className="text-zinc-600">Задайте NEXT_PUBLIC_SERVER_IP</span>}
+                    {ingestReady ? serverHost : <span className="text-zinc-600">Загрузка...</span>}
                   </span>
-                  {serverIp && (
+                  {ingestReady && (
                     <button
-                      onClick={() => copyText(serverIp)}
+                      onClick={() => copyText(serverHost)}
                       className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
                     >
                       <Copy size={12} /> Копировать
@@ -360,13 +394,17 @@ export default function StreamDetailPage() {
                 </div>
                 <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
                   <span className="w-28 shrink-0 text-xs text-zinc-500">Порт</span>
-                  <span className="flex-1 font-mono text-sm text-zinc-300">{srtPort}</span>
-                  <button
-                    onClick={() => copyText(srtPort)}
-                    className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
-                  >
-                    <Copy size={12} /> Копировать
-                  </button>
+                  <span className="flex-1 font-mono text-sm text-zinc-300">
+                    {srtPort || <span className="text-zinc-600">Загрузка...</span>}
+                  </span>
+                  {srtPort && (
+                    <button
+                      onClick={() => copyText(srtPort)}
+                      className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
+                    >
+                      <Copy size={12} /> Копировать
+                    </button>
+                  )}
                 </div>
                 <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
                   <span className="w-28 shrink-0 text-xs text-zinc-500">Stream ID</span>
@@ -384,7 +422,7 @@ export default function StreamDetailPage() {
                 <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
                   <span className="w-28 shrink-0 text-xs text-zinc-500">Сервер</span>
                   <span className="flex-1 font-mono text-sm text-zinc-300">
-                    {rtmpServer || <span className="text-zinc-600">Задайте NEXT_PUBLIC_SERVER_IP</span>}
+                    {rtmpServer || <span className="text-zinc-600">Загрузка...</span>}
                   </span>
                   {rtmpServer && (
                     <button
@@ -397,13 +435,17 @@ export default function StreamDetailPage() {
                 </div>
                 <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
                   <span className="w-28 shrink-0 text-xs text-zinc-500">Порт</span>
-                  <span className="flex-1 font-mono text-sm text-zinc-300">{rtmpPort}</span>
-                  <button
-                    onClick={() => copyText(rtmpPort)}
-                    className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
-                  >
-                    <Copy size={12} /> Копировать
-                  </button>
+                  <span className="flex-1 font-mono text-sm text-zinc-300">
+                    {rtmpPort || <span className="text-zinc-600">Загрузка...</span>}
+                  </span>
+                  {rtmpPort && (
+                    <button
+                      onClick={() => copyText(rtmpPort)}
+                      className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-md transition-all active:scale-[0.98] cursor-pointer"
+                    >
+                      <Copy size={12} /> Копировать
+                    </button>
+                  )}
                 </div>
                 <div className="flex items-center py-3 border-b border-zinc-800/40 gap-3">
                   <span className="w-28 shrink-0 text-xs text-zinc-500">Ключ потока</span>
@@ -477,7 +519,7 @@ export default function StreamDetailPage() {
                 <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
                   <code className="flex-1 text-xs text-zinc-300 font-mono break-all">
                     {srtFullUrl ||
-                      `srt://${serverIp || 'IP'}:${srtPort}?streamid=${srtStreamId}&passphrase=•••`}
+                      `srt://${serverHost || 'сервер'}:${srtPort || 'порт'}?streamid=${srtStreamId}&passphrase=•••`}
                   </code>
                   {srtFullUrl && (
                     <button
@@ -507,7 +549,7 @@ export default function StreamDetailPage() {
                 <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-2 border border-zinc-800">
                   <code className="flex-1 text-xs text-zinc-300 font-mono break-all">
                     {rtmpFullUrl ||
-                      `rtmp://${serverIp || 'IP'}:${rtmpPort}/live/${orgSlug}/${streamSlug}?key=•••`}
+                      `rtmp://${serverHost || 'сервер'}:${rtmpPort || 'порт'}/live/${orgSlug}/${streamSlug}?key=•••`}
                   </code>
                   {rtmpFullUrl && (
                     <button

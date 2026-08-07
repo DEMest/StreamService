@@ -20,25 +20,21 @@ ARG NEXT_PUBLIC_STREAM_URL=/hls/live/stream/index.m3u8
 ARG HLS_UPSTREAM=http://mediamtx:8888
 ARG API_UPSTREAM=http://api:3001
 ARG NEXT_PUBLIC_SOCKET_URL=http://localhost:3001
-ARG NEXT_PUBLIC_SERVER_IP=
-# Порты MediaMTX, проброшенные наружу. Зашиваются в строки SRT/RTMP-вставки
-# в Studio UI и старом дашборде. На тест-стенде заданы в .env (см. .env.example).
-ARG NEXT_PUBLIC_SRT_PORT=8890
-ARG NEXT_PUBLIC_RTMP_PORT=1935
-ARG NEXT_PUBLIC_HLS_PORT=8888
 # Демо-ролик лендинга. Лежит в объектном хранилище, а не в apps/web/public —
 # 97 МБ в git/образе не нужны. Пусто = лендинг покажет статичную заглушку.
 ARG NEXT_PUBLIC_DEMO_VIDEO_URL=
+
+# NEXT_PUBLIC_SERVER_IP / SRT_PORT / RTMP_PORT здесь больше нет намеренно.
+# Next.js подставляет NEXT_PUBLIC_* в клиентский бандл на СБОРКЕ, поэтому смена
+# адреса стенда требовала пересборки образа. Теперь дашборд получает их в
+# рантайме из GET /v1/org/ingest-config, и образ web одинаков для любого стенда.
+# NEXT_PUBLIC_HLS_PORT удалён совсем — в коде он не использовался.
 
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_STREAM_URL=$NEXT_PUBLIC_STREAM_URL
 ENV HLS_UPSTREAM=$HLS_UPSTREAM
 ENV API_UPSTREAM=$API_UPSTREAM
 ENV NEXT_PUBLIC_SOCKET_URL=$NEXT_PUBLIC_SOCKET_URL
-ENV NEXT_PUBLIC_SERVER_IP=$NEXT_PUBLIC_SERVER_IP
-ENV NEXT_PUBLIC_SRT_PORT=$NEXT_PUBLIC_SRT_PORT
-ENV NEXT_PUBLIC_RTMP_PORT=$NEXT_PUBLIC_RTMP_PORT
-ENV NEXT_PUBLIC_HLS_PORT=$NEXT_PUBLIC_HLS_PORT
 ENV NEXT_PUBLIC_DEMO_VIDEO_URL=$NEXT_PUBLIC_DEMO_VIDEO_URL
 ENV PORT=3000
 
