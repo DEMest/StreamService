@@ -23,6 +23,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN useradd -m -s /bin/bash runner
 
+# corepack enable ставит шимы pnpm/yarn в /usr/local/bin, а туда пишет только
+# root. Джобы выполняются от runner, поэтому делаем это здесь, на сборке.
+# Сам шим версионно-нейтрален: конкретную версию pnpm он берёт из
+# "packageManager" проекта и складывает в кэш пользователя.
+RUN corepack enable
+
+# Без этого corepack при первом скачивании версии спрашивает подтверждение,
+# а в неинтерактивной джобе это выглядит как зависание.
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
 WORKDIR /opt/runner-dist
 RUN curl -fsSL -o runner.tar.gz \
         "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz" \

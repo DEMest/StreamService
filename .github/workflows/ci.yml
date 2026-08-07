@@ -30,16 +30,21 @@ jobs:
     # type hosted even after multiple attempts".
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      # v7, а не v4: v4 собран под Node 20, раннер уже принудительно гоняет его
+      # на Node 24 и пишет предупреждение о снятии с поддержки. v7 требует
+      # раннера не ниже 2.327.1 — в образе 2.336.0 (infra/ci-runner/Dockerfile).
+      - uses: actions/checkout@v7
 
-      # Версия pnpm берётся из "packageManager" в корневом package.json,
-      # так что здесь её дублировать не нужно.
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
+      # Намеренно НЕ используем pnpm/action-setup и actions/setup-node: каждое
+      # действие качается с codeload.github.com при прогоне, а Node 20 и
+      # corepack уже лежат в образе раннера (infra/ci-runner/Dockerfile).
+      # Меньше внешних зависимостей — меньше поводов упасть; на аварии
+      # 2026-08-06 джоба намертво вставала именно на скачивании action'ов.
+      # Версию pnpm corepack берёт из "packageManager" в корневом package.json.
+      - name: Активация pnpm
+        run: |
+          corepack prepare --activate
+          pnpm --version
 
       - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
@@ -61,14 +66,12 @@ jobs:
     name: Web — типы и сборка
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
+      - name: Активация pnpm
+        run: |
+          corepack prepare --activate
+          pnpm --version
 
       - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
