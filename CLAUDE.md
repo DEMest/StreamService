@@ -288,17 +288,29 @@ What that means for how you work:
 
 - **A merge is a production release.** There is no separate "deploy" step you
   or the user perform afterwards.
-- The deploy rebuilds and restarts **only `api` and `web`, with `--no-deps`**.
-  MediaMTX is never touched, so live ingest, the FFmpeg ABR ladder and
+- The deploy rebuilds and restarts **`api` and `web`, with `--no-deps`**.
+  MediaMTX is left alone by default, so live ingest, the FFmpeg ABR ladder and
   recording all continue uninterrupted across a deploy.
 - The one visible effect is that live HLS delivery pauses for the ~5 s the API
   takes to restart (it serves HLS itself). With 2 s segments and an 80 s
   playlist window, plus nginx serving stale on upstream error, viewers normally
   do not notice and **broadcasts do not end**.
-- Therefore: changes to `infra/mediamtx/*` or the `mediamtx:` service in
-  `docker-compose.yml` **cannot** be shipped mid-broadcast — they only take
-  effect on a MediaMTX restart, which drops every publisher. That is what
-  `live-safety-auditor` exists to catch.
+- Changes to `infra/mediamtx/*` or to `docker-compose.yml` (**any** hunk — the
+  script matches the filename, not the section) only take effect on a MediaMTX
+  restart, which drops every publisher. `mediamtx.yml` is bind-mounted rather
+  than baked into the image, so the restart must be `--force-recreate`: a
+  config-only change leaves the image ID untouched and plain `up -d` would
+  silently skip the container. `deploy.sh` checks the diff on every run that
+  has a `.deployed` baseline, and picks one of three branches:
+  - **no live streams** → MediaMTX is rebuilt and restarted along with the rest;
+  - **streams live, `FORCE_MEDIAMTX=1`** → restarted anyway, ingest is cut,
+    publishers must reconnect. Trigger it from Actions → CI → Run workflow →
+    `force_mediamtx`, or on the server directly;
+  - **streams live, no force** → the deploy **aborts and changes nothing**,
+    naming both ways out. The next push retries it.
+  On the very first deploy there is no `.deployed` to diff against, so MediaMTX
+  is left alone and a warning is logged. `live-safety-auditor` flags the same
+  case at PR time.
 - Migrations run on API boot (`prisma migrate deploy`), so a slow or locking
   migration directly extends the HLS pause.
 
@@ -329,6 +341,12 @@ session and wait for their answer.
 `/home/rootuser/StreamService` on the production server is not just a source
 tree — it is the working directory of the live stack. Never run
 `docker compose up / down / restart` from here to "check" something; those
-commands hit liga-live.ru and its viewers. Verify with builds and tests
-(`.claude/settings.json` denies these commands for this reason). Deployment is
-the autodeploy job's job.
+commands hit liga-live.ru and its viewers. Verify with builds and tests, and
+leave deployment to the autodeploy job.
+
+Those container-lifecycle denies live in `.claude/settings.local.json`, which
+is gitignored and exists **only on the server**, not in `settings.json`. The
+reason is that they are a property of this checkout, not of the project: on a
+developer machine the same commands are the documented way to run the stack,
+and a repo-level `deny` cannot be re-allowed locally. If you clone this repo
+onto another host that serves live traffic, copy that file across.
