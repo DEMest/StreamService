@@ -142,12 +142,16 @@ jobs:
         # придёт 0. Значение подставляет bash раннера до вызова ssh.
         env:
           FORCE_MEDIAMTX: ${{ github.event_name == 'workflow_dispatch' && inputs.force_mediamtx && '1' || '0' }}
+          # Через ssh переменные окружения раннера не передаются, а в письмах
+          # нужна ссылка на прогон — пробрасываем явно.
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           ssh -i ~/.ssh/deploy_key \
               -o StrictHostKeyChecking=yes \
               -o ConnectTimeout=10 \
               "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-              "cd '${{ secrets.DEPLOY_PATH }}' && git fetch origin main --quiet && git checkout main --quiet && git merge --ff-only origin/main --quiet && FORCE_MEDIAMTX=$FORCE_MEDIAMTX bash infra/deploy/deploy.sh"
+              "cd '${{ secrets.DEPLOY_PATH }}' && git fetch origin main --quiet && git checkout main --quiet && git merge --ff-only origin/main --quiet && FORCE_MEDIAMTX=$FORCE_MEDIAMTX GITHUB_RUN_ID=$GITHUB_RUN_ID GITHUB_REPOSITORY=$GITHUB_REPOSITORY bash infra/deploy/deploy.sh"
 
       - name: Убрать ключ
         if: always()
