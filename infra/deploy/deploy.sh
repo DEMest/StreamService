@@ -36,7 +36,28 @@ FORCE_MEDIAMTX="${FORCE_MEDIAMTX:-0}"
 cd "$REPO"
 
 log()  { printf '%s  %s\n' "$(date -u +%H:%M:%S)" "$*"; }
-fail() { printf '::error::%s\n' "$*" >&2; exit 1; }
+
+# Уведомление на почту. Путь серверный, в репозитории его быть не может;
+# если скрипта нет — молча пропускаем. notify.py и сам всегда возвращает 0:
+# упавшая отправка письма не повод ронять выкатку.
+NOTIFY="${NOTIFY:-/home/rootuser/ops/notify.py}"
+notify() {
+  [ -x "$NOTIFY" ] || return 0
+  printf '%s\n' "$2" | "$NOTIFY" "$1" >/dev/null 2>&1 || true
+}
+
+fail() {
+  printf '::error::%s\n' "$*" >&2
+  notify "[liga-live] Выкатка ОСТАНОВЛЕНА" \
+"Выкатка прервана до изменения контейнеров.
+
+$*
+
+Целевой коммит: ${TARGET_SHA:-неизвестен}
+Выкачено сейчас: ${DEPLOYED_SHA:-неизвестно}
+Прогон: ${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-DEMest/StreamService}/actions/runs/${GITHUB_RUN_ID:-}"
+  exit 1
+}
 
 # ─────────────────────────────────────────────────────────────────────────
 # 1. Сколько потоков в эфире прямо сейчас
@@ -237,6 +258,18 @@ rollback() {
   else
     docker compose up -d --no-deps $APP_SERVICES
   fi
+  notify "[liga-live] ОТКАТ выкатки" \
+"Выкатка не прошла проверки и откачена автоматически.
+
+Пытались выкатить: $(git rev-parse --short "$TARGET_SHA" 2>/dev/null || echo "$TARGET_SHA")
+Вернулись на:      ${DEPLOYED_SHA:-(состояние неизвестно)}
+Живых эфиров было: $LIVE_COUNT
+mediamtx трогали:  $([ "$RESTART_MEDIAMTX" = 1 ] && echo да || echo нет)
+
+Проверьте сайт и эфиры вручную — откат возвращает образы, но если причина
+была снаружи (БД, диск, сеть), она никуда не делась.
+
+Прогон: ${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-DEMest/StreamService}/actions/runs/${GITHUB_RUN_ID:-}"
   fail "выкатка откачена${DEPLOYED_SHA:+ на $(git rev-parse --short "$DEPLOYED_SHA")}"
 }
 
@@ -354,3 +387,14 @@ log "build cache подрезан до $BUILD_CACHE_KEEP"
 printf '%s\n' "$TARGET_SHA" > "$STATE"
 
 log "готово: $(git rev-parse --short "$TARGET_SHA") выкачен"
+
+notify "[liga-live] Выкачено: $(git log -1 --format=%s "$TARGET_SHA" | cut -c1-60)" \
+"Выкатка прошла и проверки пройдены.
+
+Коммит:    $(git rev-parse --short "$TARGET_SHA") — $(git log -1 --format=%s "$TARGET_SHA")
+Автор:     $(git log -1 --format='%an' "$TARGET_SHA")
+Было:      ${DEPLOYED_SHA:0:7}
+Эфиров:    $LIVE_COUNT (все на месте после выкатки)
+mediamtx:  $([ "$RESTART_MEDIAMTX" = 1 ] && echo "перезапущен" || echo "не тронут")
+
+Прогон: ${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-DEMest/StreamService}/actions/runs/${GITHUB_RUN_ID:-}"
