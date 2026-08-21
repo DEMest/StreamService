@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
@@ -18,6 +19,9 @@ import { ImageService } from '../storage/image.service';
 import { randomBytes } from 'crypto';
 
 const VALID_PREVIEW_MODES = ['multicam', 'cam1', 'cam2', 'cam3', 'cam4'];
+
+/** Свежие эфиры сверка не трогает: publish мог опередить выставление ready. */
+const GRACE_MS = 3 * 60_000;
 
 const STREAM_SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const STREAM_SLUG_MAX_LEN = 32;
@@ -158,6 +162,12 @@ export class StreamService {
    */
   private readonly webhookLocks = new Map<string, Promise<void>>();
 
+  /**
+   * Stream'ы, которых не нашлось в MediaMTX на прошлом проходе сверки.
+   * Закрываем только со второго промаха — см. {@link reconcileLiveState}.
+   */
+  private readonly missedOnce = new Set<string>();
+
   constructor(
     private prisma: PrismaService,
     private mediamtx: MediamtxService,
@@ -176,6 +186,94 @@ export class StreamService {
     const stream = await this.loadForOrg(orgId, streamId);
     const basePath = mediamtxPathForStream(stream.org.slug, stream.slug);
     return this.stats.getSnapshot(`live/${basePath}`, this.chatGateway.getViewers(stream.id));
+  }
+
+  /**
+   * Сверка состояния эфиров с MediaMTX.
+   *
+   * БД знает про эфир только то, что ей сообщил вебхук, а вебхук может не
+   * дойти: api лежал в момент unpublish (в том числе из-за выкатки), сеть
+   * моргнула, mediamtx перезапустили. Тогда Stream навсегда остаётся
+   * `isLive: true`, Broadcast — открытым, и на сайте висит эфир, которого нет.
+   * Ровно так завис `a/b` — три недели онлайном без единого зрителя и байта.
+   *
+   * Раз в две минуты спрашиваем MediaMTX, кто реально публикует, и закрываем
+   * то, чего там нет. Работает и после рестарта api: состояние берётся не из
+   * памяти процесса, а из БД и control-API.
+   */
+  @Cron('*/2 * * * *')
+  async reconcileLiveState(): Promise<void> {
+    // Порядок важен: БД читаем ПЕРВОЙ. Стрим, вышедший в эфир между двумя
+    // запросами, при обратном порядке попал бы в выборку `marked`, но не в
+    // снимок `ready` — и мы закрыли бы живой эфир.
+    const marked = await this.prisma.stream.findMany({
+      where: { isLive: true },
+      select: {
+        id: true,
+        slug: true,
+        currentBroadcastId: true,
+        org: { select: { slug: true } },
+      },
+    });
+    // Раннего выхода при пустом `marked` тут нет намеренно: обратная проверка
+    // ниже («публикуется, а в БД оффлайн») полезнее всего именно тогда, когда
+    // БД считает, что эфиров нет вообще.
+
+    let ready: Set<string>;
+    try {
+      ready = await this.mediamtx.listReadyPaths();
+    } catch (e: any) {
+      // MediaMTX недоступен — молчим. Пустой ответ здесь неотличим от «все
+      // отключились», и мы бы закрыли все живые эфиры разом.
+      this.logger.warn(`reconcileLiveState: MediaMTX недоступен, пропускаем (${e?.message ?? e})`);
+      return;
+    }
+
+    for (const stream of marked) {
+      const path = mediamtxPathForStream(stream.org.slug, stream.slug);
+      if (ready.has(path)) {
+        this.missedOnce.delete(stream.id);
+        continue;
+      }
+
+      // Отсечка на гонку: publish уже создал Broadcast, а ready ещё не
+      // выставлен. Свежие эфиры не трогаем — на следующем проходе разберёмся.
+      if (stream.currentBroadcastId) {
+        const b = await this.prisma.broadcast.findUnique({
+          where: { id: stream.currentBroadcastId },
+          select: { startedAt: true },
+        });
+        if (b && Date.now() - b.startedAt.getTime() < GRACE_MS) continue;
+      }
+
+      // Отсечки по startedAt мало: при возобновлении склейки (manual + запись)
+      // Broadcast продолжается старый, и startedAt остаётся давним. Поэтому
+      // закрываем только после ДВУХ промахов подряд — одиночная гонка с
+      // publish не переживёт следующего прохода.
+      if (!this.missedOnce.has(stream.id)) {
+        this.missedOnce.add(stream.id);
+        continue;
+      }
+
+      this.logger.warn(
+        `reconcileLiveState: ${path} числится в эфире, но не публикуется — закрываем`,
+      );
+      this.missedOnce.delete(stream.id);
+      try {
+        await this.endBroadcast(stream.id);
+      } catch (e: any) {
+        this.logger.error(`reconcileLiveState: не удалось закрыть ${path}: ${e?.message ?? e}`);
+      }
+    }
+
+    // Обратный перекос: публикация идёт, а в БД оффлайн. Сами не открываем —
+    // startBroadcast включает запись и шлёт события зрителям, а причина тут
+    // всегда нештатная. Достаточно, чтобы это было видно в логах.
+    for (const path of ready) {
+      if (!marked.some((s) => mediamtxPathForStream(s.org.slug, s.slug) === path)) {
+        this.logger.warn(`reconcileLiveState: ${path} публикуется, но в БД оффлайн`);
+      }
+    }
   }
 
   async getStreamWithOrg(streamId: string) {

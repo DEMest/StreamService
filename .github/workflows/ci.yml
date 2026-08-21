@@ -14,6 +14,13 @@ on:
   # аварии 2026-08-06, когда пуши перестали порождать прогоны).
   # Работает только для workflow, лежащего на ветке по умолчанию.
   workflow_dispatch:
+    inputs:
+      force_mediamtx:
+        description: >-
+          Перезапустить mediamtx даже под эфиром. Обрывает приём SRT/RTMP
+          у ВСЕХ стримеров разом — им понадобится реконнект.
+        type: boolean
+        default: false
 
 # Новый пуш в PR отменяет предыдущий незавершённый прогон — не держим очередь
 # ради результата, который уже никому не нужен. На main НЕ отменяем: история
@@ -108,7 +115,9 @@ jobs:
   deploy:
     name: Выкатка на прод
     needs: [api, web]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: >-
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: self-hosted
     environment: production
     # Две выкатки внахлёст сломали бы health-gate друг другу: отменять текущую
@@ -129,12 +138,16 @@ jobs:
       # внутри самого скрипта. Здесь мы его только запускаем — вся логика
       # (проверка эфира, --no-deps, health-gate, откат, prune) там.
       - name: Запуск infra/deploy/deploy.sh на сервере
+        # Форс доступен только через ручной запуск: на push инпутов нет и сюда
+        # придёт 0. Значение подставляет bash раннера до вызова ssh.
+        env:
+          FORCE_MEDIAMTX: ${{ github.event_name == 'workflow_dispatch' && inputs.force_mediamtx && '1' || '0' }}
         run: |
           ssh -i ~/.ssh/deploy_key \
               -o StrictHostKeyChecking=yes \
               -o ConnectTimeout=10 \
               "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-              "cd '${{ secrets.DEPLOY_PATH }}' && git fetch origin main --quiet && git checkout main --quiet && git merge --ff-only origin/main --quiet && bash infra/deploy/deploy.sh"
+              "cd '${{ secrets.DEPLOY_PATH }}' && git fetch origin main --quiet && git checkout main --quiet && git merge --ff-only origin/main --quiet && FORCE_MEDIAMTX=$FORCE_MEDIAMTX bash infra/deploy/deploy.sh"
 
       - name: Убрать ключ
         if: always()

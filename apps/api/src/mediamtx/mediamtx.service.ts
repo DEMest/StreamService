@@ -140,6 +140,39 @@ export class MediamtxService {
     }
   }
 
+  /**
+   * Пути, по которым прямо сейчас идёт публикация (`ready: true`).
+   * Источник правды о том, что в эфире: БД знает только то, что ей сообщили
+   * вебхуки, а вебхук может не дойти — например, если api лежал в момент
+   * unpublish. Возвращает имена БЕЗ префикса `live/`.
+   *
+   * Бросает при недоступности MediaMTX: пустой Set неотличим от «все
+   * отключились», а по нему вызывающий код закрывает эфиры.
+   */
+  async listReadyPaths(): Promise<Set<string>> {
+    const { data } = await axios.get(`${this.base}/v3/paths/list`, {
+      auth: this.auth,
+      timeout: 5000,
+      params: { itemsPerPage: 1000 },
+    });
+    // Успешный, но не тот ответ (прокси, редирект, обрезанный JSON) не должен
+    // молча превращаться в «никто не публикует» — по такому ответу вызывающий
+    // код закрывает эфиры.
+    if (!Array.isArray(data?.items)) {
+      throw new Error('MediaMTX /v3/paths/list вернул неожиданный ответ');
+    }
+    if (typeof data.pageCount === 'number' && data.pageCount > 1) {
+      throw new Error(`MediaMTX /v3/paths/list не поместился на страницу (pageCount=${data.pageCount})`);
+    }
+    const ready = new Set<string>();
+    for (const item of data.items) {
+      if (item?.ready && typeof item.name === 'string') {
+        ready.add(item.name.replace(/^live\//, ''));
+      }
+    }
+    return ready;
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
   // Deprecated wrappers (backward-compat для legacy кода до Step 3)
   // Новый код должен использовать *StreamPaths методы.

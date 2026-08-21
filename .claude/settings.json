@@ -39,15 +39,6 @@
       "Bash(git push * master)",
       "Bash(git push*--force*)",
       "Bash(git push*-f)",
-
-      "Bash(docker compose down*)",
-      "Bash(docker compose restart*)",
-      "Bash(docker compose up*)",
-      "Bash(docker restart*)",
-      "Bash(docker stop*)",
-      "Bash(docker kill*)",
-      "Bash(docker rm*)",
-
       "Read(./.env)",
       "Read(./.env.*)",
       "Bash(cat .env*)"
