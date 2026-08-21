@@ -41,13 +41,21 @@ log()  { printf '%s  %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 # если скрипта нет — молча пропускаем. notify.py и сам всегда возвращает 0:
 # упавшая отправка письма не повод ронять выкатку.
 NOTIFY="${NOTIFY:-/home/rootuser/ops/notify.py}"
+# Ставится там, где письмо уже отправлено, чтобы fail() не слал второе.
+NOTIFIED=0
 notify() {
   [ -x "$NOTIFY" ] || return 0
-  printf '%s\n' "$2" | "$NOTIFY" "$1" >/dev/null 2>&1 || true
+  # timeout поверх собственного таймаута smtplib: тот покрывает операции с
+  # сокетом, но не разрешение имени, и каждая фаза сеанса считает свои 20 с.
+  printf '%s\n' "$2" | timeout 30 "$NOTIFY" "$1" >/dev/null 2>&1 || true
+  NOTIFIED=1
 }
 
 fail() {
   printf '::error::%s\n' "$*" >&2
+  # Про откат письмо уже ушло, и оно точнее: текст ниже про нетронутые
+  # контейнеры в том сценарии был бы прямым враньём.
+  [ "$NOTIFIED" = "1" ] && exit 1
   notify "[liga-live] Выкатка ОСТАНОВЛЕНА" \
 "Выкатка прервана до изменения контейнеров.
 
@@ -393,7 +401,7 @@ notify "[liga-live] Выкачено: $(git log -1 --format=%s "$TARGET_SHA" | c
 
 Коммит:    $(git rev-parse --short "$TARGET_SHA") — $(git log -1 --format=%s "$TARGET_SHA")
 Автор:     $(git log -1 --format='%an' "$TARGET_SHA")
-Было:      ${DEPLOYED_SHA:0:7}
+Было:      ${DEPLOYED_SHA:-(первая выкатка)}
 Эфиров:    $LIVE_COUNT (все на месте после выкатки)
 mediamtx:  $([ "$RESTART_MEDIAMTX" = 1 ] && echo "перезапущен" || echo "не тронут")
 
