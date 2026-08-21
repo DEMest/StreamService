@@ -85,3 +85,57 @@ jobs:
       # кода. Если сборка без них падает — это баг, и его надо видеть здесь.
       - name: Сборка
         run: pnpm --filter web build
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Выкатка на прод. Идёт только после зелёных api и web, и только на push в
+  # main (то есть на мерж PR) — на сами PR не запускается никогда.
+  #
+  # Почему self-hosted, а не ubuntu-latest с Tailscale, как в соседнем проекте:
+  # hosted-раннеры этому репозиторию перестали выдаваться (см. комментарий у
+  # job api), а наш собственный раннер и так стоит на той же машине, что и
+  # прод — он дотягивается до SSH хоста напрямую. Лишний слой Tailscale здесь
+  # ничего не добавляет.
+  #
+  # Раннеру по-прежнему НЕ даётся docker-сокет: он заходит на хост по SSH
+  # ключом из секретов, и только в этой джобе. Привилегия живёт в ключе, а не
+  # в раннере.
+  #
+  # environment: production — не косметика. Секреты ниже привязаны к этому
+  # окружению, а у окружения в настройках репозитория должно стоять правило
+  # "Deployment branches: main only". Тогда воркфлоу, изменённый в чьём-то PR,
+  # до ключа не доберётся: GitHub не отдаст секреты окружения джобе, которая
+  # запущена не с main.
+  deploy:
+    name: Выкатка на прод
+    needs: [api, web]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: self-hosted
+    environment: production
+    # Две выкатки внахлёст сломали бы health-gate друг другу: отменять текущую
+    # нельзя (оборвём на середине), поэтому просто становимся в очередь.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Ключ и known_hosts
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      # Скрипт лежит в репозитории и уже обновлён на сервере шагом git pull
+      # внутри самого скрипта. Здесь мы его только запускаем — вся логика
+      # (проверка эфира, --no-deps, health-gate, откат, prune) там.
+      - name: Запуск infra/deploy/deploy.sh на сервере
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=10 \
+              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              "cd '${{ secrets.DEPLOY_PATH }}' && git fetch origin main --quiet && git checkout main --quiet && git merge --ff-only origin/main --quiet && bash infra/deploy/deploy.sh"
+
+      - name: Убрать ключ
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
