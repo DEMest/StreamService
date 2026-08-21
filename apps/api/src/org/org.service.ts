@@ -9,6 +9,7 @@ import {
 import { ChatGateway } from '../chat/chat.gateway';
 import { ImageService } from '../storage/image.service';
 import { ARCHIVE_OVERHEAD, hourlyRate, hoursLeft } from './storage-estimate';
+import { IngestConfigDto, readIngestConfig } from './ingest-config';
 
 /**
  * Метрика хранилища для дашборда орги (`GET /v1/org/storage`).
@@ -76,6 +77,18 @@ export class OrgService {
     private chatGateway: ChatGateway,
     private images: ImageService,
   ) {}
+
+  /**
+   * GET /v1/org/ingest-config — адрес и порты для энкодера.
+   *
+   * Данные общие для всего стенда, org-скоуп тут только из-за расположения:
+   * потребитель — дашборд орги. Читаем env на каждый запрос, а не кешируем в
+   * поле: значения меняются вместе с перезапуском контейнера, а лишний
+   * process.env на фоне похода в БД у соседних ручек ничего не стоит.
+   */
+  getIngestConfig(): IngestConfigDto {
+    return readIngestConfig(process.env, (msg) => this.logger.warn(msg));
+  }
 
   async getProfile(orgId: string) {
     const org = await this.prisma.organization.findUnique({

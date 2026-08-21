@@ -34,6 +34,17 @@ export class OrgController {
   }
 
   /**
+   * GET /v1/org/ingest-config — куда стримеру пушить: хост и порты SRT/RTMP.
+   * Отдаётся в рантайме, чтобы образ web не зависел от адреса стенда
+   * (см. ingest-config.ts). Секретов не содержит — ingestKey приходит
+   * отдельно, в GET /v1/org/streams/:id.
+   */
+  @Get('ingest-config')
+  getIngestConfig() {
+    return this.org.getIngestConfig();
+  }
+
+  /**
    * GET /v1/org/storage — метрика хранилища: занято архивом орги, свободно на
    * диске сервера, прогноз «сколько часов записи ещё влезет» и срок хранения.
    */

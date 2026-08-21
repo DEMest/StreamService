@@ -140,7 +140,7 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 | `health` | `GET /health` | none |
 | `auth` | `/v1/auth/*` (login, refresh, logout, me, verify) | none / JWT |
 | `admin` | `/v1/admin/*` (orgs, contact-requests) | superadmin JWT |
-| `org` | `/v1/org/*` (profile, broadcasts, chat, preview upload) | org_admin JWT |
+| `org` | `/v1/org/*` (profile, ingest-config, broadcasts, chat, preview upload) | org_admin JWT |
 | `stream` | `/v1/org/streams/*` (CRUD, rotate-key, stop, recording) | org_admin JWT |
 | `event` | `/v1/org/events/*` (CRUD, start/end, attach/detach streams) | org_admin JWT |
 | `public` | `/v1/public/*` (catalog, watch, broadcasts, thumbnail, event landing, contact) | none |
@@ -208,7 +208,8 @@ Copy `.env.example` to `.env`. One compose file serves both prod and a test stan
 - `HLS_LQ_ENABLED` — `true` (default) adds a 540p LQ rendition via `libx264` (~7 cores on 4K input); set `false` on dev/weak stands for HD-copy only.
 - `CORS_ORIGIN` — comma-separated allowed origins for the API (also used by the WS gateways).
 - `COOKIE_SECURE` — override Secure flag for auth cookies (`false` on HTTP test stands).
-- `NEXT_PUBLIC_*` (`SOCKET_URL`, `SERVER_IP`, `SRT_PORT`, `RTMP_PORT`, `HLS_PORT`) — baked into the web bundle at build time.
+- `NEXT_PUBLIC_*` (`SOCKET_URL`, `DEMO_VIDEO_URL`) — baked into the web bundle at build time.
+- `INGEST_HOST` — host shown to streamers in the dashboard's SRT/RTMP instructions. **Leave empty** unless ingest is on a different host than the site: empty means the dashboard uses `window.location.hostname`, so moving to another domain needs no config change and no rebuild. Ports come from `MEDIAMTX_SRT_PORT` / `MEDIAMTX_RTMP_PORT`, which the `api` service also reads. Served at runtime via `GET /v1/org/ingest-config` (`apps/api/src/org/ingest-config.ts`) — deliberately *not* `NEXT_PUBLIC_*`, which would re-introduce the rebuild-on-move problem.
 - `SUPERADMIN_LOGIN`, `SUPERADMIN_PASSWORD` — used by `prisma:seed` and auto-create on API boot.
 
 ## Frontend Design Skills

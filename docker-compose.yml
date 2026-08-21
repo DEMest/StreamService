@@ -91,6 +91,14 @@ services:
       SUPERADMIN_LOGIN: ${SUPERADMIN_LOGIN:-admin}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-adminpass}
       MEDIAMTX_WEBHOOK_SECRET: ${MEDIAMTX_WEBHOOK_SECRET:-}
+      # Отдаются дашборду как строка подключения для энкодера
+      # (GET /v1/org/ingest-config). Порты — те же переменные, которыми mediamtx
+      # публикует ингест наружу, поэтому разъехаться не могут.
+      MEDIAMTX_SRT_PORT: ${MEDIAMTX_SRT_PORT:-8890}
+      MEDIAMTX_RTMP_PORT: ${MEDIAMTX_RTMP_PORT:-1935}
+      # Пусто — дашборд подставит хост, на котором открыт сам. Задавать нужно,
+      # только если ингест принимает не на том же хосте, что отдаёт веб-морду.
+      INGEST_HOST: ${INGEST_HOST:-}
       # Прод (HTTPS) — оставить пустым (тогда secure берётся из NODE_ENV).
       # Тест-стенд по HTTP — выставить COOKIE_SECURE=false в .env, иначе браузер
       # не сохранит cookie и /v1/org/me вернёт 401.
@@ -125,13 +133,10 @@ services:
       args:
         API_UPSTREAM: http://api:3001
         NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL:-http://localhost:3001}
-        NEXT_PUBLIC_SERVER_IP: ${NEXT_PUBLIC_SERVER_IP:-localhost}
-        # Порты MediaMTX, проброшенные наружу. Зашиваются в строки SRT/RTMP-вставки
-        # в Studio UI и старом дашборде. NEXT_PUBLIC_* зашиваются в client-bundle
-        # на build-time — после смены значений нужно `docker compose build web`.
-        NEXT_PUBLIC_SRT_PORT: ${MEDIAMTX_SRT_PORT:-8890}
-        NEXT_PUBLIC_RTMP_PORT: ${MEDIAMTX_RTMP_PORT:-1935}
-        NEXT_PUBLIC_HLS_PORT: ${MEDIAMTX_HLS_PORT:-8888}
+        # Адрес и порты ингеста сюда НЕ передаются: они приезжают в браузер в
+        # рантайме через GET /v1/org/ingest-config (см. сервис api ниже).
+        # Иначе смена сервера требовала бы `docker compose build web`, а не
+        # правки .env — NEXT_PUBLIC_* зашиваются в бандл на сборке.
         # Демо-ролик лендинга: отдаётся из публичного бакета объектного
         # хранилища, в репозитории/образе его нет. Пусто — лендинг не ломается,
         # блок демо показывает статичную заглушку.
