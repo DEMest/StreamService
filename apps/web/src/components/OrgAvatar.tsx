@@ -71,15 +71,21 @@ export function OrgAvatar({
   return (
     <span
       aria-hidden="true"
-      className={`shrink-0 inline-flex items-center justify-center rounded-full overflow-hidden select-none ${className}`}
+      className={`shrink-0 inline-flex items-center justify-center rounded-full overflow-hidden select-none bg-zinc-900 ${
+        live ? 'ring-[1.5px] ring-brand' : 'ring-1 ring-white/15'
+      } ${className}`}
       style={{
         width: size,
         height: size,
-        background: showImage ? '#18181B' : `linear-gradient(140deg, ${from} 0%, ${to} 100%)`,
-        boxShadow: live ? '0 0 0 1.5px #E54433' : '0 0 0 1px rgba(255,255,255,0.14)',
+        // Градиент монограммы — данные (выбран по слагу), а не токен дизайна,
+        // поэтому единственное, что осталось инлайном.
+        ...(showImage ? {} : { background: `linear-gradient(140deg, ${from} 0%, ${to} 100%)` }),
       }}
     >
       {showImage ? (
+        // Без cache-buster'а намеренно: ручка отдаёт `Cache-Control: max-age=300`,
+        // и сброс кеша добавил бы запрос картинки на каждую watch-страницу ради
+        // редкого случая — смены картинки орги. Максимум 5 минут staleness.
         <img
           src={`${API_BASE}/v1/public/orgs/${orgSlug}/image`}
           alt=""

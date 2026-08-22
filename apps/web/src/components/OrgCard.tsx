@@ -37,7 +37,9 @@ export function OrgCard({ org, thumbKey, href }: { org: CatalogOrgCard; thumbKey
             <div className="absolute inset-0 flex items-center justify-center">
               {/* Картинки нет — вместо обезличенной иконки показываем монограмму
                   орги, чтобы карточки без превью всё-таки различались между собой. */}
-              <OrgAvatar orgSlug={org.orgSlug} orgName={org.orgName} size={56} live={isLive} />
+              {/* Без `live` — карточка уже несёт крупный бейдж Live выше,
+                  брендовое кольцо дублировало бы тот же сигнал. */}
+              <OrgAvatar orgSlug={org.orgSlug} orgName={org.orgName} size={56} />
             </div>
           )}
           {isLive && (
