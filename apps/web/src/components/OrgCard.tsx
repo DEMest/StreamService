@@ -1,9 +1,10 @@
 'use client';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
-import { Monitor, VideoCamera } from '@phosphor-icons/react';
+import { VideoCamera } from '@phosphor-icons/react';
 import type { CatalogOrgCard } from '@/lib/types';
 import { API_BASE } from '@/lib/types';
+import { OrgAvatar } from '@/components/OrgAvatar';
 
 /**
  * Карточка каталога (одна орга). По умолчанию ведёт на `/watch/<orgSlug>` —
@@ -34,7 +35,9 @@ export function OrgCard({ org, thumbKey, href }: { org: CatalogOrgCard; thumbKey
               className="absolute inset-0 w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500" />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
-              <Monitor size={48} className="text-zinc-800" weight="thin" />
+              {/* Картинки нет — вместо обезличенной иконки показываем монограмму
+                  орги, чтобы карточки без превью всё-таки различались между собой. */}
+              <OrgAvatar orgSlug={org.orgSlug} orgName={org.orgName} size={56} live={isLive} />
             </div>
           )}
           {isLive && (

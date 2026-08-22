@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Header } from '@/components/Header';
 import { OrgCanvasPlayer, type CanvasTile } from '@/components/OrgCanvasPlayer';
+import { OrgAvatar } from '@/components/OrgAvatar';
 import { Play, TelevisionSimple, VideoCamera } from '@phosphor-icons/react';
 
 interface OrgOverviewStream {
@@ -19,6 +20,7 @@ interface OrgOverviewDto {
   orgSlug: string;
   orgName: string;
   orgDescription: string | null;
+  hasImage: boolean;
   streams: OrgOverviewStream[];
 }
 
@@ -68,9 +70,18 @@ export function OrgOverview({ orgSlug, archiveMode = false }: { orgSlug: string;
     <div className="min-h-[100dvh] bg-surface-primary text-zinc-200">
       <Header />
       <main className="max-w-[1100px] mx-auto px-6 py-8">
-        <h1 className="text-xl font-semibold text-zinc-50 tracking-tight mb-1">
-          {archiveMode ? `Архив · ${org?.orgName ?? orgSlug}` : (org?.orgName ?? orgSlug)}
-        </h1>
+        <div className="flex items-center gap-3 mb-1">
+          <OrgAvatar
+            orgSlug={orgSlug}
+            orgName={org?.orgName}
+            hasImage={org?.hasImage}
+            size={44}
+            live={!archiveMode && liveStreams.length > 0}
+          />
+          <h1 className="text-xl font-semibold text-zinc-50 tracking-tight">
+            {archiveMode ? `Архив · ${org?.orgName ?? orgSlug}` : (org?.orgName ?? orgSlug)}
+          </h1>
+        </div>
         {archiveMode && <p className="text-zinc-500 text-sm mb-3">Записи прошедших трансляций</p>}
         {org?.orgDescription && <p className="text-zinc-500 text-sm mb-6">{org.orgDescription}</p>}
 
