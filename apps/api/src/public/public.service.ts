@@ -31,6 +31,7 @@ export interface OrgOverviewDto {
   orgSlug: string;
   orgName: string;
   orgDescription: string | null;
+  hasImage: boolean;
   streams: Array<{
     streamSlug: string;
     streamName: string;
@@ -104,6 +105,7 @@ export class PublicService {
         slug: true,
         name: true,
         description: true,
+        imagePath: true,
         streams: {
           where: { isPublic: true },
           orderBy: [{ isLive: 'desc' }, { createdAt: 'asc' }],
@@ -123,6 +125,7 @@ export class PublicService {
       orgSlug: org.slug,
       orgName: org.name,
       orgDescription: org.description,
+      hasImage: !!org.imagePath,
       streams: org.streams.map((s) => ({
         streamSlug: s.slug,
         streamName: s.name,
@@ -191,7 +194,7 @@ export class PublicService {
         isPublic: true,
         previewKey: true,
         feedMode: true,
-        org: { select: { slug: true, name: true, description: true } },
+        org: { select: { slug: true, name: true, description: true, imagePath: true } },
       },
     });
     if (!stream) throw new NotFoundException('Stream not found');
@@ -200,6 +203,7 @@ export class PublicService {
       return {
         slug: stream.org.slug,
         name: stream.org.name,
+        hasImage: !!stream.org.imagePath,
         streamSlug: stream.slug,
         isLive: false,
         streamTitle: '',
@@ -214,6 +218,7 @@ export class PublicService {
       slug: stream.org.slug,
       name: stream.org.name,
       description: stream.org.description,
+      hasImage: !!stream.org.imagePath,
       streamSlug: stream.slug,
       isLive: stream.isLive,
       streamTitle: stream.name,

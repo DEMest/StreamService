@@ -12,6 +12,7 @@ import ViewSwitcher, {
 import { Chat } from '@/components/Chat';
 import { Header } from '@/components/Header';
 import { MobileSeekBar } from '@/components/MobileSeekBar';
+import { OrgAvatar } from '@/components/OrgAvatar';
 import {
   Eye, CornersOut, CornersIn,
   SpeakerHigh, SpeakerLow, SpeakerSlash,
@@ -33,6 +34,7 @@ interface OrgWatch {
   slug: string;
   name: string;
   description?: string;
+  hasImage?: boolean;
   isLive: boolean;
   streamTitle: string;
   streamDescription?: string;
@@ -360,12 +362,13 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
     );
   }
 
-  // Заголовок: склеиваем «<orgName> · <streamName>».
-  const composedTitle = (() => {
-    const streamName = org?.streamTitle?.trim();
-    if (streamName) return `${org?.name ?? orgSlug} · ${streamName}`;
-    return org?.name || orgSlug;
-  })();
+  // Идентичность вещателя: организация — первичная строка (с аватаром), стрим —
+  // подпись под ней. Намеренно НЕ склеиваем их в одну строку: иначе орга
+  // читается как приставка к техническому названию потока и на mobile ещё и
+  // дублируется отдельной строкой ниже.
+  const orgTitle = org?.name || orgSlug;
+  const streamTitle = org?.streamTitle?.trim() || '';
+  const orgHref = previewKey ? `/watch/${orgSlug}?key=${previewKey}` : `/watch/${orgSlug}`;
 
   // ── Mobile layout ──────────────────────────────────────────────────────
   if (isMobile) {
@@ -450,7 +453,15 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
 
             {uiVisible && (
               <div className="absolute top-0 inset-x-0 px-4 py-3 flex justify-between items-center pointer-events-none" style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)' }}>
-                <span className="font-semibold text-white text-sm truncate max-w-[60%]">{composedTitle}</span>
+                <div className="flex items-center gap-2 min-w-0 max-w-[60%]">
+                  <OrgAvatar orgSlug={orgSlug} orgName={org?.name} hasImage={org?.hasImage} size={22} live={!!org?.isLive} />
+                  <span className="min-w-0 flex flex-col">
+                    <span className="font-semibold text-white text-xs leading-tight truncate">{orgTitle}</span>
+                    {streamTitle && (
+                      <span className="text-zinc-400 text-[0.65rem] leading-tight truncate">{streamTitle}</span>
+                    )}
+                  </span>
+                </div>
                 <div className="flex items-center gap-2 pointer-events-auto">
                   {org?.isLive && (
                     <>
@@ -625,15 +636,20 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
                 >
                   <CaretLeft size={20} weight="bold" />
                 </button>
-                <div className="min-w-0 flex-1">
-                  <p className="text-zinc-100 font-semibold text-sm leading-snug truncate">
-                    {composedTitle}
-                  </p>
-                  {org?.name && (
-                    <p className="text-zinc-500 text-xs mt-0.5 truncate">{org.name}</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                <Link
+                  href={orgHref}
+                  className="flex items-center gap-2.5 min-w-0 flex-1 no-underline"
+                  title={`К ${orgTitle}`}
+                >
+                  <OrgAvatar orgSlug={orgSlug} orgName={org?.name} hasImage={org?.hasImage} size={28} live={!!org?.isLive} />
+                  <span className="min-w-0 flex flex-col">
+                    <span className="text-zinc-50 font-semibold text-sm leading-snug truncate">{orgTitle}</span>
+                    {streamTitle && (
+                      <span className="text-zinc-400 text-xs leading-snug truncate">{streamTitle}</span>
+                    )}
+                  </span>
+                </Link>
+                <div className="flex items-center gap-2 shrink-0">
                   {org?.isLive && (
                     <span className="flex items-center gap-1 text-brand text-xs font-semibold">
                       <span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse" /> LIVE
@@ -680,16 +696,29 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
           {/* Title overlay (top-left) */}
           {!isFullscreen && org && (
             <div className="absolute top-3 left-3 z-10 flex flex-col gap-1 max-w-[60%] pointer-events-auto">
-              <div className="flex items-center gap-2 bg-black/55 backdrop-blur-sm rounded-lg px-3 py-1.5">
+              <div className="flex items-center gap-2.5 bg-black/55 backdrop-blur-sm rounded-lg pl-2 pr-3 py-1.5">
                 <Link
-                  href={previewKey ? `/watch/${orgSlug}?key=${previewKey}` : `/watch/${orgSlug}`}
-                  className="text-zinc-400 hover:text-zinc-200 transition-colors no-underline shrink-0 flex items-center"
-                  title={`К ${org.name}`}
+                  href={orgHref}
+                  className="flex items-center gap-2.5 min-w-0 no-underline group"
+                  title={`К ${orgTitle}`}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <CaretLeft size={14} />
+                  <CaretLeft size={14} className="text-zinc-400 group-hover:text-zinc-200 transition-colors shrink-0" />
+                  <OrgAvatar orgSlug={orgSlug} orgName={org.name} hasImage={org.hasImage} size={32} live={org.isLive} />
+                  <span className="min-w-0 flex flex-col">
+                    <span className="text-zinc-50 text-sm font-semibold leading-tight truncate group-hover:text-white transition-colors">
+                      {orgTitle}
+                    </span>
+                    {streamTitle && (
+                      <span className="text-zinc-400 text-xs leading-tight truncate">{streamTitle}</span>
+                    )}
+                  </span>
                 </Link>
-                <span className="text-zinc-200 text-xs font-semibold truncate">{composedTitle}</span>
+                {org.isLive && (
+                  <span className="flex items-center gap-1 text-brand text-xs font-semibold shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse" /> LIVE
+                  </span>
+                )}
               </div>
             </div>
           )}
