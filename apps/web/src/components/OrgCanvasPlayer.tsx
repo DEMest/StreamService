@@ -63,15 +63,18 @@ function enterCanvasFullscreen(container: HTMLElement, canvas: HTMLCanvasElement
   tempVideo.playsInline = true;
   tempVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
   document.body.appendChild(tempVideo);
-  tempVideo.play().catch(() => {}).finally(() => {
-    const v = tempVideo as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
-    if (v.webkitEnterFullscreen) {
-      v.webkitEnterFullscreen();
-      tempVideo.addEventListener('webkitendfullscreen', () => { tempVideo.pause(); tempVideo.remove(); }, { once: true });
-    } else {
-      tempVideo.remove();
-    }
-  });
+  // webkitEnterFullscreen() обязан идти синхронно в том же тике, что и клик —
+  // WebKit привязывает право на fullscreen к user gesture, и если дождаться
+  // play().then()/.finally() (микротаска), эта привязка уже теряется и вызов
+  // молча ничего не делает. play() поэтому не ждём, катчим отдельно.
+  const v = tempVideo as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+  tempVideo.play().catch(() => {});
+  if (v.webkitEnterFullscreen) {
+    v.webkitEnterFullscreen();
+    tempVideo.addEventListener('webkitendfullscreen', () => { tempVideo.pause(); tempVideo.remove(); }, { once: true });
+  } else {
+    tempVideo.remove();
+  }
 }
 
 /**
