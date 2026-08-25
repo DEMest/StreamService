@@ -319,6 +319,7 @@ describe('PublicService', () => {
         slug: 'club1',
         name: 'Club One',
         description: 'A club',
+        imagePath: 'images/org/club1.jpg',
         streams: [
           {
             slug: 'main',
@@ -343,6 +344,7 @@ describe('PublicService', () => {
         orgSlug: 'club1',
         orgName: 'Club One',
         orgDescription: 'A club',
+        hasImage: true,
         streams: [
           {
             streamSlug: 'main',
@@ -371,6 +373,7 @@ describe('PublicService', () => {
         slug: 'club-empty',
         name: 'Empty Club',
         description: null,
+        imagePath: null,
         streams: [],
       });
 
@@ -380,6 +383,7 @@ describe('PublicService', () => {
         orgSlug: 'club-empty',
         orgName: 'Empty Club',
         orgDescription: null,
+        hasImage: false,
         streams: [],
       });
     });
@@ -400,7 +404,7 @@ describe('PublicService', () => {
         isPublic: true,
         previewKey: null,
         feedMode: 'composite',
-        org: { slug: 'org1', name: 'Org One', description: null },
+        org: { slug: 'org1', name: 'Org One', description: null, imagePath: 'images/org/org1.jpg' },
       });
 
       const result = await service.getOrgWatch('org1', 'foo');
@@ -409,6 +413,7 @@ describe('PublicService', () => {
         slug: 'org1',
         name: 'Org One',
         description: null,
+        hasImage: true,
         streamSlug: 'foo',
         isLive: true,
         streamTitle: 'Foo Stream',
@@ -439,7 +444,7 @@ describe('PublicService', () => {
         isPublic: false,
         previewKey: 'secret',
         feedMode: 'single',
-        org: { slug: 'org1', name: 'Org One', description: null },
+        org: { slug: 'org1', name: 'Org One', description: null, imagePath: null },
       });
 
       const result = await service.getOrgWatch('org1', 'foo', 'wrong-key');
@@ -447,6 +452,7 @@ describe('PublicService', () => {
       expect(result).toEqual({
         slug: 'org1',
         name: 'Org One',
+        hasImage: false,
         streamSlug: 'foo',
         isLive: false,
         streamTitle: '',

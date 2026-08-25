@@ -214,6 +214,11 @@ Copy `.env.example` to `.env`. One compose file serves both prod and a test stan
 
 ## Frontend Design Skills
 
+> **Note:** the skill files listed below are **not currently in the repository.**
+> They were lost under the old blanket `.claude/` ignore rule (now narrowed — see
+> `.gitignore`). Until they are restored, treat the overrides underneath as the
+> binding part of this section and ignore the file paths.
+
 When working on frontend code (`apps/web`), always apply the design instructions from:
 - `.claude/skills/taste-skill.md` — core design framework (typography, color, layout, motion, anti-patterns)
 - `.claude/skills/output-skill.md` — complete code output, no truncation or placeholders
@@ -239,3 +244,109 @@ Additional skills are available on request in `.claude/skills/`:
 - Private Streams use `previewKey`; watchers/HLS access them via `?key=<previewKey>`.
 - Stream slugs are validated: lowercase alphanumeric + single dashes, ≤32 chars, not reserved, not purely numeric.
 - Keep `layout-presets.ts` in sync between `apps/api` and `apps/web`.
+
+## Git flow
+
+- **Never push directly to `main`.** Branch → PR → green CI → merge.
+- Branch naming follows what's already in the repo: `feat/`, `fix/`, `chore/`,
+  `ci/`, `infra/` + kebab-case description.
+- **No `Co-Authored-By` or any Claude signature** in commits or PRs. This is
+  already configured in `.claude/settings.json` (`attribution.commit` /
+  `attribution.pr` set to `""`) — do not override it by hand.
+- **Merging is autonomous.** Once the self-check below passes and the PR is
+  open: wait for green CI (`gh pr checks <N> --watch`) and merge it yourself
+  (`gh pr merge <N> --squash --delete-branch`). Do not ask "shall I merge?" on
+  every task — this is the default for any session in this repository. It is
+  overridden by an explicit request in a given session ("don't merge, leave it
+  for review") and by the two hard stops below.
+- **Hard stop 1 — red CI.** Never merge something broken. Stop and report.
+- **Hard stop 2 — `live-safety-auditor` returned FAIL.** See Deployment below.
+- Merge PRs **one at a time**, waiting for each deploy to finish before merging
+  the next. Two merges in quick succession produce two overlapping deploys.
+
+## Mandatory self-check before considering a task done
+
+No manual checks needed — there are dedicated sub-agents in `.claude/agents/`
+for this. After any code change in this project:
+
+1. `task-completion-validator` — always.
+2. `qa-browser-tester` — if `apps/web` changed.
+3. `claude-md-compliance` — always.
+4. `code-quality-pragmatist` — for non-trivial changes.
+5. `live-safety-auditor` — **always, before merging.** Merging deploys to a
+   production server that is usually mid-broadcast.
+
+A task is not done until every applicable agent returns PASS (a WARN from
+`live-safety-auditor` is acceptable — a FAIL is not).
+
+## Deployment
+
+Merging to `main` triggers the `deploy` job in `.github/workflows/ci.yml`,
+which reaches this server over Tailscale and runs `infra/deploy/deploy.sh`.
+
+What that means for how you work:
+
+- **A merge is a production release.** There is no separate "deploy" step you
+  or the user perform afterwards.
+- The deploy rebuilds and restarts **`api` and `web`, with `--no-deps`**.
+  MediaMTX is left alone by default, so live ingest, the FFmpeg ABR ladder and
+  recording all continue uninterrupted across a deploy.
+- The one visible effect is that live HLS delivery pauses for the ~5 s the API
+  takes to restart (it serves HLS itself). With 2 s segments and an 80 s
+  playlist window, plus nginx serving stale on upstream error, viewers normally
+  do not notice and **broadcasts do not end**.
+- Changes to `infra/mediamtx/*` or to `docker-compose.yml` (**any** hunk — the
+  script matches the filename, not the section) only take effect on a MediaMTX
+  restart, which drops every publisher. `mediamtx.yml` is bind-mounted rather
+  than baked into the image, so the restart must be `--force-recreate`: a
+  config-only change leaves the image ID untouched and plain `up -d` would
+  silently skip the container. `deploy.sh` checks the diff on every run that
+  has a `.deployed` baseline, and picks one of three branches:
+  - **no live streams** → MediaMTX is rebuilt and restarted along with the rest;
+  - **streams live, `FORCE_MEDIAMTX=1`** → restarted anyway, ingest is cut,
+    publishers must reconnect. Trigger it from Actions → CI → Run workflow →
+    `force_mediamtx`, or on the server directly;
+  - **streams live, no force** → the deploy **aborts and changes nothing**,
+    naming both ways out. The next push retries it.
+  On the very first deploy there is no `.deployed` to diff against, so MediaMTX
+  is left alone and a warning is logged. `live-safety-auditor` flags the same
+  case at PR time.
+- Migrations run on API boot (`prisma migrate deploy`), so a slow or locking
+  migration directly extends the HLS pause.
+
+## Parallel development (several features at once)
+
+If the user describes several independent tasks in one go — don't wait for a
+special command. Decide yourself: if the tasks are small and spinning up
+separate worktrees isn't worth it, do them sequentially in this session under
+the rules above. If there are several and each is a self-contained piece of
+work, start the orchestration:
+
+    /parallel-feature <free-form text: one or several tasks>
+
+Better to run this from a fresh Claude Code session rather than one with a long
+history — the whole context budget of the new session goes into orchestration.
+
+The same orchestrator runs both via this explicit command and on its own when a
+session decides the task looks like it — but in the second case the model
+cannot invoke the slash command programmatically
+(`disable-model-invocation: true` on the skill blocks this deliberately):
+instead, read `.claude/skills/parallel-feature/SKILL.md` and follow its steps in
+the current session. Exception — if your own history is already large: don't
+spend it on orchestration, tell the user to run `/parallel-feature` in a fresh
+session and wait for their answer.
+
+## Working in this checkout
+
+`/home/rootuser/StreamService` on the production server is not just a source
+tree — it is the working directory of the live stack. Never run
+`docker compose up / down / restart` from here to "check" something; those
+commands hit liga-live.ru and its viewers. Verify with builds and tests, and
+leave deployment to the autodeploy job.
+
+Those container-lifecycle denies live in `.claude/settings.local.json`, which
+is gitignored and exists **only on the server**, not in `settings.json`. The
+reason is that they are a property of this checkout, not of the project: on a
+developer machine the same commands are the documented way to run the stack,
+and a repo-level `deny` cannot be re-allowed locally. If you clone this repo
+onto another host that serves live traffic, copy that file across.
