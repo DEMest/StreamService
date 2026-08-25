@@ -26,6 +26,12 @@ export class PublicController {
     return this.pub.getCatalog();
   }
 
+  /** Плоский список всех записей по всем публичным Stream'ам — питает `/archive`. */
+  @Get('broadcasts')
+  getGlobalArchive() {
+    return this.pub.getGlobalArchive();
+  }
+
   /** Картинка организации (S3-прокси) для карточек каталога/архива. */
   @Get('orgs/:orgSlug/image')
   async getOrgImage(@Param('orgSlug') orgSlug: string, @Res() res: Response) {
@@ -70,6 +76,19 @@ export class PublicController {
     return this.pub.getOrgBroadcasts(orgSlug, streamSlug, key);
   }
 
+  /**
+   * Список broadcast'ов дефолтного Stream'а орги (`slug=''`) — отдельный
+   * роут, а не `:streamSlug` с пустым значением: пустой URL-сегмент между
+   * двумя `/` не матчится Express'ом. Тело — тот же getOrgBroadcasts('').
+   */
+  @Get('orgs/:orgSlug/broadcasts')
+  getDefaultStreamBroadcasts(
+    @Param('orgSlug') orgSlug: string,
+    @Query('key') key?: string,
+  ) {
+    return this.pub.getOrgBroadcasts(orgSlug, '', key);
+  }
+
   /** Превью записи (S3-прокси); для приватного стрима — ?key=<previewKey>. */
   @Get('orgs/:orgSlug/streams/:streamSlug/broadcasts/:broadcastId/preview')
   async getBroadcastPreview(
@@ -80,6 +99,22 @@ export class PublicController {
     @Res() res: Response,
   ) {
     const buffer = await this.pub.getBroadcastPreview(orgSlug, streamSlug, broadcastId, key);
+    res.set({
+      'Content-Type': 'image/jpeg',
+      'Cache-Control': 'public, max-age=300',
+    });
+    res.send(buffer);
+  }
+
+  /** Превью записи дефолтного Stream'а орги (`slug=''`) — см. getDefaultStreamBroadcasts. */
+  @Get('orgs/:orgSlug/broadcasts/:broadcastId/preview')
+  async getDefaultStreamBroadcastPreview(
+    @Param('orgSlug') orgSlug: string,
+    @Param('broadcastId') broadcastId: string,
+    @Query('key') key: string | undefined,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.pub.getBroadcastPreview(orgSlug, '', broadcastId, key);
     res.set({
       'Content-Type': 'image/jpeg',
       'Cache-Control': 'public, max-age=300',

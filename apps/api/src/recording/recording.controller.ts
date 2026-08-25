@@ -44,6 +44,22 @@ export class RecordingController {
   }
 
   /**
+   * Тот же archive HLS, но для дефолтного Stream'а орги (`slug=''`) — без
+   * `/streams/<streamSlug>/` сегмента: пустой URL-сегмент между двумя `/` не
+   * матчится Express'ом, поэтому это отдельный роут, а не `:streamSlug=''`.
+   */
+  @Get('v1/public/orgs/:orgSlug/broadcasts/:broadcastId/recording/hls/*')
+  async serveHlsDefault(
+    @Param('orgSlug') orgSlug: string,
+    @Param('broadcastId') broadcastId: string,
+    @Param('0') wildcard: string,
+    @Res() res: Response,
+  ) {
+    this.logger.log(`serveHlsDefault: orgSlug=${orgSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
+    await this.serveArchiveHlsImpl(orgSlug, '', broadcastId, wildcard, res);
+  }
+
+  /**
    * Реализация archive HLS-сервинга поверх S3, гибридная:
    *
    *  - `.m3u8`-плейлисты (крошечный текст) ПРОКСИРУЮТСЯ через API. Это не

@@ -53,21 +53,36 @@ interface ArchiveViewProps {
  * Archive-компонент конкретного Stream'а: рендерит список broadcast'ов и
  * плеер recording'а для Stream'а `<orgSlug>/<streamSlug>`.
  *
- * URL'ы endpoint'ов:
- *   /v1/public/orgs/<org>/streams/<stream>/broadcasts
- *   /api/v1/public/orgs/<org>/streams/<stream>/broadcasts/<id>/recording/hls/master.m3u8
- *   /v1/public/orgs/<org>/streams/<stream>/broadcasts/<id>/preview
+ * `streamSlug=''` — дефолтный Stream орги: пустой URL-сегмент между двумя
+ * `/` не матчится Express'ом на бэкенде, поэтому в этом случае endpoint'ы
+ * идут БЕЗ `/streams/<slug>` — см. соседние роуты в PublicController /
+ * RecordingController (getDefaultStreamBroadcasts, serveHlsDefault и т.д.).
  *
- * Кнопка «← к стриму» ведёт на watch-страницу `/watch/<org>/<stream>`.
+ * URL'ы endpoint'ов (именованный Stream / дефолтный Stream):
+ *   /v1/public/orgs/<org>/streams/<stream>/broadcasts            | /v1/public/orgs/<org>/broadcasts
+ *   .../streams/<stream>/broadcasts/<id>/recording/hls/master.m3u8 | .../broadcasts/<id>/recording/hls/master.m3u8
+ *   /v1/public/orgs/<org>/streams/<stream>/broadcasts/<id>/preview | /v1/public/orgs/<org>/broadcasts/<id>/preview
+ *
+ * Кнопка «← к стриму» ведёт на watch-страницу `/watch/<org>/<stream>`
+ * (для дефолтного Stream'а — на обзор орги `/watch/<org>`, у него нет
+ * отдельной live-watch страницы).
  */
 export function ArchiveView({ orgSlug, streamSlug }: ArchiveViewProps) {
-  const apiBasePath = `/v1/public/orgs/${orgSlug}/streams/${streamSlug}`;
-  // Recording playback URL формируется RecordingController'ом — он живёт под
-  // `/api/v1/public/orgs/<org>/streams/<stream>/broadcasts/<id>/recording/hls/*`.
-  const recordingBasePath = `/api/v1/public/orgs/${orgSlug}/streams/${streamSlug}`;
+  const isDefaultStream = streamSlug === '';
+  const apiBasePath = isDefaultStream
+    ? `/v1/public/orgs/${orgSlug}`
+    : `/v1/public/orgs/${orgSlug}/streams/${streamSlug}`;
+  // Recording playback URL формируется RecordingController'ом.
+  const recordingBasePath = isDefaultStream
+    ? `/api/v1/public/orgs/${orgSlug}`
+    : `/api/v1/public/orgs/${orgSlug}/streams/${streamSlug}`;
 
   const searchParams = useSearchParams();
   const previewKey = searchParams.get('key') ?? undefined;
+  // Пришли с плоского /archive по ссылке на конкретную запись — откроем её
+  // плеер сразу, как только список broadcast'ов подтвердит, что она готова.
+  const initialBroadcastId = searchParams.get('broadcast');
+  const appliedInitialBroadcast = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('multicam');
   const [volume, setVolume] = useState(1);
@@ -101,12 +116,19 @@ export function ArchiveView({ orgSlug, streamSlug }: ArchiveViewProps) {
     },
   });
 
+  useEffect(() => {
+    if (!initialBroadcastId || appliedInitialBroadcast.current || !broadcasts) return;
+    appliedInitialBroadcast.current = true;
+    const match = broadcasts.find((b) => b.id === initialBroadcastId && b.recording?.status === 'ready');
+    if (match) setSelectedId(match.id);
+  }, [initialBroadcastId, broadcasts]);
+
   const selected = broadcasts?.find(b => b.id === selectedId);
   const recordingUrl = selectedId
     ? `${recordingBasePath}/broadcasts/${selectedId}/recording/hls/master.m3u8`
     : null;
 
-  const watchBasePath = `/watch/${orgSlug}/${streamSlug}`;
+  const watchBasePath = isDefaultStream ? `/watch/${orgSlug}` : `/watch/${orgSlug}/${streamSlug}`;
   const watchLink = previewKey ? `${watchBasePath}?key=${previewKey}` : watchBasePath;
 
   useEffect(() => {

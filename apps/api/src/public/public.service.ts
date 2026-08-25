@@ -41,6 +41,25 @@ export interface OrgOverviewDto {
   }>;
 }
 
+/**
+ * Элемент плоского глобального архива (`GET /v1/public/broadcasts`) —
+ * запись помечена orgSlug/orgName/streamSlug/streamName, чтобы карточка на
+ * `/archive` показывала, чья это запись, без перехода на обзор орги.
+ */
+export interface PublicArchiveItem {
+  id: string;
+  title: string;
+  description: string | null;
+  startedAt: Date;
+  endedAt: Date | null;
+  hasPreview: boolean;
+  recording: ReturnType<typeof toRecordingSummary>;
+  orgSlug: string;
+  orgName: string;
+  streamSlug: string;
+  streamName: string;
+}
+
 function publicUrlPrefix(orgSlug: string, streamSlug: string): string {
   return `/api/v1/public/orgs/${orgSlug}/streams/${streamSlug}`;
 }
@@ -284,6 +303,52 @@ export class PublicService {
       ...rest,
       hasPreview: !!previewImagePath,
       recording: toRecordingSummary(recordings[0]),
+    }));
+  }
+
+  /**
+   * GET /v1/public/broadcasts — плоский список всех записей по всем публичным
+   * Stream'ам активных орг, отсортированный по startedAt DESC. Питает
+   * `/archive` (глубина 1: все видео сразу, без выбора орги/Stream'а).
+   * Приватные Stream'ы сюда не попадают — глобально нет previewKey-контекста.
+   */
+  async getGlobalArchive(): Promise<PublicArchiveItem[]> {
+    const broadcasts = await this.prisma.broadcast.findMany({
+      where: {
+        endedAt: { not: null },
+        stream: { isPublic: true, org: { isActive: true } },
+      },
+      orderBy: { startedAt: 'desc' },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        startedAt: true,
+        endedAt: true,
+        previewImagePath: true,
+        stream: {
+          select: {
+            slug: true,
+            name: true,
+            org: { select: { slug: true, name: true } },
+          },
+        },
+        recordings: {
+          where: { slotIndex: 1 },
+          select: { id: true, status: true, fileSize: true, duration: true },
+          take: 1,
+        },
+      },
+    });
+
+    return broadcasts.map(({ recordings, previewImagePath, stream, ...rest }) => ({
+      ...rest,
+      hasPreview: !!previewImagePath,
+      recording: toRecordingSummary(recordings[0]),
+      orgSlug: stream.org.slug,
+      orgName: stream.org.name,
+      streamSlug: stream.slug,
+      streamName: stream.name,
     }));
   }
 
