@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { SpeakerHigh, X, CornersOut, ArrowsOut } from '@phosphor-icons/react';
+import { SpeakerHigh, X, CornersOut, CornersIn, ArrowsOut } from '@phosphor-icons/react';
 import { computeCanvasLayout, type TileRect } from '@/lib/canvas-layout-presets';
 
 export interface CanvasTile {
@@ -44,45 +44,6 @@ function enterVideoFullscreen(video: HTMLVideoElement) {
   if (video.requestFullscreen) video.requestFullscreen().catch(() => {});
   else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen();
   else if (v.webkitRequestFullscreen) v.webkitRequestFullscreen();
-}
-
-/**
- * Fullscreen всей композиции (canvas). На iOS Safari нет fullscreen для
- * произвольных элементов — обходим тем же трюком, что MatPlayer: захватываем
- * поток холста через captureStream и открываем нативный fullscreen на
- * временном &lt;video&gt;.
- */
-function enterCanvasFullscreen(container: HTMLElement, canvas: HTMLCanvasElement) {
-  // container.requestFullscreen существует как метод на iPhone Safari (часть
-  // DOM-интерфейса любого элемента), но вызов там всегда молча отклоняется —
-  // fullscreen для произвольных элементов не поддерживается, только для
-  // <video>. document.fullscreenEnabled — единственный надёжный флаг, что
-  // вызов реально сработает (тот же паттерн, что в WatchView/ArchiveView).
-  if (container.requestFullscreen && document.fullscreenEnabled) {
-    container.requestFullscreen().catch(() => {});
-    return;
-  }
-  const c = canvas as HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream };
-  if (!c.captureStream) return;
-  const stream = c.captureStream(30);
-  const tempVideo = document.createElement('video');
-  tempVideo.srcObject = stream;
-  tempVideo.muted = true;
-  tempVideo.playsInline = true;
-  tempVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
-  document.body.appendChild(tempVideo);
-  // webkitEnterFullscreen() обязан идти синхронно в том же тике, что и клик —
-  // WebKit привязывает право на fullscreen к user gesture, и если дождаться
-  // play().then()/.finally() (микротаска), эта привязка уже теряется и вызов
-  // молча ничего не делает. play() поэтому не ждём, катчим отдельно.
-  const v = tempVideo as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
-  tempVideo.play().catch(() => {});
-  if (v.webkitEnterFullscreen) {
-    v.webkitEnterFullscreen();
-    tempVideo.addEventListener('webkitendfullscreen', () => { tempVideo.pause(); tempVideo.remove(); }, { once: true });
-  } else {
-    tempVideo.remove();
-  }
 }
 
 /**
@@ -322,13 +283,43 @@ export function OrgCanvasPlayer({ tiles }: OrgCanvasPlayerProps) {
     if (!video) return;
     setFullscreenVideoSlug(streamSlug);
     enterVideoFullscreen(video);
+    // webkitEnterFullscreen() (iPhone) не участвует в document.fullscreenElement/
+    // fullscreenchange вообще — это отдельный legacy API. Выход из него шлёт
+    // webkitendfullscreen НА САМОМ video, а не на document. Без этого слушателя
+    // fullscreenVideoSlug на iPhone зависает навсегда: тайл рисуется чёрным,
+    // а его скрытое video (opacity управляется этим же state) остаётся
+    // видимым на весь контейнер поверх остальной раскладки.
+    const v = video as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+    if (v.webkitEnterFullscreen) {
+      video.addEventListener('webkitendfullscreen', () => {
+        setFullscreenVideoSlug((cur) => (cur === streamSlug ? null : cur));
+      }, { once: true });
+    }
   }
 
   function handleGridFullscreen() {
     const outer = outerRef.current;
-    const canvas = canvasRef.current;
-    if (!outer || !canvas) return;
-    enterCanvasFullscreen(outer, canvas);
+    // document.fullscreenEnabled === false на iPhone Safari — там fullscreen
+    // для произвольных элементов не поддерживается в принципе (только для
+    // <video>). Попытки обойти это через canvas.captureStream() +
+    // webkitEnterFullscreen() на временном <video> раз за разом ловили новые
+    // WebKit-тайминги и не давали надёжного результата (см. #28, #30).
+    // Вместо гонки с WebKit — показываем ту же композицию в CSS-оверлее на
+    // весь вьюпорт: адресная строка Safari не спрячется, зато это работает
+    // предсказуемо везде, без скрытых video/MediaStream.
+    if (outer?.requestFullscreen && document.fullscreenEnabled) {
+      outer.requestFullscreen().catch(() => {});
+      return;
+    }
+    setIsGridFullscreen(true);
+  }
+
+  function handleGridExitFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      setIsGridFullscreen(false);
+    }
   }
 
   return (
@@ -384,6 +375,15 @@ export function OrgCanvasPlayer({ tiles }: OrgCanvasPlayerProps) {
             >
               <X size={12} weight="bold" />
               К сетке
+            </button>
+          ) : isGridFullscreen ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); handleGridExitFullscreen(); }}
+              title="Свернуть"
+              className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2 py-1 bg-black/60 hover:bg-black/80 backdrop-blur-sm text-zinc-200 text-xs rounded-md transition-colors border-none cursor-pointer"
+            >
+              <CornersIn size={13} weight="bold" />
+              Свернуть
             </button>
           ) : (
             <button
