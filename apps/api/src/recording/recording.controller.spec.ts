@@ -210,6 +210,33 @@ describe('RecordingController', () => {
     });
   });
 
+  describe('serveHlsDefault — archive HLS for the org default Stream (slug=\'\')', () => {
+    it('looks up broadcast with an empty streamSlug filter (default Stream)', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/b1');
+
+      const res = makeRes();
+      await controller.serveHlsDefault('org1', 'b1', 'master.m3u8', res);
+
+      const whereArg = mockPrisma.broadcast.findFirst.mock.calls[0][0].where;
+      expect(whereArg.id).toBe('b1');
+      expect(whereArg.stream).toEqual({
+        slug: '',
+        org: { slug: 'org1', isActive: true },
+      });
+    });
+
+    it('returns 404 when broadcast does not exist under the default Stream', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue(null);
+
+      const res = makeRes();
+      await controller.serveHlsDefault('org1', 'b1', 'master.m3u8', res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.redirect).not.toHaveBeenCalled();
+    });
+  });
+
   describe('downloadRecording — presigned redirect to pre-built MP4', () => {
     it('returns 404 when broadcast does not exist for this org', async () => {
       mockPrisma.broadcast.findFirst.mockResolvedValue(null);

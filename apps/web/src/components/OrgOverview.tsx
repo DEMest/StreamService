@@ -118,10 +118,16 @@ export function OrgOverview({ orgSlug, archiveMode = false }: { orgSlug: string;
               const thumbUrl = s.isLive || s.hasCustomPreview
                 ? `${API_BASE}/v1/public/orgs/${orgSlug}/streams/${s.streamSlug}/thumbnail`
                 : null;
+              // Дефолтный Stream орги (streamSlug='') — отдельный роут-сосед без
+              // сегмента streamSlug (пустой URL-сегмент между двумя `/` не
+              // матчится Express'ом на бэкенде); см. ArchiveView.tsx.
+              const archiveHref = s.streamSlug === ''
+                ? `/watch/${orgSlug}/archive`
+                : `/watch/${orgSlug}/${s.streamSlug}/archive`;
               return (
                 <Link
                   key={s.streamSlug}
-                  href={archiveMode ? `/watch/${orgSlug}/${s.streamSlug}/archive` : `/watch/${orgSlug}/${s.streamSlug}`}
+                  href={archiveMode ? archiveHref : `/watch/${orgSlug}/${s.streamSlug}`}
                   className="no-underline group"
                 >
                   <article className={`rounded-xl overflow-hidden border transition-all duration-200 active:scale-[0.99] ${

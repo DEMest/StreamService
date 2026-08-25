@@ -531,6 +531,60 @@ describe('PublicService', () => {
     });
   });
 
+  describe('getGlobalArchive', () => {
+    it('returns broadcasts across orgs/streams, labeled with org and stream identity', async () => {
+      mockPrisma.broadcast.findMany.mockResolvedValueOnce([
+        {
+          id: 'b1', title: 'Матч 1', description: null,
+          startedAt: new Date('2026-08-20T10:00:00Z'), endedAt: new Date('2026-08-20T12:00:00Z'),
+          previewImagePath: 'archive/club1/main/b1/preview.jpg',
+          stream: { slug: '', name: '', org: { slug: 'club1', name: 'Клуб 1' } },
+          recordings: [{ id: 'r1', status: 'ready', fileSize: BigInt(123), duration: 60 }],
+        },
+        {
+          id: 'b2', title: 'Матч 2', description: null,
+          startedAt: new Date('2026-08-19T10:00:00Z'), endedAt: new Date('2026-08-19T12:00:00Z'),
+          previewImagePath: null,
+          stream: { slug: 'mat-b', name: 'Mat B', org: { slug: 'club1', name: 'Клуб 1' } },
+          recordings: [],
+        },
+      ]);
+
+      const result = await service.getGlobalArchive();
+
+      expect(result).toEqual([
+        {
+          id: 'b1', title: 'Матч 1', description: null,
+          startedAt: new Date('2026-08-20T10:00:00Z'), endedAt: new Date('2026-08-20T12:00:00Z'),
+          hasPreview: true,
+          recording: { id: 'r1', status: 'ready', fileSize: 123, duration: 60 },
+          orgSlug: 'club1', orgName: 'Клуб 1',
+          streamSlug: '', streamName: '',
+        },
+        {
+          id: 'b2', title: 'Матч 2', description: null,
+          startedAt: new Date('2026-08-19T10:00:00Z'), endedAt: new Date('2026-08-19T12:00:00Z'),
+          hasPreview: false,
+          recording: null,
+          orgSlug: 'club1', orgName: 'Клуб 1',
+          streamSlug: 'mat-b', streamName: 'Mat B',
+        },
+      ]);
+    });
+
+    it('queries only ended broadcasts of public Streams of active orgs, sorted by startedAt DESC', async () => {
+      mockPrisma.broadcast.findMany.mockResolvedValueOnce([]);
+      await service.getGlobalArchive();
+
+      const callArgs = mockPrisma.broadcast.findMany.mock.calls[0][0];
+      expect(callArgs.where).toEqual({
+        endedAt: { not: null },
+        stream: { isPublic: true, org: { isActive: true } },
+      });
+      expect(callArgs.orderBy).toEqual({ startedAt: 'desc' });
+    });
+  });
+
   describe('getThumbnail', () => {
     it("live Stream → snapshot key '<orgSlug>/<streamSlug>'", async () => {
       mockPrisma.stream.findFirst.mockResolvedValueOnce({
