@@ -39,12 +39,12 @@ export interface CropState {
   offset: Offset;
 }
 
-/** Область исходника в его собственных пикселях — аргументы для drawImage. */
-export interface SourceRect {
-  sx: number;
-  sy: number;
-  sw: number;
-  sh: number;
+/** Прямоугольник на выходном холсте — аргументы для drawImage. */
+export interface DestRect {
+  dx: number;
+  dy: number;
+  dw: number;
+  dh: number;
 }
 
 export function clampZoom(zoom: number): number {
@@ -63,16 +63,26 @@ export function scaleFor(image: Size, frame: Size, zoom: number): number {
 }
 
 /**
- * Не даём утащить картинку так, чтобы в рамке образовалась дыра.
- * Вырожденный случай (картинка уже рамки из-за погрешности округления)
- * центрируем, иначе диапазон клампа схлопнулся бы в пустоту.
+ * Порог «считаем нулём». `coverScale` подгоняет картинку под рамку ровно, и по
+ * узкой стороне `shown` отличается от `frame` на единицы 1e-14 — то есть знак
+ * разницы случаен. Без порога такая картинка попадала бы в ветку «уже рамки» и
+ * получала микроскопическое положительное смещение, которое дальше вылезало
+ * прозрачной полоской по краю холста.
+ */
+const EPSILON = 1e-6;
+
+/**
+ * Не даём утащить картинку так, чтобы в рамке образовалась дыра: смещение живёт
+ * в [-(shown - frame), 0]. Картинку, которая честно уже рамки (такое возможно
+ * только при вырожденной рамке), центрируем — иначе диапазон схлопнулся бы в
+ * пустоту.
  */
 export function clampOffset(offset: Offset, image: Size, frame: Size, scale: number): Offset {
   const shown = { width: image.width * scale, height: image.height * scale };
   const axis = (value: number, shownSize: number, frameSize: number) => {
-    const min = frameSize - shownSize;
-    if (min > 0) return min / 2;
-    return Math.min(0, Math.max(min, value));
+    const slack = shownSize - frameSize;
+    if (slack < -EPSILON) return -slack / 2;
+    return Math.min(0, Math.max(-Math.max(slack, 0), value));
   };
   return {
     x: axis(offset.x, shown.width, frame.width),
@@ -155,19 +165,34 @@ export function frameCenter(frame: Size): Offset {
 }
 
 /**
- * Что видно в рамке — в пикселях исходника. Дополнительно зажимаем результат
- * в границы картинки: накопленная погрешность float иначе даёт sx = -0.0001,
- * и Safari рисует по краю прозрачную полоску.
+ * Куда положить картинку на выходном холсте.
+ *
+ * Считаем не «какую область исходника взять», а «как перерисовать картинку
+ * целиком тем же преобразованием, что и на экране» — лишнее холст обрежет сам,
+ * ведь холст и есть рамка. Это важнее, чем кажется: так кадр совпадает с тем,
+ * что видел пользователь, даже если браузер по-своему трактует EXIF-ориентацию
+ * снимка с телефона. Экран и холст используют одни и те же числа, поэтому
+ * «сплющило» их одинаково или не сплющило вовсе.
+ *
+ * Коэффициенты по осям считаем раздельно: рамка меряется в дробных CSS-пикселях
+ * и её пропорция отличается от 16:9 в четвёртом знаке. Общий коэффициент оставил
+ * бы по краю холста полоску в сотые доли пикселя (в JPEG она стала бы тёмной),
+ * а раздельные дают точное покрытие — кламп смещения гарантирует его в
+ * координатах рамки, а умножение по осям переносит гарантию на холст.
  */
-export function toSourceRect(state: CropState, image: Size, frame: Size): SourceRect {
+export function toDestRect(state: CropState, image: Size, frame: Size): DestRect {
+  if (frame.width <= 0 || frame.height <= 0) {
+    return { dx: 0, dy: 0, dw: CROP_OUTPUT_WIDTH, dh: CROP_OUTPUT_HEIGHT };
+  }
+  const kx = CROP_OUTPUT_WIDTH / frame.width;
+  const ky = CROP_OUTPUT_HEIGHT / frame.height;
   const scale = scaleFor(image, frame, state.zoom);
-  if (scale <= 0) return { sx: 0, sy: 0, sw: image.width, sh: image.height };
-
-  const sw = Math.min(frame.width / scale, image.width);
-  const sh = Math.min(frame.height / scale, image.height);
-  const sx = Math.min(Math.max(-state.offset.x / scale, 0), image.width - sw);
-  const sy = Math.min(Math.max(-state.offset.y / scale, 0), image.height - sh);
-  return { sx, sy, sw, sh };
+  return {
+    dx: state.offset.x * kx,
+    dy: state.offset.y * ky,
+    dw: image.width * scale * kx,
+    dh: image.height * scale * ky,
+  };
 }
 
 /** Имя результата: кроп всегда JPEG, расширение исходника уже врёт. */

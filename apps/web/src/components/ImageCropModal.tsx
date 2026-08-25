@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowCounterClockwise, Crop, MagnifyingGlassMinus, MagnifyingGlassPlus, WarningCircle, X } from '@phosphor-icons/react';
 import {
   CROP_JPEG_QUALITY,
@@ -15,8 +15,8 @@ import {
   initialState,
   panBy,
   scaleFor,
+  toDestRect,
   toJpegName,
-  toSourceRect,
   zoomAt,
   type CropState,
   type Offset,
@@ -51,11 +51,14 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
   const [stage, setStage] = useState<Size | null>(null);
   const [crop, setCrop] = useState<CropState | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(
+  /** Показывать нечего — сцену заменяем баннером. */
+  const [fatalError, setFatalError] = useState<string | null>(
     tooLarge
       ? `Файл слишком большой — ${(file.size / 1024 / 1024).toFixed(1)} МБ. Максимум ${MAX_SOURCE_BYTES / 1024 / 1024} МБ.`
       : null,
   );
+  /** Сорвалась только отрисовка кадра — выбранную область не теряем, даём повторить. */
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -68,6 +71,10 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
   // единственную ссылку — и картинка перестанет грузиться в dev-сборке.
   useEffect(() => {
     if (tooLarge) return;
+    // Размеры прежней картинки к новой не относятся: пока не сработал onLoad,
+    // <img> растянуло бы новый кадр по старой геометрии.
+    setImage(null);
+    setCrop(null);
     const url = URL.createObjectURL(file);
     setObjectUrl(url);
     return () => URL.revokeObjectURL(url);
@@ -94,10 +101,13 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [error]);
+  }, [fatalError]);
 
-  const frame = stage ? fitFrame(stage, STAGE_PADDING) : null;
-  const origin = stage && frame ? frameOrigin(stage, frame) : null;
+  // Мемоизация здесь не про скорость арифметики, а про стабильность ссылок:
+  // от них зависят эффекты ниже, и без неё слушатель колеса переподписывался бы
+  // на каждый рендер, то есть 60 раз в секунду во время перетаскивания.
+  const frame = useMemo(() => (stage ? fitFrame(stage, STAGE_PADDING) : null), [stage]);
+  const origin = useMemo(() => (stage && frame ? frameOrigin(stage, frame) : null), [stage, frame]);
   const ready = Boolean(image && frame && frame.width > 0 && crop);
 
   // Размеры сцены известны только после вёрстки, картинки — после декодирования;
@@ -105,7 +115,7 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
   useEffect(() => {
     if (!image || !frame || frame.width <= 0) return;
     setCrop((prev) => (prev ? panBy(prev, { x: 0, y: 0 }, image, frame) : initialState(image, frame)));
-  }, [image, frame?.width, frame?.height]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [image, frame]);
 
   /** Точка внутри рамки по экранным координатам курсора или пальца. */
   const anchorFrom = useCallback((clientX: number, clientY: number): Offset | null => {
@@ -120,19 +130,18 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
   useEffect(() => {
     const el = stageRef.current;
     if (!el || !image || !frame || frame.width <= 0) return;
-    const currentImage = image;
-    const currentFrame = frame;
+    const geometry = { image, frame };
     function onWheel(e: WheelEvent) {
       e.preventDefault();
       const anchor = anchorFrom(e.clientX, e.clientY);
       if (!anchor) return;
       const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
       const factor = Math.exp(-delta * 0.0015);
-      setCrop((prev) => (prev ? zoomAt(prev, prev.zoom * factor, anchor, currentImage, currentFrame) : prev));
+      setCrop((prev) => (prev ? zoomAt(prev, prev.zoom * factor, anchor, geometry.image, geometry.frame) : prev));
     }
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [image, frame?.width, frame?.height, anchorFrom]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [image, frame, anchorFrom]);
 
   function pointerDistance(): number {
     const [a, b] = Array.from(pointers.current.values());
@@ -183,8 +192,9 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
     const img = imgRef.current;
     if (!img || !crop || !image || !frame) return;
     setBusy(true);
+    setApplyError(null);
     try {
-      const rect = toSourceRect(crop, image, frame);
+      const rect = toDestRect(crop, image, frame);
       const canvas = document.createElement('canvas');
       canvas.width = CROP_OUTPUT_WIDTH;
       canvas.height = CROP_OUTPUT_HEIGHT;
@@ -192,14 +202,15 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
       if (!ctx) throw new Error('canvas context unavailable');
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, CROP_OUTPUT_WIDTH, CROP_OUTPUT_HEIGHT);
+      ctx.drawImage(img, rect.dx, rect.dy, rect.dw, rect.dh);
       const blob = await new Promise<Blob | null>((resolve) =>
         canvas.toBlob(resolve, 'image/jpeg', CROP_JPEG_QUALITY),
       );
       if (!blob) throw new Error('toBlob returned null');
       onApply(new File([blob], toJpegName(file.name), { type: 'image/jpeg' }));
     } catch {
-      setError('Не удалось обработать изображение. Попробуйте другой файл.');
+      setApplyError('Не удалось отрисовать кадр. Попробуйте ещё раз.');
+    } finally {
       setBusy(false);
     }
   }
@@ -226,10 +237,10 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
           <p className="text-xs text-zinc-500">Выберите область 16:9 — она и станет превью.</p>
         </div>
 
-        {error ? (
+        {fatalError ? (
           <div className="flex items-start gap-2.5 px-3.5 py-3 bg-red-950/30 border border-red-900/50 rounded-lg">
             <WarningCircle size={18} className="text-red-400 shrink-0 mt-px" />
-            <p className="text-xs text-red-300 leading-relaxed">{error}</p>
+            <p className="text-xs text-red-300 leading-relaxed">{fatalError}</p>
           </div>
         ) : (
           <>
@@ -252,7 +263,7 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
                     width: e.currentTarget.naturalWidth,
                     height: e.currentTarget.naturalHeight,
                   })}
-                  onError={() => setError('Не удалось прочитать изображение. Попробуйте другой файл.')}
+                  onError={() => setFatalError('Не удалось прочитать изображение. Попробуйте другой файл.')}
                   className="absolute max-w-none pointer-events-none"
                   style={{
                     left: origin && crop ? origin.x + crop.offset.x : 0,
@@ -330,6 +341,8 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
             <p className="text-xs text-zinc-600">
               Тяните картинку мышью или пальцем, масштаб — колесом, ползунком или щипком.
             </p>
+
+            {applyError && <p className="text-xs text-red-400">{applyError}</p>}
           </>
         )}
 
@@ -344,7 +357,7 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
           <button
             type="button"
             onClick={handleApply}
-            disabled={!ready || busy || Boolean(error)}
+            disabled={!ready || busy}
             className="px-3.5 py-2 text-xs font-medium text-white bg-brand hover:bg-brand-hover rounded-lg transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 disabled:cursor-default"
           >
             {busy ? 'Обработка...' : 'Применить'}
