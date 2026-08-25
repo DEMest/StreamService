@@ -53,7 +53,15 @@ function enterVideoFullscreen(video: HTMLVideoElement) {
  * временном &lt;video&gt;.
  */
 function enterCanvasFullscreen(container: HTMLElement, canvas: HTMLCanvasElement) {
-  if (container.requestFullscreen) { container.requestFullscreen().catch(() => {}); return; }
+  // container.requestFullscreen существует как метод на iPhone Safari (часть
+  // DOM-интерфейса любого элемента), но вызов там всегда молча отклоняется —
+  // fullscreen для произвольных элементов не поддерживается, только для
+  // <video>. document.fullscreenEnabled — единственный надёжный флаг, что
+  // вызов реально сработает (тот же паттерн, что в WatchView/ArchiveView).
+  if (container.requestFullscreen && document.fullscreenEnabled) {
+    container.requestFullscreen().catch(() => {});
+    return;
+  }
   const c = canvas as HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream };
   if (!c.captureStream) return;
   const stream = c.captureStream(30);
