@@ -330,8 +330,16 @@ export function OrgCanvasPlayer({ tiles }: OrgCanvasPlayerProps) {
       >
         <div
           ref={containerRef}
-          className={`relative bg-black rounded-lg overflow-hidden ${isGridFullscreen ? 'max-w-full max-h-full' : 'w-full'}`}
-          style={{ aspectRatio: `${layout.aspect}`, width: isGridFullscreen ? undefined : '100%' }}
+          className="relative bg-black rounded-lg overflow-hidden"
+          style={
+            isGridFullscreen
+              ? {
+                  aspectRatio: `${layout.aspect}`,
+                  width: `min(100vw, calc(100dvh * ${layout.aspect}))`,
+                  height: `min(100dvh, calc(100vw / ${layout.aspect}))`,
+                }
+              : { aspectRatio: `${layout.aspect}`, width: '100%' }
+          }
         >
           <canvas
             ref={canvasRef}
