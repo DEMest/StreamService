@@ -74,23 +74,35 @@ export function InteractiveDemo() {
         onClick={handleContainerClick}
       >
         {hasVideo && (
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            loop
-            playsInline
-            src={DEMO_VIDEO_URL}
-            onCanPlay={handleCanPlay}
-            onError={handleVideoError}
-            className={`w-full h-full object-cover will-change-transform transition-opacity duration-500 ${
-              videoReady ? 'opacity-100' : 'opacity-0'
-            }`}
+          /*
+           * Transform/opacity висят на обёртке, а не на самом <video>: на
+           * Android Chrome/WebView CSS-transform + will-change + opacity-
+           * transition прямо на <video> ломает аппаратный видео-overlay —
+           * ролик декодируется и играет (currentTime идёт), но на экране
+           * остаётся чёрный кадр. На десктопе это не воспроизводится, т.к.
+           * там другой compositing-путь. См. issue #22.
+           */
+          <div
+            className="absolute inset-0 will-change-transform"
             style={{
               transform: getTransform(mode),
+              opacity: videoReady ? 1 : 0,
               transition: `transform 0.7s cubic-bezier(0.16, 1, 0.3, 1)${videoReady ? '' : ', opacity 0.5s ease'}`,
             }}
-          />
+          >
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="auto"
+              src={DEMO_VIDEO_URL}
+              onCanPlay={handleCanPlay}
+              onError={handleVideoError}
+              className="w-full h-full object-cover"
+            />
+          </div>
         )}
 
         {/* Loading state */}
