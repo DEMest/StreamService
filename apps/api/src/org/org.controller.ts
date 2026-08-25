@@ -113,7 +113,7 @@ export class OrgController {
 
   /**
    * POST /v1/org/image — загрузить картинку организации (multipart `file`).
-   * Нормализуется в JPEG 640×360 и хранится в S3.
+   * Нормализуется в JPEG 1280×720 и хранится в S3.
    */
   @Post('image')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 } }))

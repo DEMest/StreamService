@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { StorageCard } from '@/components/dashboard/StorageCard';
+import { ImageCropModal } from '@/components/ImageCropModal';
 import { Gear, Trash, VideoCamera, ArrowRight, Stack, Plus, DotsThreeVertical, PencilSimple, X, Warning } from '@phosphor-icons/react';
 
 interface OrgStreamSummary {
@@ -102,6 +103,8 @@ export default function DashboardPage() {
   });
 
   const [imgBump, setImgBump] = useState(() => Date.now());
+  /** Выбранный файл ждёт кропа: на сервер уходит уже обрезанный кадр 16:9. */
+  const [cropFile, setCropFile] = useState<File | null>(null);
 
   const uploadImageMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -294,7 +297,7 @@ export default function DashboardPage() {
                 accept="image/jpeg,image/png,image/webp"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) uploadImageMutation.mutate(file);
+                  if (file) setCropFile(file);
                   e.target.value = '';
                 }}
                 className="text-xs text-zinc-500 file:mr-3 file:px-3 file:py-1.5 file:bg-zinc-800 file:hover:bg-zinc-700 file:text-zinc-200 file:text-xs file:font-medium file:rounded-lg file:border-0 file:cursor-pointer cursor-pointer"
@@ -303,7 +306,7 @@ export default function DashboardPage() {
               {uploadImageMutation.isError && (
                 <p className="text-xs text-red-400">{uploadImageMutation.error?.message}</p>
               )}
-              <p className="text-xs text-zinc-600">Показывается на карточке организации в каталоге и архиве. JPEG/PNG/WebP до 2 МБ, обрезается до 16:9.</p>
+              <p className="text-xs text-zinc-600">Показывается на карточке организации в каталоге и архиве. JPEG/PNG/WebP — перед загрузкой выбираете область 16:9.</p>
             </div>
 
             <div className="flex items-center justify-between gap-3">
@@ -383,6 +386,14 @@ export default function DashboardPage() {
           onSubmit={(name) => renameStreamMutation.mutate({ id: renameTarget.id, name })}
           isSubmitting={renameStreamMutation.isPending}
           errorMessage={renameStreamMutation.error?.message ?? null}
+        />
+      )}
+      {cropFile && (
+        <ImageCropModal
+          file={cropFile}
+          title="Картинка организации"
+          onCancel={() => setCropFile(null)}
+          onApply={(cropped) => { setCropFile(null); uploadImageMutation.mutate(cropped); }}
         />
       )}
     </DashboardLayout>

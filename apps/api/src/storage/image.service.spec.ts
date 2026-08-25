@@ -39,11 +39,11 @@ describe('ImageService', () => {
   });
 
   describe('processToJpeg', () => {
-    it('resizes to 640x360 cover and encodes jpeg q80', async () => {
+    it('resizes to 1280x720 cover and encodes jpeg q82', async () => {
       const out = await service.processToJpeg(Buffer.from('raw'));
       expect(sharp).toHaveBeenCalledWith(Buffer.from('raw'));
-      expect(sharpChain.resize).toHaveBeenCalledWith(640, 360, { fit: 'cover' });
-      expect(sharpChain.jpeg).toHaveBeenCalledWith({ quality: 80 });
+      expect(sharpChain.resize).toHaveBeenCalledWith(1280, 720, { fit: 'cover' });
+      expect(sharpChain.jpeg).toHaveBeenCalledWith({ quality: 82 });
       expect(out).toEqual(Buffer.from('processed-jpeg'));
     });
 

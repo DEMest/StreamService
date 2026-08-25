@@ -193,7 +193,9 @@ export class RecordingService {
   }
 
   /**
-   * Кадр из середины сегмента → broadcastDir/preview.jpg (640×360 cover, JPEG).
+   * Кадр из середины сегмента → broadcastDir/preview.jpg (1280×720 cover, JPEG).
+   * Размер совпадает с ручной загрузкой (ImageService), иначе в архиве рядом
+   * оказывались бы превью разной чёткости.
    * Ресайз делает сам ffmpeg (scale+crop) — sharp здесь не нужен. Ключ в
    * Broadcast.previewImagePath ставит uploadAndFinalize ПОСЛЕ успешной заливки.
    */
@@ -204,7 +206,7 @@ export class RecordingService {
       '-ss', seek,
       '-i', segmentPath,
       '-frames:v', '1',
-      '-vf', 'scale=640:360:force_original_aspect_ratio=increase,crop=640:360',
+      '-vf', 'scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720',
       '-q:v', '5',
       '-y', path.join(broadcastDir, 'preview.jpg'),
     ], { timeout: FFMPEG_FRAME_TIMEOUT_MS });
