@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/lib/api';
 import { Broadcast, SignIn, SignOut, Monitor, List, X, Buildings } from '@phosphor-icons/react';
+import { FeedbackTrigger } from '@/components/FeedbackButton';
+import { FeedbackModal } from '@/components/FeedbackModal';
 
 interface Me { sub: string; role: string; orgSlug?: string }
 
@@ -20,6 +22,9 @@ export function Header() {
   const router = useRouter();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Состояние формы держит именно Header: кнопка в мобильном меню исчезает
+  // вместе с меню, и хранить открытость внутри неё нельзя.
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   const { data: me } = useQuery({
     queryKey: ['me'],
@@ -61,6 +66,7 @@ export function Header() {
               {link.label}
             </Link>
           ))}
+          <FeedbackTrigger variant="nav" onClick={() => setFeedbackOpen(true)} />
         </nav>
 
         {/* Desktop auth — right */}
@@ -140,6 +146,11 @@ export function Header() {
               </Link>
             ))}
 
+            <FeedbackTrigger
+              variant="menu"
+              onClick={() => { setMenuOpen(false); setFeedbackOpen(true); }}
+            />
+
             <div className="border-t border-zinc-800/40 mt-2 pt-2 flex flex-col gap-0.5">
               {me ? (
                 <>
@@ -175,6 +186,8 @@ export function Header() {
           </nav>
         </div>
       )}
+
+      {feedbackOpen && <FeedbackModal onClose={() => setFeedbackOpen(false)} />}
     </header>
   );
 }

@@ -13,6 +13,7 @@ import { Chat } from '@/components/Chat';
 import { Header } from '@/components/Header';
 import { MobileSeekBar } from '@/components/MobileSeekBar';
 import { OrgAvatar } from '@/components/OrgAvatar';
+import { FeedbackButton } from '@/components/FeedbackButton';
 import {
   Eye, CornersOut, CornersIn,
   SpeakerHigh, SpeakerLow, SpeakerSlash,
@@ -510,9 +511,12 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
               style={{ left: mobileViewOpen ? 0 : -180, bottom: 50, width: 180, background: 'rgba(12,12,14,0.95)', transition: 'left 0.2s' }}
             >
               {renderViewSwitcher()}
-              <Link href={archiveLink} className="flex items-center gap-1.5 text-zinc-500 text-xs no-underline hover:text-zinc-300 transition-colors">
-                <Archive size={14} /> Архив
-              </Link>
+              <div className="flex flex-col gap-3">
+                <Link href={archiveLink} className="flex items-center gap-1.5 text-zinc-500 text-xs no-underline hover:text-zinc-300 transition-colors">
+                  <Archive size={14} /> Архив
+                </Link>
+                <FeedbackButton variant="panel" context={{ orgSlug, streamSlug }} />
+              </div>
             </div>
 
             <div
@@ -752,9 +756,12 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
                   className="absolute left-0 inset-y-0 w-40 backdrop-blur-sm p-4 flex flex-col justify-center z-[9] overflow-y-auto"
                   style={{ background: 'rgba(12,12,14,0.95)' }}>
                   {renderViewSwitcher()}
-                  <Link href={archiveLink} className="mt-6 flex items-center gap-1.5 text-zinc-500 text-xs no-underline hover:text-zinc-300 transition-colors">
-                    <Archive size={14} /> Архив
-                  </Link>
+                  <div className="mt-6 flex flex-col gap-3">
+                    <Link href={archiveLink} className="flex items-center gap-1.5 text-zinc-500 text-xs no-underline hover:text-zinc-300 transition-colors">
+                      <Archive size={14} /> Архив
+                    </Link>
+                    <FeedbackButton variant="panel" context={{ orgSlug, streamSlug }} />
+                  </div>
                 </div>
               )}
             </>

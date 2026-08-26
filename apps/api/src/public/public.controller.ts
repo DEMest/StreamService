@@ -1,13 +1,16 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { PublicService } from './public.service';
 import { ContactService, CreateContactDto } from '../contact/contact.service';
+import { CreateFeedbackDto, FeedbackService } from '../feedback/feedback.service';
+import { clientIp } from '../feedback/client-ip';
 
 @Controller('v1/public')
 export class PublicController {
   constructor(
     private pub: PublicService,
     private contact: ContactService,
+    private feedback: FeedbackService,
   ) {}
 
   @Post('contact')
@@ -19,6 +22,19 @@ export class PublicController {
       throw new BadRequestException('Invalid email');
     }
     return this.contact.create(body);
+  }
+
+  /**
+   * Обратная связь зрителя (issue #16). Без авторизации: пишет её как раз тот,
+   * у кого прямо сейчас что-то не работает, и логин на этом пути — гарантия
+   * не получить обращение. Защита от спама живёт в FeedbackService.
+   */
+  @Post('feedback')
+  submitFeedback(@Body() body: CreateFeedbackDto, @Req() req: Request) {
+    return this.feedback.create(body, {
+      ip: clientIp(req),
+      userAgent: req.headers['user-agent'] ?? null,
+    });
   }
 
   @Get('orgs')

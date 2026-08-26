@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { ContactService } from '../contact/contact.service';
+import { FeedbackService } from '../feedback/feedback.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -12,6 +13,7 @@ export class AdminController {
   constructor(
     private admin: AdminService,
     private contact: ContactService,
+    private feedback: FeedbackService,
   ) {}
 
   @Post('orgs')
@@ -47,5 +49,20 @@ export class AdminController {
   @Delete('contact-requests/:id')
   deleteContactRequest(@Param('id') id: string) {
     return this.contact.remove(id);
+  }
+
+  @Get('feedback')
+  listFeedback(@Query('status') status?: string) {
+    return this.feedback.list(status);
+  }
+
+  @Patch('feedback/:id')
+  updateFeedback(@Param('id') id: string, @Body() body: { status: string }) {
+    return this.feedback.updateStatus(id, body.status);
+  }
+
+  @Delete('feedback/:id')
+  deleteFeedback(@Param('id') id: string) {
+    return this.feedback.remove(id);
   }
 }
