@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { RecordingControl, type RecordingMode } from '@/components/dashboard/RecordingControl';
 import { StreamStats } from '@/components/dashboard/StreamStats';
+import { ImageCropModal } from '@/components/ImageCropModal';
 import {
   Broadcast,
   Gear,
@@ -186,6 +187,13 @@ export default function StreamDetailPage() {
   const visibleBroadcasts = broadcasts?.filter((b) => b.recording) ?? [];
 
   const [previewBump, setPreviewBump] = useState(() => Date.now());
+  /**
+   * Выбранный файл ждёт кропа. Обе точки загрузки (превью стрима и превью
+   * записи) делят одно окно, поэтому храним ещё и куда его потом отправлять.
+   */
+  const [cropTarget, setCropTarget] = useState<
+    { kind: 'stream'; file: File } | { kind: 'broadcast'; file: File; broadcastId: string } | null
+  >(null);
 
   const uploadBroadcastPreview = useMutation({
     mutationFn: async ({ bid, file }: { bid: string; file: File }) => {
@@ -722,7 +730,7 @@ export default function StreamDetailPage() {
                 accept="image/jpeg,image/png,image/webp"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) uploadPreview.mutate(file);
+                  if (file) setCropTarget({ kind: 'stream', file });
                   e.target.value = '';
                 }}
                 className="hidden"
@@ -848,7 +856,7 @@ export default function StreamDetailPage() {
                         className="hidden"
                         onChange={(e) => {
                           const file = e.target.files?.[0];
-                          if (file) uploadBroadcastPreview.mutate({ bid: b.id, file });
+                          if (file) setCropTarget({ kind: 'broadcast', file, broadcastId: b.id });
                           e.target.value = '';
                         }}
                       />
@@ -869,6 +877,19 @@ export default function StreamDetailPage() {
           </div>
         </section>
       </div>
+
+      {cropTarget && (
+        <ImageCropModal
+          file={cropTarget.file}
+          title={cropTarget.kind === 'stream' ? 'Статичное превью стрима' : 'Превью записи'}
+          onCancel={() => setCropTarget(null)}
+          onApply={(cropped) => {
+            if (cropTarget.kind === 'stream') uploadPreview.mutate(cropped);
+            else uploadBroadcastPreview.mutate({ bid: cropTarget.broadcastId, file: cropped });
+            setCropTarget(null);
+          }}
+        />
+      )}
     </DashboardLayout>
   );
 }

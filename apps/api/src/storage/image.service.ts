@@ -4,7 +4,7 @@ import { S3Service } from './s3.service';
 
 /**
  * Единый пайплайн статичных картинок-превью (орга / стрим / запись):
- * нормализация в JPEG 640×360 (cover) → S3; отдача — прокси Buffer'ом через
+ * нормализация в JPEG 1280×720 (cover) → S3; отдача — прокси Buffer'ом через
  * API (объекты маленькие, presigned-редирект не нужен, кешируется браузером).
  * Ключи задают вызывающие:
  *   images/org/<orgId>.jpg | images/stream/<streamId>.jpg |
@@ -16,12 +16,18 @@ export class ImageService {
 
   constructor(private s3: S3Service) {}
 
-  /** sharp не смог декодировать → 400: загрузили не картинку. */
+  /**
+   * sharp не смог декодировать → 400: загрузили не картинку.
+   *
+   * Кроп 16:9 выбирает пользователь в браузере ещё до отправки, так что
+   * `cover` здесь обычно уже ничего не режет — он остаётся страховкой для
+   * картинок, пришедших мимо UI (curl, старые клиенты).
+   */
   async processToJpeg(buffer: Buffer): Promise<Buffer> {
     try {
       return await sharp(buffer)
-        .resize(640, 360, { fit: 'cover' })
-        .jpeg({ quality: 80 })
+        .resize(1280, 720, { fit: 'cover' })
+        .jpeg({ quality: 82 })
         .toBuffer();
     } catch {
       throw new BadRequestException('Invalid image file');
