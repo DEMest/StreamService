@@ -128,3 +128,27 @@ model ContactRequest {
 
   @@index([status, createdAt])
 }
+
+/// Обращение в обратную связь: тема + комментарий от зрителя или организатора.
+/// Отдельно от ContactRequest: там заявка с лендинга, где организация, имя и
+/// email обязательны. Здесь человек в момент проблемы, и просить у него
+/// что-либо сверх темы и текста — значит не получить обращение вовсе.
+model Feedback {
+  id      String  @id @default(cuid())
+  topic   String
+  message String
+  /// Необязательный email или телеграм — если человек хочет ответа.
+  contact String?
+
+  // Технический контекст. Собирается автоматически на клиенте: без него
+  // «видео тормозит» неразбираемо — неизвестен ни эфир, ни устройство.
+  pageUrl    String?
+  orgSlug    String?
+  streamSlug String?
+  userAgent  String?
+
+  status    String   @default("new")
+  createdAt DateTime @default(now())
+
+  @@index([status, createdAt])
+}

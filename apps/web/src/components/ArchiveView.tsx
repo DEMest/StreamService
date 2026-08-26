@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import MatPlayer, { type MatPlayerHandle } from '@/components/MatPlayer';
 import ViewSwitcher, { type ViewMode } from '@/components/ViewSwitcher';
 import { Header } from '@/components/Header';
+import { FeedbackButton } from '@/components/FeedbackButton';
 import {
   Play, Pause, X, Monitor,
   CornersOut, CornersIn, SpeakerHigh, SpeakerLow, SpeakerSlash,
@@ -206,7 +207,7 @@ export function ArchiveView({ orgSlug, streamSlug }: ArchiveViewProps) {
       {/* Breadcrumb / back link — отдельная плашка между Header'ом и плеером,
           даёт быстрый возврат на watch-страницу соответствующего Stream'а. */}
       {!isFullscreen && (
-        <div className="max-w-[920px] mx-auto px-6 pt-4">
+        <div className="max-w-[920px] mx-auto px-6 pt-4 flex items-center justify-between gap-4">
           <Link
             href={watchLink}
             className="inline-flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 transition-colors text-xs no-underline"
@@ -214,6 +215,7 @@ export function ArchiveView({ orgSlug, streamSlug }: ArchiveViewProps) {
             <CaretLeft size={14} weight="bold" />
             К трансляции
           </Link>
+          <FeedbackButton variant="panel" context={{ orgSlug, streamSlug: streamSlug || undefined }} />
         </div>
       )}
 
