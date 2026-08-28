@@ -123,8 +123,14 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       MAIL_FROM: ${MAIL_FROM:-}
       MAIL_TO: ${MAIL_TO:-}
-      # Только для кликабельной ссылки на /admin/feedback в письме.
+      # Ссылка на /admin/feedback в письме + абсолютные URL для SEO. Она же
+      # включает пинг поисковикам: пусто/localhost — пинг выключен.
       SITE_URL: ${SITE_URL:-}
+      # SEO-пинг при старте/завершении эфира. IndexNow (Яндекс, Bing) работает
+      # с ключом по умолчанию — переменная нужна, только если ключ меняли.
+      # Google Indexing API молчит, пока нет сервис-аккаунта.
+      INDEXNOW_KEY: ${INDEXNOW_KEY:-}
+      GOOGLE_INDEXING_CREDENTIALS: ${GOOGLE_INDEXING_CREDENTIALS:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -153,6 +159,11 @@ services:
         # хранилища, в репозитории/образе его нет. Пусто — лендинг не ломается,
         # блок демо показывает статичную заглушку.
         NEXT_PUBLIC_DEMO_VIDEO_URL: ${NEXT_PUBLIC_DEMO_VIDEO_URL:-}
+        # Нужен на сборке: Next.js фиксирует metadataBase при пререндере
+        # статических страниц, иначе canonical/og:url у лендинга и разделов
+        # остаются относительными. Ту же переменную сервис получает и в
+        # рантайме (см. environment ниже) — она перекрывает зашитую.
+        SITE_URL: ${SITE_URL:-}
     container_name: ${COMPOSE_PROJECT_NAME:-streamservice}-web
     # host-порт не публикуем: nginx ходит в web по имени контейнера через сеть edge.
     environment:
@@ -163,6 +174,10 @@ services:
       # для локальной проверки подписи access-токена. Должен совпадать с JWT_SECRET
       # сервиса api, иначе middleware будет продлевать токен на каждой навигации.
       JWT_SECRET: ${JWT_SECRET:-changeme-in-production}
+      # Абсолютный адрес сайта для canonical, og:url, sitemap.xml и robots.txt.
+      # Runtime, а не build-arg: переезд на другой домен — правка .env, а не
+      # пересборка образа (тот же принцип, что у INGEST_HOST).
+      SITE_URL: ${SITE_URL:-}
     depends_on:
       - api
       - mediamtx
