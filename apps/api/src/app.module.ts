@@ -12,6 +12,7 @@ import { RecordingModule } from './recording/recording.module';
 import { ThumbnailModule } from './thumbnail/thumbnail.module';
 import { StreamModule } from './stream/stream.module';
 import { StatsModule } from './stats/stats.module';
+import { SeoModule } from './seo/seo.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { StatsModule } from './stats/stats.module';
     ThumbnailModule,
     StreamModule,
     StatsModule,
+    SeoModule,
   ],
   controllers: [HealthController],
 })

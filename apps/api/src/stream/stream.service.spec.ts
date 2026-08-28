@@ -7,6 +7,7 @@ import { ChatService } from '../chat/chat.service';
 import { ImageService } from '../storage/image.service';
 import { StatsService } from '../stats/stats.service';
 import { ChatGateway } from '../chat/chat.gateway';
+import { SeoPingService } from '../seo/seo-ping.service';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 const mockPrisma = {
@@ -40,6 +41,7 @@ const mockChatService = { clearMessagesByStream: jest.fn() };
 const mockImages = { upload: jest.fn(), delete: jest.fn(), serve: jest.fn() };
 const mockStats = { getSnapshot: jest.fn() };
 const mockChatGateway = { getViewers: jest.fn().mockReturnValue(0) };
+const mockSeoPing = { streamStateChanged: jest.fn() };
 
 describe('StreamService', () => {
   let service: StreamService;
@@ -57,6 +59,7 @@ describe('StreamService', () => {
         { provide: ImageService, useValue: mockImages },
         { provide: StatsService, useValue: mockStats },
         { provide: ChatGateway, useValue: mockChatGateway },
+        { provide: SeoPingService, useValue: mockSeoPing },
       ],
     }).compile();
     service = module.get(StreamService);

@@ -16,6 +16,7 @@ import { StreamStatsSnapshot } from '../stats/stats.types';
 import { ChatService } from '../chat/chat.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { ImageService } from '../storage/image.service';
+import { SeoPingService } from '../seo/seo-ping.service';
 import { randomBytes } from 'crypto';
 
 const VALID_PREVIEW_MODES = ['multicam', 'cam1', 'cam2', 'cam3', 'cam4'];
@@ -176,6 +177,7 @@ export class StreamService {
     private images: ImageService,
     private stats: StatsService,
     private chatGateway: ChatGateway,
+    private seoPing: SeoPingService,
   ) {}
 
   /**
@@ -527,9 +529,13 @@ export class StreamService {
   private async handleWebhookInternal(streamId: string, action: 'publish' | 'unpublish'): Promise<void> {
     if (action === 'publish') {
       await this.ensureAutoRecording(streamId);
-      await this.startBroadcast(streamId); // идемпотентен (isLive guard)
+      const started = await this.startBroadcast(streamId); // идемпотентен (isLive guard)
+      // Пинг поисковикам — только на фактической смене состояния: повторный
+      // webhook по уже живому стриму ничего на странице не меняет.
+      if (!('alreadyLive' in started)) this.seoPing.streamStateChanged(streamId);
     } else {
-      await this.endBroadcast(streamId);   // идемпотентен (alreadyOff guard)
+      const ended = await this.endBroadcast(streamId);   // идемпотентен (alreadyOff guard)
+      if (!('alreadyOff' in ended)) this.seoPing.streamStateChanged(streamId);
     }
   }
 

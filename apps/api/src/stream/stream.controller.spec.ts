@@ -16,6 +16,7 @@ import { ChatService } from '../chat/chat.service';
 import { ImageService } from '../storage/image.service';
 import { StatsService } from '../stats/stats.service';
 import { ChatGateway } from '../chat/chat.gateway';
+import { SeoPingService } from '../seo/seo-ping.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { JwtPayload } from '../auth/auth.service';
@@ -60,6 +61,7 @@ const mockChatService = { clearMessagesByStream: jest.fn() };
 const mockImages = { upload: jest.fn(), delete: jest.fn(), serve: jest.fn() };
 const mockStats = { getSnapshot: jest.fn() };
 const mockChatGateway = { getViewers: jest.fn().mockReturnValue(0) };
+const mockSeoPing = { streamStateChanged: jest.fn() };
 
 const orgAdmin: JwtPayload = {
   sub: 'u1',
@@ -84,6 +86,7 @@ describe('StreamController', () => {
         { provide: ImageService, useValue: mockImages },
         { provide: StatsService, useValue: mockStats },
         { provide: ChatGateway, useValue: mockChatGateway },
+        { provide: SeoPingService, useValue: mockSeoPing },
       ],
     })
       .overrideGuard(JwtAuthGuard)
