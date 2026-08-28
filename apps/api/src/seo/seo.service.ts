@@ -51,6 +51,14 @@ const STATIC_URLS: Array<Omit<SitemapUrl, 'lastModified'>> = [
   { path: '/organizations', changeFrequency: 'daily', priority: 0.7 },
   { path: '/archive', changeFrequency: 'daily', priority: 0.7 },
   { path: '/login', changeFrequency: 'monthly', priority: 0.3 },
+  // FAQ отвечает ровно на то, что зритель гуглит во время эфира («трансляция
+  // тормозит», «где посмотреть запись матча»), — страница поисковая по сути.
+  { path: '/faq', changeFrequency: 'monthly', priority: 0.5 },
+  // Правовые документы в индексе нужны не ради трафика: по ним проверяют, что
+  // у сайта вообще есть политика и реквизиты. Вес минимальный, меняются редко.
+  { path: '/legal/privacy', changeFrequency: 'yearly', priority: 0.2 },
+  { path: '/legal/terms', changeFrequency: 'yearly', priority: 0.2 },
+  { path: '/legal/copyright', changeFrequency: 'yearly', priority: 0.2 },
 ];
 
 /** Активность по одному Stream'у, собранная из трёх запросов в БД. */

@@ -22,14 +22,26 @@ describe('SeoService', () => {
   });
 
   describe('getSitemapUrls', () => {
-    it('всегда отдаёт статические страницы, включая логин', async () => {
+    it('всегда отдаёт статические страницы, включая логин и правовые', async () => {
       mockPrisma.stream.findMany.mockResolvedValueOnce([]);
 
       const urls = await service.getSitemapUrls(NOW);
       const paths = urls.map((u) => u.path);
 
-      expect(paths).toEqual(['/', '/streams', '/organizations', '/archive', '/login']);
+      expect(paths).toEqual([
+        '/',
+        '/streams',
+        '/organizations',
+        '/archive',
+        '/login',
+        '/faq',
+        '/legal/privacy',
+        '/legal/terms',
+        '/legal/copyright',
+      ]);
       expect(urls.find((u) => u.path === '/login')?.priority).toBe(0.3);
+      // Правовые страницы не должны конкурировать в выдаче с трансляциями.
+      expect(urls.find((u) => u.path === '/legal/privacy')?.priority).toBe(0.2);
     });
 
     it('организацию с живым эфиром отдаёт вместе со страницей стрима', async () => {

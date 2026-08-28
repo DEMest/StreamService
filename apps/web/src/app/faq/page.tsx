@@ -7,9 +7,15 @@ import { LEGAL } from '@/lib/legal';
 import { faqItems } from '@/lib/legal-content/faq';
 
 export const metadata: Metadata = {
-  title: 'Вопросы и ответы — Liga Live',
+  title: 'Вопросы и ответы',
   description:
     'Ответы зрителям Liga Live: почему тормозит видео, как переключать камеры, где найти запись матча.',
+  alternates: { canonical: '/faq' },
+  openGraph: {
+    title: 'Вопросы и ответы — Liga Live',
+    description: 'Почему тормозит видео, как переключать камеры и где найти запись матча.',
+    url: '/faq',
+  },
 };
 
 export default function FaqPage() {
