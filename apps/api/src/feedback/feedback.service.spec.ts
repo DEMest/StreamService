@@ -19,7 +19,12 @@ const mockPrisma = {
 };
 const mockMail = { send: jest.fn() };
 
-const VALID = { topic: 'Видео тормозит', message: 'Всё время буферизация на телефоне' };
+const CONSENT = { consent: true, consentVersion: '2026-08-28' };
+const VALID = {
+  topic: 'Видео тормозит',
+  message: 'Всё время буферизация на телефоне',
+  ...CONSENT,
+};
 
 describe('FeedbackService', () => {
   let service: FeedbackService;
@@ -65,6 +70,48 @@ describe('FeedbackService', () => {
     });
   });
 
+  describe('согласие на обработку данных', () => {
+    it('отвергает обращение без согласия', async () => {
+      const { consent, ...withoutConsent } = VALID;
+      await expect(service.create(withoutConsent)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.create({ ...VALID, consent: false })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(mockPrisma.feedback.create).not.toHaveBeenCalled();
+    });
+
+    it('отвергает согласие без указания редакции политики', async () => {
+      await expect(service.create({ ...VALID, consentVersion: '  ' })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      await expect(
+        service.create({ ...VALID, consentVersion: 'v'.repeat(33) }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('сохраняет момент согласия и редакцию, которую видел человек', async () => {
+      await service.create({ ...VALID, consentVersion: '2026-08-28' });
+
+      const { data } = mockPrisma.feedback.create.mock.calls[0][0];
+      expect(data.consentVersion).toBe('2026-08-28');
+      expect(data.consentAt).toBeInstanceOf(Date);
+    });
+
+    it('отказ по согласию не сжигает квоту адреса', async () => {
+      for (let i = 0; i < RATE_PER_IP * 2; i++) {
+        await expect(
+          service.create({ ...VALID, consent: false }, { ip: '1.1.1.1' }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      }
+      await expect(service.create(VALID, { ip: '1.1.1.1' })).resolves.toMatchObject({ ok: true });
+    });
+
+    it('бот с ловушкой отсекается раньше проверки согласия', async () => {
+      const res = await service.create({ ...VALID, consent: false, website: 'http://spam.example' });
+      expect(res).toMatchObject({ ok: true, id: null });
+    });
+  });
+
   describe('валидация полей', () => {
     it('отвергает слишком короткую тему', async () => {
       await expect(service.create({ ...VALID, topic: 'ой' })).rejects.toBeInstanceOf(
@@ -98,7 +145,12 @@ describe('FeedbackService', () => {
     });
 
     it('обрезает пробелы, а пустой контакт кладёт как null', async () => {
-      await service.create({ topic: '  Нет звука  ', message: '  тишина совсем  ', contact: '   ' });
+      await service.create({
+        topic: '  Нет звука  ',
+        message: '  тишина совсем  ',
+        contact: '   ',
+        ...CONSENT,
+      });
 
       expect(mockPrisma.feedback.create).toHaveBeenCalledWith(
         expect.objectContaining({

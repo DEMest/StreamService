@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { Header } from '@/components/Header';
+import { Footer } from '@/components/Footer';
 import { OrgCard, SkeletonCard } from '@/components/OrgCard';
 import { fadeUp, staggerContainer, cardFadeUp } from '@/lib/motion';
 import type { CatalogItem } from '@/lib/types';
@@ -64,6 +65,7 @@ export default function StreamsPage() {
           )}
         </motion.section>
       </main>
+      <Footer />
     </div>
   );
 }

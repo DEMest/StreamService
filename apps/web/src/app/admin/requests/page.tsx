@@ -6,6 +6,7 @@ import { PublicLayout } from '@/components/PublicLayout';
 import {
   ArrowLeft, Buildings, Envelope, Phone, Trash, CheckCircle, ArrowCounterClockwise,
 } from '@phosphor-icons/react';
+import { ConsentBadge } from '@/components/ConsentBadge';
 
 interface ContactRequest {
   id: string;
@@ -15,6 +16,8 @@ interface ContactRequest {
   phone: string | null;
   message: string | null;
   status: 'new' | 'processed' | string;
+  consentAt: string | null;
+  consentVersion: string | null;
   createdAt: string;
 }
 
@@ -93,7 +96,10 @@ export default function AdminRequestsPage() {
                       {STATUS_LABEL[r.status] ?? r.status}
                     </span>
                   </div>
-                  <span className="text-xs text-zinc-600 font-mono shrink-0">{formatDate(r.createdAt)}</span>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <ConsentBadge consentAt={r.consentAt} consentVersion={r.consentVersion} />
+                    <span className="text-xs text-zinc-600 font-mono">{formatDate(r.createdAt)}</span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm mb-3">
