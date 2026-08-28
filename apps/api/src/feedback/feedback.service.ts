@@ -7,9 +7,10 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../notify/mail.service';
+import { requireConsent, type ConsentInput } from '../common/consent';
 import { SlidingWindowLimiter } from './rate-limiter';
 
-export interface CreateFeedbackDto {
+export interface CreateFeedbackDto extends ConsentInput {
   topic: string;
   message: string;
   contact?: string;
@@ -71,6 +72,7 @@ export class FeedbackService {
     const topic = requiredText(dto?.topic, 'Тема', FIELD_LIMITS.topic);
     const message = requiredText(dto?.message, 'Комментарий', FIELD_LIMITS.message);
     const contact = optionalText(dto?.contact, FIELD_LIMITS.contact.max);
+    const consent = requireConsent(dto);
 
     if (!this.global.tryHit(GLOBAL_KEY)) throw tooManyRequests();
     // Адрес не определился — общего потолка достаточно. Схлопывать всех в один
@@ -86,6 +88,7 @@ export class FeedbackService {
         orgSlug: optionalText(dto?.orgSlug, FIELD_LIMITS.slug.max),
         streamSlug: optionalText(dto?.streamSlug, FIELD_LIMITS.slug.max),
         userAgent: optionalText(meta.userAgent ?? undefined, FIELD_LIMITS.userAgent.max),
+        ...consent,
       },
       select: { id: true, topic: true, message: true, contact: true, pageUrl: true, orgSlug: true, streamSlug: true, createdAt: true },
     });

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Header } from '@/components/Header';
+import { Footer } from '@/components/Footer';
 import { ContactForm } from '@/components/ContactForm';
 import { InteractiveDemo } from '@/components/InteractiveDemo';
 import { fadeUp, staggerContainer, cardFadeUp, scaleIn } from '@/lib/motion';
@@ -215,16 +216,7 @@ export default function HomePage() {
         </div>
       </motion.section>
 
-      {/* ── Footer ─────────────────────────────────────────── */}
-      <footer className="border-t border-zinc-800/40 py-8">
-        <div className="max-w-[1400px] mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <span className="text-xs text-zinc-600">&copy; {new Date().getFullYear()} Liga Live. Все права защищены.</span>
-          <div className="flex items-center gap-4">
-            <Link href="/streams" className="text-xs text-zinc-600 hover:text-zinc-400 no-underline transition-colors">Трансляции</Link>
-            <Link href="/login" className="text-xs text-zinc-600 hover:text-zinc-400 no-underline transition-colors">Вход для организаций</Link>
-          </div>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 }

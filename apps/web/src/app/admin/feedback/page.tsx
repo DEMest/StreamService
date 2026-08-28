@@ -8,6 +8,7 @@ import {
   ArrowLeft, ChatText, Trash, CheckCircle, ArrowCounterClockwise,
   Link as LinkIcon, Monitor, VideoCamera, At,
 } from '@phosphor-icons/react';
+import { ConsentBadge } from '@/components/ConsentBadge';
 
 interface Feedback {
   id: string;
@@ -19,6 +20,8 @@ interface Feedback {
   streamSlug: string | null;
   userAgent: string | null;
   status: 'new' | 'processed' | string;
+  consentAt: string | null;
+  consentVersion: string | null;
   createdAt: string;
 }
 
@@ -121,9 +124,10 @@ export default function AdminFeedbackPage() {
                       {STATUS_LABEL[f.status] ?? f.status}
                     </span>
                   </div>
-                  <span className="text-xs text-zinc-600 font-mono shrink-0">
-                    {formatDate(f.createdAt)}
-                  </span>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <ConsentBadge consentAt={f.consentAt} consentVersion={f.consentVersion} />
+                    <span className="text-xs text-zinc-600 font-mono">{formatDate(f.createdAt)}</span>
+                  </div>
                 </div>
 
                 <p className="text-sm text-zinc-300 leading-relaxed bg-surface-primary border border-zinc-800/60 rounded-lg p-3 mb-3 whitespace-pre-wrap break-words">

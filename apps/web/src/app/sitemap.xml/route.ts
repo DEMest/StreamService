@@ -13,12 +13,21 @@ import { fetchSitemapUrls, siteUrlFromRequest, type SitemapUrl } from '@/lib/seo
  */
 export const dynamic = 'force-dynamic';
 
+/**
+ * Держать в согласии со `STATIC_URLS` в `apps/api/src/seo/seo.service.ts`.
+ * Копия здесь неизбежна: список нужен ровно тогда, когда API недоступен, —
+ * импортировать его оттуда некому.
+ */
 const FALLBACK: SitemapUrl[] = [
   { path: '/', lastModified: '', changeFrequency: 'daily', priority: 1.0 },
   { path: '/streams', lastModified: '', changeFrequency: 'hourly', priority: 0.9 },
   { path: '/organizations', lastModified: '', changeFrequency: 'daily', priority: 0.7 },
   { path: '/archive', lastModified: '', changeFrequency: 'daily', priority: 0.7 },
   { path: '/login', lastModified: '', changeFrequency: 'monthly', priority: 0.3 },
+  { path: '/faq', lastModified: '', changeFrequency: 'monthly', priority: 0.5 },
+  { path: '/legal/privacy', lastModified: '', changeFrequency: 'yearly', priority: 0.2 },
+  { path: '/legal/terms', lastModified: '', changeFrequency: 'yearly', priority: 0.2 },
+  { path: '/legal/copyright', lastModified: '', changeFrequency: 'yearly', priority: 0.2 },
 ];
 
 export async function GET(req: Request) {

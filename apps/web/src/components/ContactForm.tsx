@@ -1,14 +1,17 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import {
   PaperPlaneTilt, CheckCircle, Buildings, User, Envelope, Phone, Warning,
 } from '@phosphor-icons/react';
 import { api } from '@/lib/api';
+import { LEGAL } from '@/lib/legal';
 
 const inputClasses = 'w-full px-4 py-3 bg-surface-primary border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-brand focus:ring-1 focus:ring-brand/30 outline-none transition-colors';
 
 export function ContactForm() {
   const [form, setForm] = useState({ org: '', name: '', email: '', phone: '', message: '' });
+  const [consent, setConsent] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +21,9 @@ export function ContactForm() {
     setError(null);
     setSubmitting(true);
     try {
-      await api.post('/v1/public/contact', form);
+      // Редакцию политики шлём ту, что показана на этой странице: сервер
+      // запишет её рядом с заявкой как доказательство, с чем именно согласились.
+      await api.post('/v1/public/contact', { ...form, consent, consentVersion: LEGAL.version });
       setSubmitted(true);
     } catch (err) {
       setError((err as Error).message || 'Не удалось отправить заявку');
@@ -90,7 +95,30 @@ export function ContactForm() {
       )}
 
       <div className="md:col-span-2">
-        <button type="submit" disabled={submitting}
+        <label className="flex items-start gap-2.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={consent}
+            onChange={(e) => setConsent(e.target.checked)}
+            required
+            className="mt-0.5 w-4 h-4 shrink-0 accent-brand cursor-pointer"
+          />
+          <span className="text-xs leading-relaxed text-zinc-500">
+            Я согласен на обработку моих персональных данных в соответствии с{' '}
+            <Link href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-200 underline underline-offset-2 transition-colors">
+              политикой конфиденциальности
+            </Link>{' '}
+            и принимаю{' '}
+            <Link href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-200 underline underline-offset-2 transition-colors">
+              пользовательское соглашение
+            </Link>
+            .
+          </span>
+        </label>
+      </div>
+
+      <div className="md:col-span-2">
+        <button type="submit" disabled={submitting || !consent}
           className="flex items-center justify-center gap-2 w-full md:w-auto px-8 py-3 bg-brand hover:bg-brand-hover text-white font-semibold rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
           <PaperPlaneTilt size={18} weight="fill" />
           {submitting ? 'Отправляем...' : 'Отправить заявку'}

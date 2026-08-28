@@ -123,6 +123,11 @@ model ContactRequest {
   email     String
   phone     String?
   message   String?
+  /// Момент, когда человек отметил согласие на обработку персональных данных,
+  /// и редакция политики, которую он в этот момент видел. NULL — заявка старше
+  /// появления галочки в форме.
+  consentAt      DateTime?
+  consentVersion String?
   status    String   @default("new")
   createdAt DateTime @default(now())
 
@@ -146,6 +151,10 @@ model Feedback {
   orgSlug    String?
   streamSlug String?
   userAgent  String?
+
+  /// См. ContactRequest.consentAt — то же согласие и та же редакция политики.
+  consentAt      DateTime?
+  consentVersion String?
 
   status    String   @default("new")
   createdAt DateTime @default(now())

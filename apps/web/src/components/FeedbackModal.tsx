@@ -2,8 +2,10 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { CheckCircle, ChatText, PaperPlaneTilt, Warning, X } from '@phosphor-icons/react';
 import { api } from '@/lib/api';
+import { LEGAL } from '@/lib/legal';
 import { deriveStreamContext, type StreamContext } from '@/lib/feedback-context';
 
 const TOPIC_MAX = 120;
@@ -24,6 +26,7 @@ export function FeedbackModal({ onClose, context }: Props) {
   const [topic, setTopic] = useState('');
   const [message, setMessage] = useState('');
   const [contact, setContact] = useState('');
+  const [consent, setConsent] = useState(false);
   /** Honeypot: скрыт и от глаз, и от скринридеров — заполнит только бот. */
   const [website, setWebsite] = useState('');
 
@@ -50,6 +53,8 @@ export function FeedbackModal({ onClose, context }: Props) {
         message,
         contact,
         website,
+        consent,
+        consentVersion: LEGAL.version,
         pageUrl: typeof window === 'undefined' ? undefined : window.location.href,
         orgSlug: context?.orgSlug ?? derived.orgSlug,
         streamSlug: context?.streamSlug ?? derived.streamSlug,
@@ -198,9 +203,33 @@ export function FeedbackModal({ onClose, context }: Props) {
               </div>
             )}
 
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+                required
+                className="mt-0.5 w-4 h-4 shrink-0 accent-brand cursor-pointer"
+              />
+              <span className="text-xs leading-relaxed text-zinc-500">
+                Согласен на обработку персональных данных согласно{' '}
+                {/* В новой вкладке: модалку открывают в том числе поверх эфира,
+                    и уход на другую страницу оборвал бы просмотр. */}
+                <Link
+                  href="/legal/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-zinc-400 hover:text-zinc-200 underline underline-offset-2 transition-colors"
+                >
+                  политике конфиденциальности
+                </Link>
+                .
+              </span>
+            </label>
+
             <button
               type="submit"
-              disabled={sending}
+              disabled={sending || !consent}
               className="flex items-center justify-center gap-2 w-full px-6 py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <PaperPlaneTilt size={16} weight="fill" />

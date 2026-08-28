@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/lib/api';
 import { Header } from '@/components/Header';
+import { Footer } from '@/components/Footer';
 import { OrgAvatar } from '@/components/OrgAvatar';
 import { fadeUp, staggerContainer, cardFadeUp } from '@/lib/motion';
 import { API_BASE, type ArchiveFeedItem } from '@/lib/types';
@@ -76,6 +77,7 @@ export default function ArchivePage() {
           )}
         </motion.section>
       </main>
+      <Footer />
     </div>
   );
 }

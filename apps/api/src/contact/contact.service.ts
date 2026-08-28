@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { requireConsent, type ConsentInput } from '../common/consent';
 
-export interface CreateContactDto {
+export interface CreateContactDto extends ConsentInput {
   org: string;
   name: string;
   email: string;
@@ -14,6 +15,8 @@ export class ContactService {
   constructor(private prisma: PrismaService) {}
 
   async create(data: CreateContactDto) {
+    const consent = requireConsent(data);
+
     const created = await this.prisma.contactRequest.create({
       data: {
         org: data.org.trim(),
@@ -21,6 +24,7 @@ export class ContactService {
         email: data.email.trim().toLowerCase(),
         phone: data.phone?.trim() || null,
         message: data.message?.trim() || null,
+        ...consent,
       },
       select: { id: true, createdAt: true },
     });
