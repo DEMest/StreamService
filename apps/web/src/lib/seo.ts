@@ -16,6 +16,8 @@
  * canonical в статических метаданных (там запроса нет).
  */
 
+import { headers } from 'next/headers';
+
 /** Внутренний адрес API — тот же, которым пользуется прокси Next.js. */
 const API_BASE = process.env.API_UPSTREAM ?? 'http://localhost:3001';
 
@@ -38,6 +40,31 @@ export function siteUrlFromRequest(req: Request): string {
   const host = headers.get('x-forwarded-host') ?? headers.get('host') ?? 'localhost:3000';
   const proto = headers.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
   return `${proto}://${host}`;
+}
+
+/**
+ * Адрес сайта для страницы, которая рендерится на каждый запрос: env, а если
+ * её не задали — хост из заголовков.
+ *
+ * Нужен, чтобы забытая переменная окружения не выключала разметку целиком: без
+ * абсолютного адреса не собрать ни canonical, ни JSON-LD с BroadcastEvent, а
+ * это ровно то, ради чего всё затевалось. Возвращает пустую строку только при
+ * статическом рендере, где запроса нет.
+ */
+export function siteUrlForPage(): string {
+  const fromEnv = siteUrlFromEnv();
+  if (fromEnv) return fromEnv;
+
+  try {
+    const h = headers();
+    const host = h.get('x-forwarded-host') ?? h.get('host');
+    if (!host) return '';
+    const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
+    return `${proto}://${host}`;
+  } catch {
+    // Статический рендер: заголовков нет — вызывающий обойдётся без разметки.
+    return '';
+  }
 }
 
 export interface SitemapUrl {

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { OrgOverview } from '@/components/OrgOverview';
 import { JsonLd } from '@/components/JsonLd';
 import { orgPageJsonLd } from '@/lib/json-ld';
-import { fetchPageMeta, siteUrlFromEnv } from '@/lib/seo';
+import { fetchPageMeta, siteUrlForPage } from '@/lib/seo';
 
 /**
  * Обзор орги: список её публичных Stream'ов + опциональный режим совместного
@@ -19,6 +19,7 @@ import { fetchPageMeta, siteUrlFromEnv } from '@/lib/seo';
  * по-прежнему в клиентском `OrgOverview`.
  */
 export async function generateMetadata({ params }: { params: { orgSlug: string } }): Promise<Metadata> {
+  const site = siteUrlForPage();
   const meta = await fetchPageMeta(params.orgSlug);
 
   if (!meta?.found || !meta.org) {
@@ -35,6 +36,9 @@ export async function generateMetadata({ params }: { params: { orgSlug: string }
       : `${org.name}: расписание трансляций и архив записей матчей на Liga Live.`);
 
   return {
+    // metadataBase не наследуем из корневого layout: он вычисляется на
+    // сборке, а адрес сайта может быть известен только из запроса.
+    ...(site ? { metadataBase: new URL(site) } : {}),
     title: live ? `${org.name} — прямой эфир` : org.name,
     description,
     alternates: { canonical: `/watch/${org.slug}` },
@@ -59,7 +63,7 @@ export default async function WatchOrgPage({
   params: { orgSlug: string };
   searchParams: { view?: string };
 }) {
-  const site = siteUrlFromEnv();
+  const site = siteUrlForPage();
   const meta = site ? await fetchPageMeta(params.orgSlug) : null;
   const jsonLd = site && meta?.found && meta.indexable ? orgPageJsonLd(site, meta) : null;
 
