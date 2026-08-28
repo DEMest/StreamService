@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { ArchiveView } from '@/components/ArchiveView';
-import { fetchPageMeta } from '@/lib/seo';
+import { fetchPageMeta, siteUrlForPage } from '@/lib/seo';
 
 /**
  * Archive-страница дефолтного Stream'а орги (`slug=''`).
@@ -13,6 +13,7 @@ import { fetchPageMeta } from '@/lib/seo';
  * когда streamSlug — пустая строка.
  */
 export async function generateMetadata({ params }: { params: { orgSlug: string } }): Promise<Metadata> {
+  const site = siteUrlForPage();
   const meta = await fetchPageMeta(params.orgSlug);
 
   if (!meta?.found || !meta.org) {
@@ -24,6 +25,9 @@ export async function generateMetadata({ params }: { params: { orgSlug: string }
   const hasRecordings = stats.finishedBroadcasts > 0;
 
   return {
+    // metadataBase не наследуем из корневого layout: он вычисляется на
+    // сборке, а адрес сайта может быть известен только из запроса.
+    ...(site ? { metadataBase: new URL(site) } : {}),
     title: `Архив трансляций — ${org.name}`,
     description: `Записи прошедших трансляций ${org.name}: матчи и мероприятия в записи на Liga Live.`,
     alternates: { canonical: `/watch/${org.slug}/archive` },

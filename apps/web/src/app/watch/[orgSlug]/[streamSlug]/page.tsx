@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { WatchView } from '@/components/WatchView';
 import { JsonLd } from '@/components/JsonLd';
 import { streamPageJsonLd } from '@/lib/json-ld';
-import { fetchPageMeta, siteUrlFromEnv } from '@/lib/seo';
+import { fetchPageMeta, siteUrlForPage } from '@/lib/seo';
 
 /**
  * Watch-страница конкретного Stream'а орги.
@@ -22,6 +22,7 @@ export async function generateMetadata({
 }: {
   params: { orgSlug: string; streamSlug: string };
 }): Promise<Metadata> {
+  const site = siteUrlForPage();
   const meta = await fetchPageMeta(params.orgSlug, params.streamSlug);
 
   // Приватный стрим (доступ по ?key=) сюда попадает как found: false —
@@ -39,6 +40,9 @@ export async function generateMetadata({
       : `«${title}» — трансляции и записи ${org.name} на Liga Live.`);
 
   return {
+    // metadataBase не наследуем из корневого layout: он вычисляется на
+    // сборке, а адрес сайта может быть известен только из запроса.
+    ...(site ? { metadataBase: new URL(site) } : {}),
     title: stream.isLive ? `${title} — прямой эфир` : title,
     description,
     alternates: { canonical: `/watch/${org.slug}/${stream.slug}` },
@@ -60,7 +64,7 @@ export default async function WatchStreamPage({
 }: {
   params: { orgSlug: string; streamSlug: string };
 }) {
-  const site = siteUrlFromEnv();
+  const site = siteUrlForPage();
   const meta = site ? await fetchPageMeta(params.orgSlug, params.streamSlug) : null;
   const jsonLd = site && meta?.found && meta.indexable ? streamPageJsonLd(site, meta) : null;
 

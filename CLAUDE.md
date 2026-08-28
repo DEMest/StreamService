@@ -218,6 +218,12 @@ HTTP calls go through `apps/web/src/lib/api.ts` (relative URLs, proxied by Next.
   `app/sitemap.xml/route.ts`), а не файлы в `public/`: обеим нужен абсолютный
   адрес сайта, который известен только в рантайме. При недоступном API карта
   отдаёт статический минимум, а не 500.
+- **Адрес сайта.** `SITE_URL` — основной источник, но `/watch/*` умеет без неё:
+  эти страницы рендерятся на каждый запрос, поэтому берут хост из заголовков
+  (`siteUrlForPage`) и сами задают `metadataBase`. Забытая переменная лишает
+  абсолютных canonical только статические разделы, а не выключает JSON-LD и
+  разметку целиком. Для пинга из API заголовков нет — там `SITE_URL`
+  обязательна.
 - **Метаданные страниц** задаются в `layout.tsx` каждого раздела (страницы
   остаются клиентскими) и в `generateMetadata` у `/watch/*` (там нужны данные
   из БД). Лендинг вынесен в route group `app/(landing)/` ради собственного
@@ -259,6 +265,9 @@ Copy `.env.example` to `.env`. One compose file serves both prod and a test stan
   `metadataBase` при пререндере статических страниц, поэтому без build-arg
   canonical и og:url у лендинга остались бы относительными. Пусто или
   localhost — SEO-пинг выключен (dev-стенд поисковики не трогает).
+- `GOOGLE_SITE_VERIFICATION`, `YANDEX_VERIFICATION` — коды подтверждения прав
+  мета-тегом; пусты при подтверждении через DNS. Тоже build-args `web`: тег
+  должен попасть в статически отрендеренный HTML.
 - `INDEXNOW_KEY` — переопределение ключа IndexNow. Обычно пусто: ключ по
   умолчанию зашит в `seo/indexnow.service.ts` и лежит файлом в
   `apps/web/public/`. Меняя — меняйте оба места.

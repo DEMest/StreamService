@@ -47,6 +47,14 @@ export const metadata: Metadata = {
     title: 'Liga Live — прямые трансляции матчей и мероприятий',
     description: 'Живой эфир, чат и архив записей спортивных трансляций.',
   },
+  // Коды подтверждения прав в Search Console и Яндекс.Вебмастере. Нужны
+  // только тем, кто подтверждается мета-тегом; при подтверждении через DNS
+  // остаются пустыми. Как и SITE_URL, читаются на сборке — их значения
+  // приезжают build-аргументами (см. apps/web/Dockerfile).
+  verification: {
+    ...(process.env.GOOGLE_SITE_VERIFICATION ? { google: process.env.GOOGLE_SITE_VERIFICATION } : {}),
+    ...(process.env.YANDEX_VERIFICATION ? { yandex: process.env.YANDEX_VERIFICATION } : {}),
+  },
   robots: {
     index: true,
     follow: true,

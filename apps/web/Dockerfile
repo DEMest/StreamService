@@ -31,6 +31,10 @@ ARG NEXT_PUBLIC_DEMO_VIDEO_URL=
 # зашитую: динамические страницы, sitemap.xml и robots.txt берут её оттуда.
 # В браузер не утекает — это НЕ NEXT_PUBLIC_.
 ARG SITE_URL=
+# Коды подтверждения прав в Search Console / Яндекс.Вебмастере. Пусто —
+# мета-теги просто не выводятся (подтверждение через DNS их не требует).
+ARG GOOGLE_SITE_VERIFICATION=
+ARG YANDEX_VERIFICATION=
 
 # NEXT_PUBLIC_SERVER_IP / SRT_PORT / RTMP_PORT здесь больше нет намеренно.
 # Next.js подставляет NEXT_PUBLIC_* в клиентский бандл на СБОРКЕ, поэтому смена
@@ -45,6 +49,8 @@ ENV API_UPSTREAM=$API_UPSTREAM
 ENV NEXT_PUBLIC_SOCKET_URL=$NEXT_PUBLIC_SOCKET_URL
 ENV NEXT_PUBLIC_DEMO_VIDEO_URL=$NEXT_PUBLIC_DEMO_VIDEO_URL
 ENV SITE_URL=$SITE_URL
+ENV GOOGLE_SITE_VERIFICATION=$GOOGLE_SITE_VERIFICATION
+ENV YANDEX_VERIFICATION=$YANDEX_VERIFICATION
 ENV PORT=3000
 
 RUN pnpm --filter web build

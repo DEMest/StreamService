@@ -164,6 +164,10 @@ services:
         # остаются относительными. Ту же переменную сервис получает и в
         # рантайме (см. environment ниже) — она перекрывает зашитую.
         SITE_URL: ${SITE_URL:-}
+        # Коды подтверждения прав вебмастера — тоже на сборку: мета-тег
+        # должен быть в HTML, который отдаёт статически отрендеренный лендинг.
+        GOOGLE_SITE_VERIFICATION: ${GOOGLE_SITE_VERIFICATION:-}
+        YANDEX_VERIFICATION: ${YANDEX_VERIFICATION:-}
     container_name: ${COMPOSE_PROJECT_NAME:-streamservice}-web
     # host-порт не публикуем: nginx ходит в web по имени контейнера через сеть edge.
     environment:
