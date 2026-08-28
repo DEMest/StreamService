@@ -24,6 +24,14 @@ ARG NEXT_PUBLIC_SOCKET_URL=http://localhost:3001
 # 97 МБ в git/образе не нужны. Пусто = лендинг покажет статичную заглушку.
 ARG NEXT_PUBLIC_DEMO_VIDEO_URL=
 
+# Адрес сайта нужен и на СБОРКЕ, и в рантайме. На сборке — потому что Next.js
+# вычисляет metadataBase при пререндере статических страниц, и без него
+# canonical/og:url у лендинга и разделов остались бы относительными. В рантайме
+# та же переменная приезжает из docker-compose (environment) и перекрывает
+# зашитую: динамические страницы, sitemap.xml и robots.txt берут её оттуда.
+# В браузер не утекает — это НЕ NEXT_PUBLIC_.
+ARG SITE_URL=
+
 # NEXT_PUBLIC_SERVER_IP / SRT_PORT / RTMP_PORT здесь больше нет намеренно.
 # Next.js подставляет NEXT_PUBLIC_* в клиентский бандл на СБОРКЕ, поэтому смена
 # адреса стенда требовала пересборки образа. Теперь дашборд получает их в
@@ -36,6 +44,7 @@ ENV HLS_UPSTREAM=$HLS_UPSTREAM
 ENV API_UPSTREAM=$API_UPSTREAM
 ENV NEXT_PUBLIC_SOCKET_URL=$NEXT_PUBLIC_SOCKET_URL
 ENV NEXT_PUBLIC_DEMO_VIDEO_URL=$NEXT_PUBLIC_DEMO_VIDEO_URL
+ENV SITE_URL=$SITE_URL
 ENV PORT=3000
 
 RUN pnpm --filter web build

@@ -146,6 +146,7 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 | `public` | `/v1/public/*` (catalog, watch, broadcasts, thumbnail, event landing, contact) | none |
 | `recording` | live + archive HLS serving, download | none (HLS) / org_admin JWT (download) |
 | `mediamtx` (webhook) | `/v1/internal/mediamtx/{auth,webhook}` | shared secret (`MEDIAMTX_WEBHOOK_SECRET`) |
+| `seo` | `/v1/public/seo/{sitemap,page-meta}` | none |
 | `chat` | WebSocket `/chat` namespace | none |
 | `studio` | WebSocket `/studio` namespace | org_admin JWT cookie |
 | `thumbnail`, `contact`, `prisma` | (internal services) | — |
@@ -196,6 +197,46 @@ HTTP calls go through `apps/web/src/lib/api.ts` (relative URLs, proxied by Next.
 - `/api/*` → `API_UPSTREAM` (default `http://api:3001`)
 - `/hls/*` → `HLS_UPSTREAM` (default `http://mediamtx:8888`) — legacy; live HLS now flows through `/api/v1/public/...`.
 
+### SEO (`apps/api/src/seo/` + `apps/web/src/{lib/seo.ts,lib/json-ld.ts}`)
+
+**Один источник правды — бэкенд.** Решение «пускать ли страницу в индекс»
+живёт в `seo/popularity.ts` и одинаково питает и `sitemap.xml`, и мета-тег
+`robots` на самой странице. Разъехавшись, они дали бы худший из вариантов:
+карта сайта зовёт краулера туда, где страница просит его уйти.
+
+- **Что индексируется.** Статика: `/`, `/streams`, `/organizations`,
+  `/archive`, `/login` (логин намеренно — по нему ищут вход). Организации и
+  стримы — только «живые»: идёт эфир **или** была хотя бы одна завершённая
+  публичная трансляция. Пустая организация получает `noindex` и в sitemap не
+  попадает: пачка тонких страниц роняет оценку сайта целиком. Приоритет по
+  свежести — live 0.9 / эфир за 30 дней 0.7 / давние 0.5, страница стрима на
+  0.1 ниже страницы организации.
+- **Приватные стримы** (`isPublic=false`) не отдаются даже по имени:
+  `/v1/public/seo/page-meta` возвращает для них `found: false`, а `robots.txt`
+  закрывает `*?key=`.
+- **`robots.txt` и `sitemap.xml`** — route handler'ы (`app/robots.txt/route.ts`,
+  `app/sitemap.xml/route.ts`), а не файлы в `public/`: обеим нужен абсолютный
+  адрес сайта, который известен только в рантайме. При недоступном API карта
+  отдаёт статический минимум, а не 500.
+- **Метаданные страниц** задаются в `layout.tsx` каждого раздела (страницы
+  остаются клиентскими) и в `generateMetadata` у `/watch/*` (там нужны данные
+  из БД). Лендинг вынесен в route group `app/(landing)/` ради собственного
+  canonical — в корневом `layout.tsx` его держать нельзя, он унаследуется
+  всеми страницами без своего.
+- **JSON-LD**: `WebSite`+`Organization` на всех страницах, `VideoObject` с
+  `publication: BroadcastEvent` на странице трансляции. Это не украшение:
+  Google Indexing API принимает только страницы с `BroadcastEvent` или
+  `JobPosting`, и именно эта разметка делает пинг легальным.
+- **Пинг поисковикам** (`seo-ping.service.ts`) дёргается из
+  `StreamService.handleWebhookInternal` при фактической смене состояния эфира.
+  IndexNow (Яндекс, Bing) получает страницу трансляции и списки; Google
+  Indexing API — только страницу трансляции. Троттлинг 10 минут на URL спасает
+  от «мигающего» ингеста и от суточной квоты Google (200 URL). Всё
+  fire-and-forget: недоступный поисковик не должен влиять на эфир.
+- **Ключ IndexNow** публичен по дизайну протокола и лежит в двух местах:
+  константа в `indexnow.service.ts` и файл `apps/web/public/<ключ>.txt`.
+  Меняете — меняйте оба.
+
 ## Environment Variables
 
 Copy `.env.example` to `.env`. One compose file serves both prod and a test stand — the difference is just this file (ports, `COMPOSE_PROJECT_NAME`, public URLs). Key variables:
@@ -211,6 +252,19 @@ Copy `.env.example` to `.env`. One compose file serves both prod and a test stan
 - `NEXT_PUBLIC_*` (`SOCKET_URL`, `DEMO_VIDEO_URL`) — baked into the web bundle at build time.
 - `INGEST_HOST` — host shown to streamers in the dashboard's SRT/RTMP instructions. **Leave empty** unless ingest is on a different host than the site: empty means the dashboard uses `window.location.hostname`, so moving to another domain needs no config change and no rebuild. Ports come from `MEDIAMTX_SRT_PORT` / `MEDIAMTX_RTMP_PORT`, which the `api` service also reads. Served at runtime via `GET /v1/org/ingest-config` (`apps/api/src/org/ingest-config.ts`) — deliberately *not* `NEXT_PUBLIC_*`, which would re-introduce the rebuild-on-move problem.
 - `SUPERADMIN_LOGIN`, `SUPERADMIN_PASSWORD` — used by `prisma:seed` and auto-create on API boot.
+- `SITE_URL` — публичный адрес сайта (`https://liga-live.ru`). Нужен трём
+  вещам: ссылка в письме обратной связи, абсолютные URL в
+  sitemap/robots/canonical и пинг поисковикам. Единственная переменная,
+  которую `web` получает **и как build-arg, и в рантайме**: Next.js фиксирует
+  `metadataBase` при пререндере статических страниц, поэтому без build-arg
+  canonical и og:url у лендинга остались бы относительными. Пусто или
+  localhost — SEO-пинг выключен (dev-стенд поисковики не трогает).
+- `INDEXNOW_KEY` — переопределение ключа IndexNow. Обычно пусто: ключ по
+  умолчанию зашит в `seo/indexnow.service.ts` и лежит файлом в
+  `apps/web/public/`. Меняя — меняйте оба места.
+- `GOOGLE_INDEXING_CREDENTIALS` — JSON сервис-аккаунта Google Cloud (как есть
+  или в base64) для Indexing API. Пусто — Google узнаёт о новых страницах
+  только из sitemap.xml, остальное продолжает работать.
 
 ## Frontend Design Skills
 
