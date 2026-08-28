@@ -66,9 +66,12 @@ export function LegalDocument({ doc }: { doc: LegalDoc }) {
           ))}
         </article>
 
+        {/* max-h + overflow-y: на невысоком окне (ноутбук с открытой консолью)
+            липкая карточка из 15 пунктов не влезает, и нижние ссылки уезжают
+            за край экрана недостижимыми — своей прокрутки у неё нет. */}
         <nav
           aria-label="Содержание документа"
-          className="order-1 lg:order-2 mb-10 lg:mb-0 lg:sticky lg:top-20 bg-surface-elevated border border-zinc-800/60 rounded-xl p-4"
+          className="order-1 lg:order-2 mb-10 lg:mb-0 lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto bg-surface-elevated border border-zinc-800/60 rounded-xl p-4"
         >
           <p className="text-[11px] uppercase tracking-wider text-zinc-600 mb-3">Содержание</p>
           <ul className="flex flex-col gap-1.5 list-none p-0 m-0">

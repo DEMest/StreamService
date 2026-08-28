@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { LegalBlocks } from '@/components/LegalDocument';
+import { FaqHashOpener } from '@/components/FaqHashOpener';
 import { LEGAL } from '@/lib/legal';
 import { faqItems } from '@/lib/legal-content/faq';
 
@@ -22,6 +23,7 @@ export default function FaqPage() {
   return (
     <div className="min-h-[100dvh] flex flex-col bg-surface-primary text-zinc-200">
       <Header />
+      <FaqHashOpener />
 
       <main className="flex-1">
         <div className="max-w-[800px] mx-auto px-6 py-12 md:py-16">
