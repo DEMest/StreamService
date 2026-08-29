@@ -32,7 +32,12 @@ postconf -e "smtpd_relay_restrictions = permit_sasl_authenticated, reject_unauth
 postconf -e "smtpd_recipient_restrictions = permit_sasl_authenticated, reject_unauth_destination"
 postconf -e "smtpd_sasl_auth_enable = yes"
 postconf -e "smtpd_sasl_security_options = noanonymous"
-postconf -e "smtpd_sasl_local_domain = \$myhostname"
+# $mydomain (= MAIL_DOMAIN), а не $myhostname: SMTP_USER — это email на
+# MAIL_DOMAIN (совпадает с MAIL_FROM, см. mail.service.ts), Cyrus SASL при
+# логине с "@" берёт realm из части после "@" в самой строке — она должна
+# совпасть с realm записи в sasldb ниже, иначе AUTH падает с 535 в самом
+# частом случае (SMTP_USER вида notify@liga-live.ru).
+postconf -e "smtpd_sasl_local_domain = \$mydomain"
 postconf -e "smtpd_sasl_type = cyrus"
 postconf -e "smtpd_sasl_path = smtpd"
 
@@ -57,7 +62,9 @@ pwcheck_method: auxprop
 auxprop_plugin: sasldb
 mech_list: PLAIN LOGIN
 EOF
-echo "${SMTP_PASS}" | saslpasswd2 -p -c -u "${MAIL_HOSTNAME}" "${SASL_USER}"
+# Realm = MAIL_DOMAIN — должен совпасть с тем, что Cyrus SASL вычисляет из
+# SMTP_USER на логине (см. комментарий у smtpd_sasl_local_domain выше).
+echo "${SMTP_PASS}" | saslpasswd2 -p -c -u "${MAIL_DOMAIN}" "${SASL_USER}"
 chown postfix:sasl /etc/sasldb2
 chmod 640 /etc/sasldb2
 adduser postfix sasl >/dev/null 2>&1 || true
