@@ -258,6 +258,22 @@ Copy `.env.example` to `.env`. One compose file serves both prod and a test stan
 - `NEXT_PUBLIC_*` (`SOCKET_URL`, `DEMO_VIDEO_URL`) — baked into the web bundle at build time.
 - `INGEST_HOST` — host shown to streamers in the dashboard's SRT/RTMP instructions. **Leave empty** unless ingest is on a different host than the site: empty means the dashboard uses `window.location.hostname`, so moving to another domain needs no config change and no rebuild. Ports come from `MEDIAMTX_SRT_PORT` / `MEDIAMTX_RTMP_PORT`, which the `api` service also reads. Served at runtime via `GET /v1/org/ingest-config` (`apps/api/src/org/ingest-config.ts`) — deliberately *not* `NEXT_PUBLIC_*`, which would re-introduce the rebuild-on-move problem.
 - `SUPERADMIN_LOGIN`, `SUPERADMIN_PASSWORD` — used by `prisma:seed` and auto-create on API boot.
+- `SMTP_HOST`, `SMTP_PORT` (default `587`), `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`,
+  `MAIL_FROM`, `MAIL_TO` — feedback-form notification email (`MailService`,
+  `apps/api/src/notify/mail.service.ts`). Empty `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS`/`MAIL_TO` — feedback
+  still saved to `/admin/feedback`, no email sent. `~/ops/notify.py` (server-side,
+  outside the repo — sends deploy notifications) reads the same variable names
+  from its own `~/ops/notify.env`, not from this `.env`.
+- `MAIL_DOMAIN` (default `liga-live.ru`), `MAIL_HOSTNAME` (default
+  `relay.liga-live.ru`), `DKIM_SELECTOR` (default `mail`) — config for the
+  self-hosted outbound-only SMTP relay (`postfix` service, `infra/postfix/`).
+  `SMTP_USER` for this relay must be an email on `MAIL_DOMAIN` (e.g.
+  `notify@liga-live.ru`) — the relay's SASL realm is `MAIL_DOMAIN`, and a
+  mismatched domain in `SMTP_USER` fails auth with `535`.
+- `SMTP_RELAY_PORT` (default `2587`) — host-side (`127.0.0.1` only, like
+  `MINIO_API_PORT`) port mapping to the `postfix` relay's submission port, so
+  `~/ops/notify.py` on the host (outside the docker network) can also send
+  through it.
 - `SITE_URL` — публичный адрес сайта (`https://liga-live.ru`). Нужен трём
   вещам: ссылка в письме обратной связи, абсолютные URL в
   sitemap/robots/canonical и пинг поисковикам. Единственная переменная,

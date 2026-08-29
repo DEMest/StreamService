@@ -69,6 +69,32 @@ services:
       - hls_data:/hls
     restart: unless-stopped
 
+  # ─── Postfix (исходящий SMTP-релей своего домена, без внешнего провайдера) ───
+  postfix:
+    build:
+      context: ./infra/postfix
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-streamservice}-postfix
+    environment:
+      MAIL_DOMAIN: ${MAIL_DOMAIN:-liga-live.ru}
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME:-relay.liga-live.ru}
+      DKIM_SELECTOR: ${DKIM_SELECTOR:-mail}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+    volumes:
+      # Приватный DKIM-ключ переживает пересборки образа: если бы он
+      # генерировался заново при каждом старте, DNS-запись DKIM разъехалась
+      # бы с реальным ключом и подписи стали бы невалидны.
+      - dkim_data:/etc/opendkim/keys
+    ports:
+      # Только на localhost хоста — так же, как у minio, чтобы ~/ops/notify.py
+      # (живёт на хосте, не в docker-сети) тоже мог слать через этот релей.
+      # Наружу (0.0.0.0) не публикуем — снаружи к релею никто не обращается.
+      - "127.0.0.1:${SMTP_RELAY_PORT:-2587}:587"
+    networks:
+      - default
+    restart: unless-stopped
+
   # ─── API ───
   api:
     build:
@@ -200,3 +226,4 @@ volumes:
   recordings_data:
   hls_data:
   minio_data:
+  dkim_data:
