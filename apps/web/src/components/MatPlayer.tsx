@@ -11,6 +11,15 @@ interface PropsBase {
   onTimeUpdate?: (current: number, duration: number, isLive: boolean, seekableStart: number) => void;
   onBuffering?: (isBuffering: boolean) => void;
   onQualityChange?: (levelIndex: number) => void;
+  /** Буфер опустел — зритель увидел рывок. Для метрик ёмкости. */
+  onStall?: () => void;
+  /** Фрагмент догрузился за столько миллисекунд. Для метрик ёмкости. */
+  onFragLoad?: (ms: number) => void;
+  /**
+   * Сменилась ступень лесенки: имя каталога (`hd`, `p720`…) из адреса уровня.
+   * Именно каталог, а не подпись из плейлиста: по нему считается вес зрителя.
+   */
+  onRendition?: (rendition: string | null) => void;
 }
 
 interface PropsLegacy extends PropsBase {
@@ -62,6 +71,21 @@ function drawContain(
 }
 
 /** Stable signature of a string array (order matters). */
+/**
+ * Каталог ступени из адреса её плейлиста: `…/live/hls/p720/index.m3u8` → `p720`.
+ *
+ * Берём именно каталог, а не подпись уровня из master.m3u8: подпись —
+ * человеческая («Оригинал», «720p») и может измениться, а каталог создаёт
+ * `on-ready.sh`, и по нему же считает вес зрителя серверная часть.
+ */
+function renditionOf(levelUrl: string | undefined): string | null {
+  if (!levelUrl) return null;
+  const path = levelUrl.split('?')[0];
+  const parts = path.split('/');
+  // Предпоследний сегмент — каталог, последний — сам index.m3u8.
+  return parts.length >= 2 ? parts[parts.length - 2] || null : null;
+}
+
 function arrSig(arr: string[]): string {
   return arr.join('');
 }
@@ -75,6 +99,9 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
     onTimeUpdate,
     onBuffering,
     onQualityChange,
+    onStall,
+    onFragLoad,
+    onRendition,
   } = props;
 
   // Resolve the array of source URLs in a uniform way.
@@ -248,6 +275,11 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
         onQualityChange?.(data.level);
+        onRendition?.(renditionOf(hls?.levels?.[data.level]?.url?.[0]));
+      });
+      hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => {
+        const ms = data.frag.stats.loading.end - data.frag.stats.loading.start;
+        if (Number.isFinite(ms) && ms >= 0) onFragLoad?.(Math.round(ms));
       });
       // Прыжок к живому краю: спасает от вечного стоп-кадра, когда буфер опустел
       // и нужный сегмент уже стёрт с сервера (плеер иначе ждёт его бесконечно).
@@ -280,6 +312,7 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
         // Застревание буфера у hls.js — НЕ фатально, но на живом стриме требует
         // прыжка к эфиру, иначе плеер молча стоит на месте.
         if (!isArchive && data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+          onStall?.();
           seekToLive();
           return;
         }
