@@ -14,7 +14,9 @@
 #                       задел И (эфиров нет ИЛИ FORCE_MEDIAMTX=1).
 #   ffmpeg ABR+запись — живут внутри mediamtx (runOnReady), не трогаются.
 #   postgres, minio   — не трогаем.
-#   api, web          — пересобираются и перезапускаются (~5 с).
+#   api, web, postfix — пересобираются и перезапускаются (~5 с). postfix —
+#                       чисто исходящий SMTP-релей, простой в письмах во время
+#                       его рестарта эфиру не мешает.
 #
 # Единственный видимый эффект: api сам отдаёт live-HLS, поэтому на время его
 # рестарта раздача встаёт. Сегменты по 2 с, окно плейлиста 80 с, nginx отдаёт
@@ -23,8 +25,8 @@
 set -euo pipefail
 
 REPO="${REPO:-/home/rootuser/StreamService}"
-SERVICES="api web"          # собираем и метим для отката
-APP_SERVICES="api web"      # поднимаем обычным up; mediamtx идёт отдельно и раньше
+SERVICES="api web postfix"          # собираем и метим для отката
+APP_SERVICES="api web postfix"      # поднимаем обычным up; mediamtx идёт отдельно и раньше
 HEALTH_URL="${HEALTH_URL:-https://liga-live.ru/api/v1/org/ingest-config}"
 SITE_URL="${SITE_URL:-https://liga-live.ru/}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-90}"
