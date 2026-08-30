@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import * as fs from 'fs';
 import * as os from 'os';
+import { RECORDINGS_ROOT } from '../recording/recording.service';
+import { HLS_ROOT } from '../stats/stats.service';
 
 /**
  * Железо сервера без единого стороннего экспортёра.
@@ -52,10 +54,15 @@ export interface HostMetrics {
   uptimeSeconds: number;
 }
 
-/** Что проверяем на заполнение. Пути прода; отсутствующие молча пропускаются. */
+/**
+ * Что проверяем на заполнение. Пути берутся из существующих констант, а не из
+ * собственных переменных окружения: заводить второй способ задать те же
+ * каталоги — верный способ однажды измерить не тот диск.
+ * Отсутствующие пути молча пропускаются.
+ */
 const WATCHED_PATHS: Array<{ path: string; label: string }> = [
-  { path: process.env.HLS_ROOT ?? '/hls', label: 'Живой HLS' },
-  { path: process.env.RECORDINGS_ROOT ?? '/recordings', label: 'Записи' },
+  { path: HLS_ROOT, label: 'Живой HLS' },
+  { path: RECORDINGS_ROOT, label: 'Записи' },
 ];
 
 interface CpuTotals {

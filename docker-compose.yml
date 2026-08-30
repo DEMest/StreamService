@@ -137,6 +137,18 @@ services:
       # Google Indexing API молчит, пока нет сервис-аккаунта.
       INDEXNOW_KEY: ${INDEXNOW_KEY:-}
       GOOGLE_INDEXING_CREDENTIALS: ${GOOGLE_INDEXING_CREDENTIALS:-}
+      # Метрики ёмкости (/admin/capacity). UPLINK_MBPS — ширина канала
+      # сервера; от неё считается и заполнение, и весь потолок по зрителям,
+      # поэтому ошибка здесь смещает вывод о необходимости CDN целиком.
+      UPLINK_MBPS: ${UPLINK_MBPS:-750}
+      CAPACITY_HEADROOM: ${CAPACITY_HEADROOM:-0.2}
+      # Лог nginx, размеченный под метрики; том с ним смонтирован выше.
+      NGINX_LOG_PATH: ${NGINX_LOG_PATH:-/var/log/nginx/capacity.log}
+      # true — синтетическая нагрузка вместо реальной. Только для стенда.
+      CAPACITY_DEMO: ${CAPACITY_DEMO:-false}
+      # Тревоги об инцидентах. Пусто — уходят только письмом через SMTP выше.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     depends_on:
       postgres:
         condition: service_healthy

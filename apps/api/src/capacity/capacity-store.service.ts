@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CapacityCollectorService } from './capacity-collector.service';
 import { CapacityPoint } from './capacity.types';
 import { HostMetricsReader } from './host-metrics';
+import { QoeService } from './qoe.service';
 
 /** Сколько держим минутные срезы. Дальше сравнивать турниры уже не с чем. */
 const RETENTION_DAYS = 90;
@@ -33,6 +34,7 @@ export class CapacityStoreService {
     private readonly prisma: PrismaService,
     private readonly collector: CapacityCollectorService,
     private readonly host: HostMetricsReader,
+    private readonly qoe: QoeService,
   ) {}
 
   @Cron('30 * * * * *')
@@ -60,6 +62,11 @@ export class CapacityStoreService {
     if (byMinute.size === 0) return;
 
     const hostMetrics = this.host.read();
+    // Перцентиль берётся из живого реестра плееров: он мгновенный, поэтому
+    // относится к последней закрытой минуте лишь приблизительно. Точнее было
+    // бы копить сырые значения за минуту, но ради одного числа держать в
+    // памяти историю по каждому зрителю — плохой обмен.
+    const fragLoadP95 = this.qoe.snapshot().fragLoadP95;
     const renditionMix = Object.fromEntries(
       this.collector.renditions().map((r) => [r.key, r.viewers]),
     );
@@ -77,7 +84,7 @@ export class CapacityStoreService {
         cacheHitRatio: +avg((p) => p.cacheHitRatio).toFixed(3),
         errorRate: +avg((p) => p.errorRate).toFixed(4),
         stallShare: +avg((p) => p.stallRatio).toFixed(3),
-        fragLoadP95: null,
+        fragLoadP95,
         renditionMix,
         cpuUsage: hostMetrics.cpu.usage,
         memoryUsage: hostMetrics.memory.usage,

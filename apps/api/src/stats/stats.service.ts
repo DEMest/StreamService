@@ -15,7 +15,8 @@ const PROGRESS_TAIL_BYTES = 4096;
 /** Ниже этого speed транскодер уже отстаёт настолько, что зритель видит рывки. */
 const SPEED_UNHEALTHY_BELOW = 0.95;
 
-const HLS_ROOT = '/hls';
+/** Корень HLS-вывода. Экспортируется: тот же том читают метрики ёмкости. */
+export const HLS_ROOT = '/hls';
 
 interface PathState {
   lastBytesReceived: number;

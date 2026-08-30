@@ -32,8 +32,10 @@ describe('CapacityStoreService', () => {
     })),
   };
 
+  const qoe = { snapshot: jest.fn(() => ({ fragLoadP95: 640 })) };
+
   const make = () =>
-    new CapacityStoreService(prisma as never, collector as never, host as never);
+    new CapacityStoreService(prisma as never, collector as never, host as never, qoe as never);
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -87,6 +89,16 @@ describe('CapacityStoreService', () => {
     collector.history.mockReturnValue([]);
     await make().flush();
     expect(prisma.capacitySample.createMany).not.toHaveBeenCalled();
+  });
+
+  it('кладёт в серверный срез перцентиль загрузки фрагмента', async () => {
+    collector.history.mockReturnValue([point(0)]);
+    await make().flush();
+
+    const server = prisma.capacitySample.createMany.mock.calls[0][0].data.find(
+      (r: { streamKey: string }) => r.streamKey === '',
+    );
+    expect(server.fragLoadP95).toBe(640);
   });
 
   it('кладёт железо в серверный срез', async () => {
