@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CapacityPoint, CapacitySnapshot, RenditionShare } from './capacity.types';
 import { LADDER, demoHistory, demoIncidents, egressOf, mixAt } from './demo-source';
 import { HostMetricsReader } from './host-metrics';
+import { CapacityCollectorService } from './capacity-collector.service';
 
 /** Ширина канала сервера. Единственное число, которое неоткуда измерить — его задаёт человек. */
 const DEFAULT_UPLINK_MBPS = 750;
@@ -54,10 +55,10 @@ export function computeCeiling(input: {
 /**
  * Сбор данных для экрана ёмкости.
  *
- * Прототип: источники ещё не подключены, поэтому под флагом `CAPACITY_DEMO`
- * сервис отдаёт синтетическую нагрузку, а без флага — честные нули. Реальные
- * источники (лог nginx, телеметрия плеера, `StatsService`) встанут на место
- * `collect()`, а `computeCeiling` и весь фронтенд останутся как есть.
+ * Числа приходят от `CapacityCollectorService` — он сводит лог nginx с
+ * телеметрией плееров. Под флагом `CAPACITY_DEMO` вместо них подставляется
+ * синтетическая нагрузка: экран ёмкости имеет смысл только под нагрузкой, а
+ * на машине разработчика зрителей нет вообще.
  */
 @Injectable()
 export class CapacityService {
@@ -73,7 +74,7 @@ export class CapacityService {
    */
   private readonly host = new HostMetricsReader();
 
-  constructor() {
+  constructor(private readonly collector: CapacityCollectorService) {
     // Первый замер сразу: он задаёт базу для дельты, иначе самый первый
     // открытый экран показал бы «загрузка неизвестна».
     this.host.read();
@@ -113,7 +114,6 @@ export class CapacityService {
     };
   }
 
-  /** Точка, куда встанут реальные источники. Сейчас — стенд либо нули. */
   private collect(now: number) {
     if (this.demo) {
       const history = demoHistory(now);
@@ -121,19 +121,27 @@ export class CapacityService {
       return { history, renditions: mixAt(viewers), incidents: demoIncidents(now) };
     }
 
-    const empty: CapacityPoint = {
-      t: now,
-      viewers: 0,
-      egressMbps: 0,
-      cacheHitRatio: 0,
-      errorRate: 0,
-      stallRatio: 0,
-    };
-    return {
-      history: [empty],
-      renditions: LADDER.map((r) => ({ ...r, viewers: 0, share: 0 })),
-      incidents: [],
-    };
+    const history = this.collector.history();
+    if (history.length === 0) {
+      // Первый тик сборщика ещё не прошёл. Показать нулевую точку честнее, чем
+      // пустой график: экран должен отрисоваться сразу после запуска API.
+      const empty: CapacityPoint = {
+        t: now,
+        viewers: 0,
+        egressMbps: 0,
+        cacheHitRatio: 0,
+        errorRate: 0,
+        stallRatio: 0,
+      };
+      return {
+        history: [empty],
+        renditions: LADDER.map((r) => ({ ...r, viewers: 0, share: 0 })),
+        incidents: [],
+      };
+    }
+
+    // Инциденты появятся здесь, когда заработает детектор: пока лента пуста.
+    return { history, renditions: this.collector.renditions(), incidents: [] };
   }
 
   /** Экспортируется ради тестов и будущего сбора: вес микса → отдача. */
