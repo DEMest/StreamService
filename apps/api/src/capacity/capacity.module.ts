@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
+import { NotifyModule } from '../notify/notify.module';
 import { CapacityController } from './capacity.controller';
 import { CapacityService } from './capacity.service';
+import { CapacityAlertsService } from './capacity-alerts.service';
 import { CapacityCollectorService } from './capacity-collector.service';
 import { CapacityStoreService } from './capacity-store.service';
 import { HostMetricsReader } from './host-metrics';
@@ -12,12 +14,14 @@ import { QoeService } from './qoe.service';
 const DEFAULT_LOG_PATH = '/var/log/nginx/capacity.log';
 
 @Module({
+  imports: [NotifyModule],
   controllers: [CapacityController, QoeController],
   providers: [
     CapacityService,
     QoeService,
     CapacityCollectorService,
     CapacityStoreService,
+    CapacityAlertsService,
     // Один читатель железа на всё приложение: он хранит предыдущий замер ради
     // дельты, и два независимых экземпляра делили бы интервал пополам, занижая
     // загрузку процессора вдвое.
