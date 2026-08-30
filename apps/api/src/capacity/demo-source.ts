@@ -102,6 +102,22 @@ export function demoHistory(now: number): CapacityPoint[] {
   return points;
 }
 
+/**
+ * Раскладка нагрузки по стримам для стенда: два корта с разной посещаемостью.
+ * Без неё карточка «По стримам» на стенде пуста, и проверить её нечем.
+ */
+export function demoStreams(viewers: number, egressMbps: number) {
+  const split = [
+    { streamKey: 'liga/court-a', weight: 0.62 },
+    { streamKey: 'liga/', weight: 0.38 },
+  ];
+  return split.map((s) => ({
+    streamKey: s.streamKey,
+    viewers: Math.round(viewers * s.weight),
+    egressMbps: +(egressMbps * s.weight).toFixed(1),
+  }));
+}
+
 export function demoIncidents(now: number): CapacityIncident[] {
   return [
     {

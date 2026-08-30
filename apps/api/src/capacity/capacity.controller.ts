@@ -1,7 +1,7 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { CapacityService } from './capacity.service';
 import { CapacityAlertsService } from './capacity-alerts.service';
-import { CapacitySnapshot } from './capacity.types';
+import { CapacityPeriod, CapacitySnapshot } from './capacity.types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -24,12 +24,24 @@ export class CapacityController {
     private alerts: CapacityAlertsService,
   ) {}
 
+  /**
+   * @param period час (из памяти) | сутки | неделя (из базы)
+   * @param streamKey `<orgSlug>/<streamSlug>` — фильтр по одному эфиру
+   */
   @Get()
-  async getSnapshot(): Promise<CapacitySnapshot> {
-    const snapshot = this.capacity.getSnapshot();
+  async getSnapshot(
+    @Query('period') period?: string,
+    @Query('streamKey') streamKey?: string,
+  ): Promise<CapacitySnapshot> {
+    const snapshot = await this.capacity.getSnapshotFor(normalizePeriod(period), streamKey || undefined);
     // На стенде лента синтетическая — подменять её пустой базой незачем.
     if (snapshot.demo) return snapshot;
 
     return { ...snapshot, incidents: await this.alerts.recent() };
   }
+}
+
+/** Неизвестное значение — час: экран должен открыться, а не отдать ошибку. */
+function normalizePeriod(raw?: string): CapacityPeriod {
+  return raw === 'day' || raw === 'week' ? raw : 'hour';
 }

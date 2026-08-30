@@ -55,7 +55,24 @@ export interface CapacityIncident {
   peak: string;
 }
 
+/** Глубина графика. Час живёт в памяти, остальное — из базы. */
+export type CapacityPeriod = 'hour' | 'day' | 'week';
+
+/** Нагрузка одного стрима: видно, какой эфир съел канал. */
+export interface StreamLoadRow {
+  /** `<orgSlug>/<streamSlug>`; пустой slug — дефолтный стрим организации. */
+  streamKey: string;
+  viewers: number;
+  egressMbps: number;
+}
+
 export interface CapacitySnapshot {
+  period: CapacityPeriod;
+  /** Выбранный фильтр по стриму; null — весь сервер. */
+  streamKey: string | null;
+  /** Все стримы, отдававшие трафик в последнем тике, тяжёлые первыми. */
+  streams: StreamLoadRow[];
+
   /** Ширина канала сервера, Мбит/с (переменная окружения UPLINK_MBPS). */
   uplinkMbps: number;
   /** Какую долю канала держим в резерве под ингест, чат и страницы. */

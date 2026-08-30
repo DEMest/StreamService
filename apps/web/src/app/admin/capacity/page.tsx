@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft, Users, Gauge, WarningCircle, CheckCircle, Lightning, Flask, Clock,
@@ -44,7 +45,18 @@ interface HostMetrics {
   uptimeSeconds: number;
 }
 
+type Period = 'hour' | 'day' | 'week';
+
+interface StreamLoadRow {
+  streamKey: string;
+  viewers: number;
+  egressMbps: number;
+}
+
 interface Snapshot {
+  period: Period;
+  streamKey: string | null;
+  streams: StreamLoadRow[];
   uplinkMbps: number;
   headroomRatio: number;
   viewers: number;
@@ -81,11 +93,26 @@ function since(ts: number) {
   return min < 60 ? `${min} мин назад` : `${Math.round(min / 60)} ч назад`;
 }
 
+const PERIODS: Array<{ key: Period; label: string }> = [
+  { key: 'hour', label: 'Час' },
+  { key: 'day', label: 'Сутки' },
+  { key: 'week', label: 'Неделя' },
+];
+
 export default function CapacityPage() {
+  const [period, setPeriod] = useState<Period>('hour');
+  const [streamKey, setStreamKey] = useState<string | null>(null);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['admin-capacity'],
-    queryFn: () => api.get<Snapshot>('/v1/admin/capacity'),
-    refetchInterval: 10_000,
+    // Период и стрим — часть ключа: иначе React Query отдал бы данные
+    // предыдущего среза и график молча соврал бы про выбранный.
+    queryKey: ['admin-capacity', period, streamKey],
+    queryFn: () =>
+      api.get<Snapshot>(
+        `/v1/admin/capacity?period=${period}` + (streamKey ? `&streamKey=${encodeURIComponent(streamKey)}` : ''),
+      ),
+    // Долгие срезы обновлять каждые 10 секунд незачем — они меняются раз в минуту.
+    refetchInterval: period === 'hour' ? 10_000 : 60_000,
   });
 
   return (
@@ -122,7 +149,29 @@ export default function CapacityPage() {
             <HeadlineCard data={data} />
 
             <section className="bg-surface-elevated border border-zinc-800 rounded-xl p-5">
-              <h2 className="text-sm font-medium text-zinc-300 mb-4">Последний час</h2>
+              <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+                <h2 className="text-sm font-medium text-zinc-300">
+                  {PERIODS.find((p) => p.key === period)!.label}
+                  {streamKey !== null && (
+                    <span className="text-zinc-500 font-normal"> · {streamLabel(streamKey)}</span>
+                  )}
+                </h2>
+                <div className="flex items-center gap-1 bg-surface-card border border-zinc-800 rounded-lg p-0.5">
+                  {PERIODS.map((p) => (
+                    <button
+                      key={p.key}
+                      onClick={() => setPeriod(p.key)}
+                      className={`px-3 py-1 text-xs rounded-md transition-colors cursor-pointer ${
+                        period === p.key
+                          ? 'bg-zinc-700 text-zinc-100'
+                          : 'text-zinc-500 hover:text-zinc-300'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <CapacityChart
                 points={data.history}
                 uplinkMbps={data.uplinkMbps}
@@ -134,6 +183,12 @@ export default function CapacityPage() {
               <RenditionCard renditions={data.renditions} total={data.viewers} />
               <HealthCard health={data.health} />
             </div>
+
+            <StreamsCard
+              streams={data.streams}
+              selected={streamKey}
+              onSelect={(key) => setStreamKey((prev) => (prev === key ? null : key))}
+            />
 
             <HostCard host={data.host} demo={data.demo} />
 
@@ -454,6 +509,77 @@ function HostCard({ host, demo }: { host: HostMetrics; demo: boolean }) {
         <p className="text-[11px] text-zinc-600 mt-3">
           Разделы для записей и живого HLS не смонтированы — на сервере они появятся.
         </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Человеческое имя стрима из ключа `<orgSlug>/<streamSlug>`.
+ * Пустой slug — дефолтный стрим организации, у него нет собственного имени.
+ */
+function streamLabel(streamKey: string): string {
+  const [org, slug] = streamKey.split('/');
+  return slug ? `${org} · ${slug}` : `${org} · основной`;
+}
+
+/**
+ * Нагрузка по стримам.
+ *
+ * Пока эфир один, разрез бесполезен, но как только их становится несколько,
+ * это единственный способ понять, какой именно съел канал. Строка кликабельна:
+ * весь экран пересчитывается по выбранному стриму.
+ */
+function StreamsCard({
+  streams,
+  selected,
+  onSelect,
+}: {
+  streams: StreamLoadRow[];
+  selected: string | null;
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <section className="bg-surface-elevated border border-zinc-800 rounded-xl p-5">
+      <div className="flex items-baseline justify-between flex-wrap gap-2">
+        <h2 className="text-sm font-medium text-zinc-300">По стримам</h2>
+        {selected !== null && (
+          <button
+            onClick={() => onSelect(selected)}
+            className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+          >
+            Показать все
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-zinc-500 mt-1 mb-4">Какой эфир занимает канал прямо сейчас</p>
+
+      {streams.length === 0 ? (
+        <div className="text-sm text-zinc-500 py-5 text-center">Отдачи нет — сейчас никто не смотрит</div>
+      ) : (
+        <div className="flex flex-col divide-y divide-zinc-800/70">
+          {streams.map((s) => {
+            const active = selected === s.streamKey;
+            return (
+              <button
+                key={s.streamKey}
+                onClick={() => onSelect(s.streamKey)}
+                className={`flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 text-left transition-colors cursor-pointer ${
+                  active ? 'text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? 'bg-brand' : 'bg-zinc-700'}`} />
+                <span className="text-sm truncate flex-1">{streamLabel(s.streamKey)}</span>
+                <span className="text-xs tabular-nums text-zinc-500 shrink-0">
+                  {nf.format(s.viewers)} зр.
+                </span>
+                <span className="text-xs tabular-nums shrink-0 w-24 text-right">
+                  {nf.format(s.egressMbps)} Мбит/с
+                </span>
+              </button>
+            );
+          })}
+        </div>
       )}
     </section>
   );

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CapacityPoint, CapacitySnapshot, RenditionShare } from './capacity.types';
-import { LADDER, demoHistory, demoIncidents, egressOf, mixAt } from './demo-source';
+import { CapacityPeriod, CapacityPoint, CapacitySnapshot, RenditionShare } from './capacity.types';
+import { CapacityStoreService } from './capacity-store.service';
+import { LADDER, demoHistory, demoIncidents, demoStreams, egressOf, mixAt } from './demo-source';
 import { HostMetricsReader } from './host-metrics';
 import { CapacityCollectorService } from './capacity-collector.service';
 
@@ -13,6 +14,13 @@ const DEFAULT_HEADROOM = 0.2;
  * один человек, перематывающий буфер, перекосит среднее вдвое.
  */
 const MEASURED_MIN_VIEWERS = 5;
+
+/** Глубина графика по периодам. */
+const PERIOD_MS: Record<CapacityPeriod, number> = {
+  hour: 60 * 60_000,
+  day: 24 * 60 * 60_000,
+  week: 7 * 24 * 60 * 60_000,
+};
 
 /**
  * Расчёт потолка — чистая функция, намеренно оторванная от источника данных.
@@ -76,10 +84,52 @@ export class CapacityService {
      * загрузку процессора.
      */
     private readonly host: HostMetricsReader,
+    private readonly store: CapacityStoreService,
   ) {
     // Первый замер сразу: он задаёт базу для дельты, иначе самый первый
     // открытый экран показал бы «загрузка неизвестна».
     this.host.read();
+  }
+
+  /**
+   * Снимок за выбранный период.
+   *
+   * Час берётся из памяти сборщика (шаг 10 секунд), сутки и неделя — из базы
+   * (шаг минута). Фильтр по стриму всегда идёт в базу: сборщик держит по
+   * стримам только текущее состояние, истории у него нет.
+   */
+  async getSnapshotFor(
+    period: CapacityPeriod = 'hour',
+    streamKey?: string,
+  ): Promise<CapacitySnapshot> {
+    const base = this.getSnapshot();
+    if (this.demo) return { ...base, period };
+
+    const needsStore = period !== 'hour' || !!streamKey;
+    if (!needsStore) return base;
+
+    const to = new Date();
+    const from = new Date(to.getTime() - PERIOD_MS[period]);
+    const history = await this.store.range(from, to, streamKey ?? '');
+    const last = history[history.length - 1];
+
+    return {
+      ...base,
+      period,
+      streamKey: streamKey ?? null,
+      history,
+      // Пересчитываем итоги под выбранный срез: заголовок экрана обязан
+      // относиться к тому же, что нарисовано на графике.
+      viewers: last?.viewers ?? 0,
+      egressMbps: last?.egressMbps ?? 0,
+      ...computeCeiling({
+        uplinkMbps: this.uplinkMbps,
+        headroomRatio: this.headroomRatio,
+        viewers: last?.viewers ?? 0,
+        egressMbps: last?.egressMbps ?? 0,
+        renditions: base.renditions,
+      }),
+    };
   }
 
   getSnapshot(): CapacitySnapshot {
@@ -91,6 +141,13 @@ export class CapacityService {
     const egressMbps = last?.egressMbps ?? 0;
 
     return {
+      period: 'hour',
+      streamKey: null,
+      streams: this.demo
+        ? demoStreams(viewers, egressMbps)
+        : [...this.collector.byStream()]
+            .map(([streamKey, load]) => ({ streamKey, ...load }))
+            .sort((a, b) => b.egressMbps - a.egressMbps),
       uplinkMbps: this.uplinkMbps,
       headroomRatio: this.headroomRatio,
       viewers,
