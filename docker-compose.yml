@@ -79,6 +79,12 @@ services:
     volumes:
       - recordings_data:/recordings
       - hls_data:/hls
+      # Лог nginx для метрик ёмкости — только на чтение. Том общий с ВНЕШНИМ
+      # стеком nginx: создаёт его ЭТОТ стек, а nginx подключается к готовому
+      # (см. docs/capacity-metrics-setup.md). Наоборот делать нельзя — том с
+      # external:true, которого ещё нет, уронил бы автодеплой прода.
+      # Пока nginx в него не пишет, метрики отдачи нулевые; ничего не ломается.
+      - nginx_logs:/var/log/nginx:ro
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       API_PORT: 3001
@@ -200,3 +206,7 @@ volumes:
   recordings_data:
   hls_data:
   minio_data:
+  # Общий с внешним стеком nginx: nginx пишет лог, api читает. Полное имя тома
+  # в docker — `<имя проекта>_nginx_logs`; именно его нужно подключить к nginx
+  # как external, см. docs/capacity-metrics-setup.md.
+  nginx_logs:
