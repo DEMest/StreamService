@@ -68,13 +68,15 @@ export class CapacityService {
   private readonly headroomRatio = Number(process.env.CAPACITY_HEADROOM) || DEFAULT_HEADROOM;
   private readonly demo = process.env.CAPACITY_DEMO === 'true';
 
-  /**
-   * Читатель железа держит предыдущий замер ради дельты, поэтому живёт вместе
-   * с сервисом, а не создаётся на каждый запрос.
-   */
-  private readonly host = new HostMetricsReader();
-
-  constructor(private readonly collector: CapacityCollectorService) {
+  constructor(
+    private readonly collector: CapacityCollectorService,
+    /**
+     * Читатель железа один на приложение (см. модуль): он хранит предыдущий
+     * замер ради дельты, и второй экземпляр делил бы интервал, занижая
+     * загрузку процессора.
+     */
+    private readonly host: HostMetricsReader,
+  ) {
     // Первый замер сразу: он задаёт базу для дельты, иначе самый первый
     // открытый экран показал бы «загрузка неизвестна».
     this.host.read();

@@ -1,3 +1,4 @@
+import { Injectable } from '@nestjs/common';
 import * as fs from 'fs';
 import * as os from 'os';
 
@@ -167,6 +168,7 @@ function diskUsage(): HostDisk[] {
  * предыдущий замер. Первый вызов честно отдаёт null вместо нуля: «мы ещё не
  * знаем» и «нагрузки нет» на экране должны выглядеть по-разному.
  */
+@Injectable()
 export class HostMetricsReader {
   private prevCpu: CpuTotals | null = null;
   private prevNet: (NetTotals & { at: number }) | null = null;

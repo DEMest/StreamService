@@ -161,3 +161,58 @@ model Feedback {
 
   @@index([status, createdAt])
 }
+
+/// Минутный срез нагрузки. Час живой истории лежит в памяти API; сюда уезжает
+/// усреднение за минуту, чтобы турниры можно было сравнивать между собой —
+/// без этого «потолок по зрителям» невозможно ни подтвердить, ни оспорить.
+model CapacitySample {
+  id String @id @default(cuid())
+
+  /// Начало минуты, к которой относится срез.
+  at DateTime
+  /// `<orgSlug>/<streamSlug>`; пустая строка — агрегат по всему серверу.
+  /// Именно пустая строка, а не NULL: в Postgres NULL не равен NULL, и
+  /// уникальный индекс не удержал бы от дублей серверный срез — тот самый,
+  /// который пишется каждую минуту.
+  streamKey String @default("")
+
+  viewers       Int
+  egressMbps    Float
+  cacheHitRatio Float
+  errorRate     Float
+  /// Доля зрителей с подвисаниями за минуту.
+  stallShare    Float
+  /// 95-й перцентиль загрузки фрагмента, мс. Среднее здесь врёт: оно
+  /// размазывает страдания худших зрителей по всем остальным.
+  fragLoadP95   Int?
+  /// Распределение зрителей по ступеням: { "hd": 12, "p720": 40, ... }
+  renditionMix  Json
+
+  cpuUsage    Float?
+  memoryUsage Float?
+  netTxMbps   Float?
+
+  @@unique([at, streamKey])
+  @@index([at])
+  @@index([streamKey, at])
+}
+
+/// Отрезок времени, когда что-то шло не так. Открывается и закрывается
+/// детектором; хранится в базе, чтобы «моменты падения» переживали перезапуск
+/// API — иначе о ночном инциденте никто бы не узнал.
+model CapacityIncident {
+  id        String    @id @default(cuid())
+  /// 'uplink' | 'encode' | 'errors' | 'stalls' | 'offline'
+  kind      String
+  /// 'warn' | 'crit'
+  severity  String
+  title     String
+  startedAt DateTime
+  /// NULL — инцидент ещё длится.
+  endedAt   DateTime?
+  /// Человекочитаемый пик: «87% канала», «speed 0.86».
+  peak      String
+
+  @@index([startedAt])
+  @@index([kind, endedAt])
+}
