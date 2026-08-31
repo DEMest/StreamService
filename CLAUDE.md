@@ -263,18 +263,29 @@ Copy `.env.example` to `.env`. One compose file serves both prod and a test stan
   `MAIL_FROM`, `MAIL_TO` — feedback-form notification email (`MailService`,
   `apps/api/src/notify/mail.service.ts`). Empty `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS`/`MAIL_TO` — feedback
   still saved to `/admin/feedback`, no email sent. `~/ops/notify.py` (server-side,
-  outside the repo — sends deploy notifications) reads the same variable names
-  from its own `~/ops/notify.env`, not from this `.env`.
-- `MAIL_DOMAIN` (default `liga-live.ru`), `MAIL_HOSTNAME` (default
-  `relay.liga-live.ru`), `DKIM_SELECTOR` (default `mail`) — config for the
-  self-hosted outbound-only SMTP relay (`postfix` service, `infra/postfix/`).
-  `SMTP_USER` for this relay must be an email on `MAIL_DOMAIN` (e.g.
-  `notify@liga-live.ru`) — the relay's SASL realm is `MAIL_DOMAIN`, and a
-  mismatched domain in `SMTP_USER` fails auth with `535`.
-- `SMTP_RELAY_PORT` (default `2587`) — host-side (`127.0.0.1` only, like
-  `MINIO_API_PORT`) port mapping to the `postfix` relay's submission port, so
-  `~/ops/notify.py` on the host (outside the docker network) can also send
-  through it.
+  outside the repo — шлёт письма о выкатке и недельный отчёт о состоянии
+  сервера) reads the same variable names from its own `~/ops/notify.env`, not
+  from this `.env`; на сервере обе конфигурации держат один и тот же ящик.
+
+  **Почта домена живёт на почтовом хостинге регистратора — своего MTA в стеке
+  нет.** Здесь был `postfix`-релей (`infra/postfix/`), и его убрали: у домена
+  уже стоял MX на хостинг, а с ним готовые DKIM и DMARC и прогретая репутация
+  отправляющего IP. Свой релей потребовал бы PTR-записи, открытого исходящего
+  25 порта (провайдеры режут его по умолчанию) и собственного приёма входящей —
+  всё это ради нескольких служебных писем в день. Рабочие значения:
+  `SMTP_HOST=mail.hosting.reg.ru`, `SMTP_PORT=587` (STARTTLS; `465` — SSL,
+  тогда `SMTP_SECURE=true`), `SMTP_USER` и `MAIL_FROM` — **полный** адрес
+  ящика (`notify@liga-live.ru`): логином служит адрес целиком, не локальная
+  часть.
+
+  Пароль ящика лежит в `.env`, который разбирает docker compose, поэтому в нём
+  **не должно быть `$` и `#`** — первый читается как подстановка переменной,
+  второй начинает комментарий, и пароль тихо приедет обрезанным.
+
+  Публичный контакт домена — `info@liga-live.ru` (псевдонимы `postmaster@`,
+  `abuse@`, `support@` ведут туда же). Он стоит в правовых документах
+  (`apps/web/src/lib/legal.ts`), а копии писем пересылаются на личную почту
+  владельца. Настраивается это в панели хостинга, в репозитории следов нет.
 - `SITE_URL` — публичный адрес сайта (`https://liga-live.ru`). Нужен трём
   вещам: ссылка в письме обратной связи, абсолютные URL в
   sitemap/robots/canonical и пинг поисковикам. Единственная переменная,
