@@ -14,7 +14,6 @@ describe('QoeService', () => {
     clientId,
     rendition: 'p720',
     stalls: 0,
-    stallMs: 0,
     fragLoadMs: 100,
     ...over,
   }) as Parameters<QoeService['ingest']>[0];

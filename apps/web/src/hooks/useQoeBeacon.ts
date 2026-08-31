@@ -15,6 +15,16 @@ export interface QoeBeacon {
   onQuality: (rendition: string | null) => void;
   /** Фрагмент догрузился за столько миллисекунд. */
   onFragLoad: (ms: number) => void;
+  /**
+   * Признак жизни от плеера, который не умеет сообщать про фрагменты.
+   *
+   * Нативный HLS в Safari (весь iOS) не даёт ни событий загрузки фрагментов,
+   * ни списка уровней — а его зрители потребляют канал наравне со всеми. Без
+   * этого сигнала они бы не попадали в счётчик, и «вес среднего зрителя»
+   * оказался бы завышен ровно на их долю: потолок занижался бы тем сильнее,
+   * чем мобильнее зал.
+   */
+  onAlive: () => void;
 }
 
 /**
@@ -40,26 +50,25 @@ export function useQoeBeacon({
 }): QoeBeacon {
   const clientId = useRef(Math.random().toString(36).slice(2) + Date.now().toString(36));
   const stalls = useRef(0);
-  const stallMs = useRef(0);
-  const stallStartedAt = useRef<number | null>(null);
   const rendition = useRef<string | null>(null);
   const fragLoads = useRef<number[]>([]);
+  /** Плеер шевелился в текущем интервале — хотя бы просто продвигал время. */
+  const alive = useRef(false);
 
   const onStall = useCallback(() => {
     stalls.current += 1;
-    // Начало отсчёта длительности: конец засчитается, когда доедет фрагмент.
-    if (stallStartedAt.current === null) stallStartedAt.current = Date.now();
   }, []);
 
   const onQuality = useCallback((name: string | null) => {
     rendition.current = name;
   }, []);
 
+  const onAlive = useCallback(() => {
+    alive.current = true;
+  }, []);
+
   const onFragLoad = useCallback((ms: number) => {
-    if (stallStartedAt.current !== null) {
-      stallMs.current += Date.now() - stallStartedAt.current;
-      stallStartedAt.current = null;
-    }
+    alive.current = true;
     fragLoads.current.push(ms);
   }, []);
 
@@ -69,13 +78,12 @@ export function useQoeBeacon({
     const timer = setInterval(() => {
       const loads = fragLoads.current;
 
-      // Молчим, если за интервал не догрузилось ни одного фрагмента.
-      // Открытая вкладка с остановленным видео канал не ест, и считать её
-      // зрителем — значит вернуться к подсчёту вкладок, от которого мы и
-      // уходили. Плеер на паузе добирает буфер и замолкает сам через минуту.
-      if (loads.length === 0) {
+      // Молчим, если плеер за интервал не подавал признаков жизни. Открытая
+      // вкладка с остановленным видео канал не ест, и считать её зрителем —
+      // значит вернуться к подсчёту вкладок, от которого мы и уходили. Плеер
+      // на паузе добирает буфер и замолкает сам через минуту.
+      if (!alive.current) {
         stalls.current = 0;
-        stallMs.current = 0;
         return;
       }
 
@@ -84,15 +92,18 @@ export function useQoeBeacon({
         clientId: clientId.current,
         rendition: rendition.current,
         stalls: stalls.current,
-        stallMs: stallMs.current,
-        fragLoadMs: Math.round(loads.reduce((a, b) => a + b, 0) / loads.length),
+        // Нативный плеер времени загрузки фрагмента не сообщает — тогда null,
+        // а не выдуманный ноль: перцентиль обязан считаться по тем, кто его
+        // действительно измерил.
+        fragLoadMs:
+          loads.length > 0 ? Math.round(loads.reduce((a, b) => a + b, 0) / loads.length) : null,
       });
 
       // Счётчики обнуляются сразу: интервал закрыт, что бы дальше ни случилось
       // с самой отправкой.
       stalls.current = 0;
-      stallMs.current = 0;
       fragLoads.current = [];
+      alive.current = false;
 
       // keepalive: вкладку могут закрыть ровно в момент отправки, и обычный
       // запрос отменился бы вместе с ней.
@@ -110,5 +121,5 @@ export function useQoeBeacon({
     return () => clearInterval(timer);
   }, [orgSlug, streamSlug, enabled]);
 
-  return { onStall, onQuality, onFragLoad };
+  return { onStall, onQuality, onFragLoad, onAlive };
 }

@@ -1,4 +1,5 @@
 import { CapacityIncident, CapacityPoint, RenditionShare } from './capacity.types';
+import { LADDER } from './ladder';
 
 /**
  * Синтетические данные для стенда.
@@ -12,18 +13,6 @@ import { CapacityIncident, CapacityPoint, RenditionShare } from './capacity.type
  * подсунуть выдуманный потолок хуже, чем не показать никакого.
  */
 
-/**
- * Ступени лесенки. `key` — это ИМЯ КАТАЛОГА, который создаёт
- * `infra/mediamtx/on-ready.sh`, а не произвольная метка: по нему разбирается
- * путь сегмента в логе nginx. Разъехавшись с каталогами, разбор молча
- * перестанет узнавать качества, и микс схлопнется в «неизвестно».
- */
-export const LADDER: Array<Omit<RenditionShare, 'viewers' | 'share'>> = [
-  { key: 'hd', label: 'Оригинал', bitrateMbps: 6.5 },
-  { key: 'p720', label: '720p', bitrateMbps: 3.0 },
-  { key: 'p480', label: '480p', bitrateMbps: 1.4 },
-  { key: 'p240', label: '240p', bitrateMbps: 0.5 },
-];
 
 /** Шаг точки на графике. 30 с × 120 = час истории. */
 const STEP_MS = 30_000;

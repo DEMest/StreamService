@@ -1,9 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { CapacityPeriod, CapacityPoint, CapacitySnapshot, RenditionShare } from './capacity.types';
 import { CapacityStoreService } from './capacity-store.service';
-import { LADDER, demoHistory, demoIncidents, demoStreams, egressOf, mixAt } from './demo-source';
+import { demoHistory, demoIncidents, demoStreams, mixAt } from './demo-source';
+import { LADDER } from './ladder';
 import { HostMetricsReader } from './host-metrics';
 import { CapacityCollectorService } from './capacity-collector.service';
+import { StatsService } from '../stats/stats.service';
 
 /** Ширина канала сервера. Единственное число, которое неоткуда измерить — его задаёт человек. */
 const DEFAULT_UPLINK_MBPS = 750;
@@ -70,8 +72,6 @@ export function computeCeiling(input: {
  */
 @Injectable()
 export class CapacityService {
-  private readonly logger = new Logger(CapacityService.name);
-
   private readonly uplinkMbps = Number(process.env.UPLINK_MBPS) || DEFAULT_UPLINK_MBPS;
   private readonly headroomRatio = Number(process.env.CAPACITY_HEADROOM) || DEFAULT_HEADROOM;
   private readonly demo = process.env.CAPACITY_DEMO === 'true';
@@ -85,6 +85,8 @@ export class CapacityService {
      */
     private readonly host: HostMetricsReader,
     private readonly store: CapacityStoreService,
+    /** StatsModule глобальный — импорт модуля здесь не нужен. */
+    private readonly stats: StatsService,
   ) {
     // Первый замер сразу: он задаёт базу для дельты, иначе самый первый
     // открытый экран показал бы «загрузка неизвестна».
@@ -163,7 +165,7 @@ export class CapacityService {
       health: {
         cacheHitRatio: last?.cacheHitRatio ?? 0,
         errorRate: last?.errorRate ?? 0,
-        encodeSpeed: this.demo ? 0.99 : null,
+        encodeSpeed: this.demo ? 0.99 : this.stats.worstEncodeSpeed(),
         stallRatio: last?.stallRatio ?? 0,
       },
       host: this.host.read(),
@@ -203,7 +205,4 @@ export class CapacityService {
     // оперативном снимке, и тянуть её сюда значило бы замкнуть граф зависимостей.
     return { history, renditions: this.collector.renditions(), incidents: [] };
   }
-
-  /** Экспортируется ради тестов и будущего сбора: вес микса → отдача. */
-  static egressOf = egressOf;
 }

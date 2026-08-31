@@ -27,7 +27,7 @@ export interface CapacityPoint {
 
 /** Сколько зрителей сидит на каждой ступени лесенки качеств. */
 export interface RenditionShare {
-  /** Каталог FFmpeg-рендишена: 'hd' | '720' | '480' | '240'. */
+  /** Каталог рендишена, как его создаёт on-ready.sh: hd | p720 | p480 | p240. */
   key: string;
   /** Человеческое имя из master.m3u8 («Оригинал», «720p», …). */
   label: string;
@@ -43,9 +43,9 @@ export interface CapacityIncident {
   id: string;
   /**
    * uplink — канал занят выше порога; encode — FFmpeg не успевает;
-   * errors — всплеск 4xx/5xx; stalls — зрителям плохо; offline — эфир оборвался.
+   * errors — всплеск 4xx/5xx; stalls — зрителям плохо.
    */
-  kind: 'uplink' | 'encode' | 'errors' | 'stalls' | 'offline';
+  kind: 'uplink' | 'encode' | 'errors' | 'stalls';
   severity: 'warn' | 'crit';
   title: string;
   startedAt: number;

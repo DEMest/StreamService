@@ -49,7 +49,6 @@ export class QoeController {
       clientId,
       rendition: body?.rendition ? String(body.rendition).slice(0, 16) : null,
       stalls: num(body?.stalls, MAX_STALLS),
-      stallMs: num(body?.stallMs, MAX_MS),
       fragLoadMs: body?.fragLoadMs != null ? num(body.fragLoadMs, MAX_MS) : null,
     });
   }

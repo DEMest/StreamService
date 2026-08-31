@@ -15,6 +15,8 @@ interface PropsBase {
   onStall?: () => void;
   /** Фрагмент догрузился за столько миллисекунд. Для метрик ёмкости. */
   onFragLoad?: (ms: number) => void;
+  /** Признак жизни от нативного плеера, который про фрагменты не сообщает. */
+  onAlive?: () => void;
   /**
    * Сменилась ступень лесенки: имя каталога (`hd`, `p720`…) из адреса уровня.
    * Именно каталог, а не подпись из плейлиста: по нему считается вес зрителя.
@@ -86,6 +88,56 @@ function renditionOf(levelUrl: string | undefined): string | null {
   return parts.length >= 2 ? parts[parts.length - 2] || null : null;
 }
 
+/**
+ * Ступень лесенки по высоте кадра — единственный способ узнать качество у
+ * нативного плеера Safari, который списка уровней не отдаёт. Границы взяты с
+ * запасом вниз: важно не перепутать соседние ступени, а точную высоту
+ * кодировщик может слегка менять.
+ */
+function renditionByHeight(height: number): string | null {
+  if (!height) return null;
+  if (height >= 900) return 'hd';
+  if (height >= 620) return 'p720';
+  if (height >= 380) return 'p480';
+  return 'p240';
+}
+
+/**
+ * Телеметрия для нативного HLS. Возвращает функцию отписки.
+ *
+ * `timeupdate` срабатывает несколько раз в секунду при воспроизведении и
+ * молчит на паузе — ровно то определение «зритель ест канал», которое нам и
+ * нужно. `waiting` означает опустевший буфер, то есть видимый рывок.
+ */
+function attachNativeTelemetry(
+  video: HTMLVideoElement,
+  handlers: {
+    onAlive?: () => void;
+    onStall?: () => void;
+    onRendition?: (rendition: string | null) => void;
+  },
+): () => void {
+  let lastRendition: string | null = null;
+
+  const onTime = () => {
+    handlers.onAlive?.();
+    const next = renditionByHeight(video.videoHeight);
+    if (next !== lastRendition) {
+      lastRendition = next;
+      handlers.onRendition?.(next);
+    }
+  };
+  const onWaiting = () => handlers.onStall?.();
+
+  video.addEventListener('timeupdate', onTime);
+  video.addEventListener('waiting', onWaiting);
+
+  return () => {
+    video.removeEventListener('timeupdate', onTime);
+    video.removeEventListener('waiting', onWaiting);
+  };
+}
+
 function arrSig(arr: string[]): string {
   return arr.join('');
 }
@@ -101,6 +153,7 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
     onQualityChange,
     onStall,
     onFragLoad,
+    onAlive,
     onRendition,
   } = props;
 
@@ -221,6 +274,7 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
     if (!compositeUrl) return;
 
     let hls: Hls | null = null;
+    let nativeCleanup: (() => void) | null = null;
 
     if (isArchive) {
       if (Hls.isSupported()) {
@@ -338,8 +392,21 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
         onMutedFallback?.();
         video.play().catch(() => {});
       });
+
+      // Телеметрия для нативного HLS (весь iOS). Событий загрузки фрагментов и
+      // списка уровней Safari не даёт, поэтому берём то, что есть: движение
+      // времени как признак жизни, `waiting` как подвисание и высоту кадра как
+      // ступень лесенки — при переключении качества Safari меняет videoHeight.
+      // Без этого зрители с iPhone потребляли бы канал, не попадая в счётчик,
+      // и потолок занижался бы тем сильнее, чем мобильнее зал.
+      nativeCleanup = attachNativeTelemetry(video, {
+        onAlive,
+        onStall,
+        onRendition,
+      });
     }
     return () => {
+      nativeCleanup?.();
       hls?.destroy();
       primaryHlsRef.current = null;
     };

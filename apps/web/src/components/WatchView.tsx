@@ -356,6 +356,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
         onQualityChange={setActiveQuality}
         onStall={qoe.onStall}
         onFragLoad={qoe.onFragLoad}
+        onAlive={qoe.onAlive}
         onRendition={qoe.onQuality}
       />
     );

@@ -93,6 +93,22 @@ describe('CapacityAlertsService', () => {
     expect(mail.send.mock.calls[0][1]).toContain('7 мин');
   });
 
+  it('в демо-режиме не открывает инцидентов и не шлёт уведомлений', async () => {
+    const old = process.env.CAPACITY_DEMO;
+    process.env.CAPACITY_DEMO = 'true';
+    try {
+      const svc = make();
+      await svc.check();
+      await svc.check();
+      await svc.check();
+      expect(prisma.capacityIncident.create).not.toHaveBeenCalled();
+      expect(mail.send).not.toHaveBeenCalled();
+      expect(telegram.send).not.toHaveBeenCalled();
+    } finally {
+      process.env.CAPACITY_DEMO = old;
+    }
+  });
+
   it('сбой записи в базу не выбрасывает наружу', async () => {
     prisma.capacityIncident.create.mockRejectedValue(new Error('база недоступна'));
     capacity.getSnapshot.mockReturnValue({ utilization: 0.9, health: { encodeSpeed: 1.0 } });

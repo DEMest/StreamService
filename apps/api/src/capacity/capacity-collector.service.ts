@@ -1,6 +1,6 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { CapacityPoint, RenditionShare } from './capacity.types';
-import { LADDER } from './demo-source';
+import { LADDER } from './ladder';
 import { LogTailer } from './log-tailer';
 import { parseAccessLogLine } from './nginx-log';
 import { QoeService } from './qoe.service';

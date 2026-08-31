@@ -1,4 +1,4 @@
-import { LADDER } from './demo-source';
+import { LADDER } from './ladder';
 
 /**
  * Разбор строки access-лога nginx.

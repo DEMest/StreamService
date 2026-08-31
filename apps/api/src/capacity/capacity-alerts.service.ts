@@ -26,6 +26,7 @@ const FEED_LIMIT = 20;
 export class CapacityAlertsService {
   private readonly logger = new Logger(CapacityAlertsService.name);
   private readonly detector = new IncidentDetector();
+  private readonly demo = process.env.CAPACITY_DEMO === 'true';
 
   constructor(
     private readonly prisma: PrismaService,
@@ -37,6 +38,11 @@ export class CapacityAlertsService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async check(): Promise<void> {
+    // Синтетическая нагрузка стенда не должна порождать настоящих инцидентов и
+    // настоящих писем. Демо-кривая специально доходит до перегруза — без этой
+    // проверки стенд молча рассылал бы тревоги о канале, которого нет.
+    if (this.demo) return;
+
     const history = this.collector.history();
     const last = history[history.length - 1];
     if (!last) return;

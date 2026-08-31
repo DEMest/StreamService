@@ -10,7 +10,6 @@ export interface QoeReport {
   clientId: string;
   rendition: string | null;
   stalls: number;
-  stallMs: number;
   fragLoadMs: number | null;
 }
 
