@@ -11,6 +11,17 @@ interface PropsBase {
   onTimeUpdate?: (current: number, duration: number, isLive: boolean, seekableStart: number) => void;
   onBuffering?: (isBuffering: boolean) => void;
   onQualityChange?: (levelIndex: number) => void;
+  /** Буфер опустел — зритель увидел рывок. Для метрик ёмкости. */
+  onStall?: () => void;
+  /** Фрагмент догрузился за столько миллисекунд. Для метрик ёмкости. */
+  onFragLoad?: (ms: number) => void;
+  /** Признак жизни от нативного плеера, который про фрагменты не сообщает. */
+  onAlive?: () => void;
+  /**
+   * Сменилась ступень лесенки: имя каталога (`hd`, `p720`…) из адреса уровня.
+   * Именно каталог, а не подпись из плейлиста: по нему считается вес зрителя.
+   */
+  onRendition?: (rendition: string | null) => void;
 }
 
 interface PropsLegacy extends PropsBase {
@@ -62,6 +73,71 @@ function drawContain(
 }
 
 /** Stable signature of a string array (order matters). */
+/**
+ * Каталог ступени из адреса её плейлиста: `…/live/hls/p720/index.m3u8` → `p720`.
+ *
+ * Берём именно каталог, а не подпись уровня из master.m3u8: подпись —
+ * человеческая («Оригинал», «720p») и может измениться, а каталог создаёт
+ * `on-ready.sh`, и по нему же считает вес зрителя серверная часть.
+ */
+function renditionOf(levelUrl: string | undefined): string | null {
+  if (!levelUrl) return null;
+  const path = levelUrl.split('?')[0];
+  const parts = path.split('/');
+  // Предпоследний сегмент — каталог, последний — сам index.m3u8.
+  return parts.length >= 2 ? parts[parts.length - 2] || null : null;
+}
+
+/**
+ * Ступень лесенки по высоте кадра — единственный способ узнать качество у
+ * нативного плеера Safari, который списка уровней не отдаёт. Границы взяты с
+ * запасом вниз: важно не перепутать соседние ступени, а точную высоту
+ * кодировщик может слегка менять.
+ */
+function renditionByHeight(height: number): string | null {
+  if (!height) return null;
+  if (height >= 900) return 'hd';
+  if (height >= 620) return 'p720';
+  if (height >= 380) return 'p480';
+  return 'p240';
+}
+
+/**
+ * Телеметрия для нативного HLS. Возвращает функцию отписки.
+ *
+ * `timeupdate` срабатывает несколько раз в секунду при воспроизведении и
+ * молчит на паузе — ровно то определение «зритель ест канал», которое нам и
+ * нужно. `waiting` означает опустевший буфер, то есть видимый рывок.
+ */
+function attachNativeTelemetry(
+  video: HTMLVideoElement,
+  handlers: {
+    onAlive?: () => void;
+    onStall?: () => void;
+    onRendition?: (rendition: string | null) => void;
+  },
+): () => void {
+  let lastRendition: string | null = null;
+
+  const onTime = () => {
+    handlers.onAlive?.();
+    const next = renditionByHeight(video.videoHeight);
+    if (next !== lastRendition) {
+      lastRendition = next;
+      handlers.onRendition?.(next);
+    }
+  };
+  const onWaiting = () => handlers.onStall?.();
+
+  video.addEventListener('timeupdate', onTime);
+  video.addEventListener('waiting', onWaiting);
+
+  return () => {
+    video.removeEventListener('timeupdate', onTime);
+    video.removeEventListener('waiting', onWaiting);
+  };
+}
+
 function arrSig(arr: string[]): string {
   return arr.join('');
 }
@@ -75,6 +151,10 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
     onTimeUpdate,
     onBuffering,
     onQualityChange,
+    onStall,
+    onFragLoad,
+    onAlive,
+    onRendition,
   } = props;
 
   // Resolve the array of source URLs in a uniform way.
@@ -194,6 +274,7 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
     if (!compositeUrl) return;
 
     let hls: Hls | null = null;
+    let nativeCleanup: (() => void) | null = null;
 
     if (isArchive) {
       if (Hls.isSupported()) {
@@ -248,6 +329,11 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
         onQualityChange?.(data.level);
+        onRendition?.(renditionOf(hls?.levels?.[data.level]?.url?.[0]));
+      });
+      hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => {
+        const ms = data.frag.stats.loading.end - data.frag.stats.loading.start;
+        if (Number.isFinite(ms) && ms >= 0) onFragLoad?.(Math.round(ms));
       });
       // Прыжок к живому краю: спасает от вечного стоп-кадра, когда буфер опустел
       // и нужный сегмент уже стёрт с сервера (плеер иначе ждёт его бесконечно).
@@ -280,6 +366,7 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
         // Застревание буфера у hls.js — НЕ фатально, но на живом стриме требует
         // прыжка к эфиру, иначе плеер молча стоит на месте.
         if (!isArchive && data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+          onStall?.();
           seekToLive();
           return;
         }
@@ -305,8 +392,21 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
         onMutedFallback?.();
         video.play().catch(() => {});
       });
+
+      // Телеметрия для нативного HLS (весь iOS). Событий загрузки фрагментов и
+      // списка уровней Safari не даёт, поэтому берём то, что есть: движение
+      // времени как признак жизни, `waiting` как подвисание и высоту кадра как
+      // ступень лесенки — при переключении качества Safari меняет videoHeight.
+      // Без этого зрители с iPhone потребляли бы канал, не попадая в счётчик,
+      // и потолок занижался бы тем сильнее, чем мобильнее зал.
+      nativeCleanup = attachNativeTelemetry(video, {
+        onAlive,
+        onStall,
+        onRendition,
+      });
     }
     return () => {
+      nativeCleanup?.();
       hls?.destroy();
       primaryHlsRef.current = null;
     };

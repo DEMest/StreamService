@@ -14,6 +14,7 @@ import { Header } from '@/components/Header';
 import { MobileSeekBar } from '@/components/MobileSeekBar';
 import { OrgAvatar } from '@/components/OrgAvatar';
 import { FeedbackButton } from '@/components/FeedbackButton';
+import { useQoeBeacon } from '@/hooks/useQoeBeacon';
 import {
   Eye, CornersOut, CornersIn,
   SpeakerHigh, SpeakerLow, SpeakerSlash,
@@ -99,6 +100,11 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
   const [qualityLevel, setQualityLevel] = useState(-1);
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const [activeQuality, setActiveQuality] = useState(-1);
+
+  // Телеметрия ёмкости: сколько плееров реально тянут эфир и не рвётся ли у
+  // них воспроизведение. Только для живого просмотра — архив раздаётся из S3
+  // и на канал сервера не влияет.
+  const qoe = useQoeBeacon({ orgSlug, streamSlug: streamSlug ?? '', enabled: true });
 
   const uiTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
   const matRef             = useRef<MatPlayerHandle>(null);
@@ -348,6 +354,10 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
         onTimeUpdate={handleTimeUpdate}
         onBuffering={setIsBuffering}
         onQualityChange={setActiveQuality}
+        onStall={qoe.onStall}
+        onFragLoad={qoe.onFragLoad}
+        onAlive={qoe.onAlive}
+        onRendition={qoe.onQuality}
       />
     );
   }

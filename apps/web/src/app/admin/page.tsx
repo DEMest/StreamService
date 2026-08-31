@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PublicLayout } from '@/components/PublicLayout';
-import { Plus, Trash, Prohibit, Warning, Tray, ChatText } from '@phosphor-icons/react';
+import { Plus, Trash, Prohibit, Warning, Tray, ChatText, Gauge } from '@phosphor-icons/react';
 
 interface Org { id: string; slug: string; name: string; isActive: boolean; createdAt: string }
 
@@ -40,6 +40,13 @@ export default function AdminPage() {
         <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
           <h1 className="text-xl font-semibold text-zinc-50 tracking-tight">Управление организациями</h1>
           <div className="flex items-center gap-2">
+            <Link
+              href="/admin/capacity"
+              className="flex items-center gap-2 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer no-underline"
+            >
+              <Gauge size={16} weight="bold" />
+              Ёмкость
+            </Link>
             <Link
               href="/admin/requests"
               className="flex items-center gap-2 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer no-underline"

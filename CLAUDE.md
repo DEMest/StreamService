@@ -147,6 +147,7 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 | `recording` | live + archive HLS serving, download | none (HLS) / org_admin JWT (download) |
 | `mediamtx` (webhook) | `/v1/internal/mediamtx/{auth,webhook}` | shared secret (`MEDIAMTX_WEBHOOK_SECRET`) |
 | `seo` | `/v1/public/seo/{sitemap,page-meta}` | none |
+| `capacity` | `/v1/admin/capacity` (ёмкость сервера), `/v1/public/qoe` (телеметрия плеера) | superadmin JWT / none |
 | `chat` | WebSocket `/chat` namespace | none |
 | `studio` | WebSocket `/studio` namespace | org_admin JWT cookie |
 | `thumbnail`, `contact`, `prisma` | (internal services) | — |
@@ -290,6 +291,23 @@ Copy `.env.example` to `.env`. One compose file serves both prod and a test stan
 - `GOOGLE_INDEXING_CREDENTIALS` — JSON сервис-аккаунта Google Cloud (как есть
   или в base64) для Indexing API. Пусто — Google узнаёт о новых страницах
   только из sitemap.xml, остальное продолжает работать.
+- `UPLINK_MBPS` — ширина исходящего канала сервера, Мбит/с (по умолчанию 750).
+  Единственное число во всей подсистеме метрик, которое неоткуда измерить: от
+  него считается и заполнение канала, и потолок по зрителям, поэтому ошибка
+  здесь смещает вывод о необходимости CDN целиком.
+- `CAPACITY_HEADROOM` — доля канала под ингест, чат и всплески (0.2). Потолок
+  считается от остатка.
+- `NGINX_LOG_PATH` — лог nginx, размеченный под метрики. Формат задан в
+  `apps/api/src/capacity/nginx-log.ts` (`CAPACITY_LOG_FORMAT`) и **обязан
+  совпадать** с `log_format capacity` в `infra/deploy/nginx-streamservice.conf`:
+  разъехавшись, они молча дадут нулевые метрики без единой ошибки. Том с логом
+  общий с внешним стеком nginx — разовая настройка описана в
+  `docs/capacity-metrics-setup.md`.
+- `CAPACITY_DEMO` — `true` подставляет на экран ёмкости синтетическую
+  нагрузку. Только для стенда: выдуманный потолок опаснее отсутствующего,
+  поэтому экран помечает такие данные.
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` — дублирование тревог об инцидентах
+  в телеграм. Пусто — уходят только письмом через SMTP.
 
 ## Frontend Design Skills
 

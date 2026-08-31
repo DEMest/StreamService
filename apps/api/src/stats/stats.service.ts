@@ -15,7 +15,8 @@ const PROGRESS_TAIL_BYTES = 4096;
 /** Ниже этого speed транскодер уже отстаёт настолько, что зритель видит рывки. */
 const SPEED_UNHEALTHY_BELOW = 0.95;
 
-const HLS_ROOT = '/hls';
+/** Корень HLS-вывода. Экспортируется: тот же том читают метрики ёмкости. */
+export const HLS_ROOT = '/hls';
 
 interface PathState {
   lastBytesReceived: number;
@@ -177,6 +178,29 @@ export class StatsService implements OnModuleDestroy {
     prev.lastBytesReceived = bytesReceived;
     prev.lastBytesSent = bytesSent;
     prev.lastSampleAt = now;
+  }
+
+  /**
+   * Худшая скорость кодирования среди путей в эфире. null — эфира нет либо
+   * FFmpeg ещё не отдал progress.
+   *
+   * Берётся минимум, а не среднее: если не успевает хотя бы один транскодер,
+   * его зрители уже видят рывки, и усреднение с благополучными путями просто
+   * спрятало бы это.
+   *
+   * Нужен метрикам ёмкости: без него плитка «Скорость кодирования» на экране
+   * показывала бы вечный прочерк, а правило инцидента по кодированию не могло
+   * бы сработать никогда.
+   */
+  worstEncodeSpeed(): number | null {
+    let worst: number | null = null;
+    for (const [name, st] of this.paths) {
+      if (!st.lastPath?.ready) continue;
+      const speed = this.readProgress(name)?.speed ?? null;
+      if (speed === null) continue;
+      if (worst === null || speed < worst) worst = speed;
+    }
+    return worst;
   }
 
   /**
