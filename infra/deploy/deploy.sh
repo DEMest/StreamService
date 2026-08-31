@@ -15,9 +15,6 @@
 #   ffmpeg ABR+запись — живут внутри mediamtx (runOnReady), не трогаются.
 #   postgres, minio   — не трогаем.
 #   api, web          — пересобираются и перезапускаются (~5 с).
-#   postfix           — вспомогательный SMTP-релей, собирается/поднимается
-#                       отдельно от api/web и никогда не фейлит деплой: его
-#                       поломка не должна блокировать срочный фикс api/web.
 #
 # Единственный видимый эффект: api сам отдаёт live-HLS, поэтому на время его
 # рестарта раздача встаёт. Сегменты по 2 с, окно плейлиста 80 с, nginx отдаёт
@@ -28,12 +25,6 @@ set -euo pipefail
 REPO="${REPO:-/home/rootuser/StreamService}"
 SERVICES="api web"          # собираем и метим для отката
 APP_SERVICES="api web"      # поднимаем обычным up; mediamtx идёт отдельно и раньше
-# postfix НЕ в SERVICES/APP_SERVICES: он вспомогательный (MailService сам
-# рассчитан на «не настроено — не беда»), и общая команда build/up на весь
-# список превратила бы его сбой (упавшая сборка, занятый SMTP_RELAY_PORT) в
-# fail()/rollback() всего деплоя — то есть срочный фикс api/web оказался бы
-# заблокирован поломкой почтового релея. Собирается и поднимается отдельно,
-# не фатально, см. ниже.
 HEALTH_URL="${HEALTH_URL:-https://liga-live.ru/api/v1/org/ingest-config}"
 SITE_URL="${SITE_URL:-https://liga-live.ru/}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-90}"
@@ -339,14 +330,6 @@ docker compose up -d --no-deps $APP_SERVICES || rollback
 if [ "$RESTART_MEDIAMTX" = "1" ]; then
   wait_paths_restored || { log "пути в mediamtx не восстановились"; rollback; }
 fi
-
-# postfix — вспомогательный SMTP-релей, никто от него не зависит (api его не
-# ждёт). Собираем/поднимаем отдельно от основного пути и никогда не роняем
-# из-за него деплой api/web: неудача тут — не повод откатывать рабочий эфир.
-log "сборка/подъём postfix (необязательно)"
-docker compose build postfix >/dev/null 2>&1 \
-  && docker compose up -d --no-deps postfix >/dev/null 2>&1 \
-  || log "::warning::postfix не собрался/не поднялся — уведомления недоступны, на эфир не влияет"
 
 # ─────────────────────────────────────────────────────────────────────────
 # 5. Health-gate: ждём, пока API снова отвечает через edge-nginx
