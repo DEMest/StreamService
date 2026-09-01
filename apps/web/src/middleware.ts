@@ -1,9 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const PROTECTED_PATHS = ['/dashboard', '/admin'];
+/**
+ * Кому принадлежит раздел. Дублирует `@Roles(...)` на бэкенде намеренно:
+ * гвард вернёт 403 на запросы к API, но страницу это не остановит — админ
+ * организации до сих пор мог открыть /admin и смотреть на пустой каркас,
+ * который сыплет 403 в консоль. Роль решается здесь, до рендера.
+ */
+const SECTION_ROLE: Record<string, string> = {
+  '/admin': 'superadmin',
+  '/dashboard': 'org_admin',
+};
 
-function isProtected(pathname: string): boolean {
-  return PROTECTED_PATHS.some((p) => pathname.startsWith(p));
+function sectionFor(pathname: string): string | null {
+  return Object.keys(SECTION_ROLE).find((p) => pathname.startsWith(p)) ?? null;
+}
+
+/**
+ * Куда уводить того, кто попал в чужой раздел. Суперадмин отправляется на
+ * главную, а не в /admin: на основном домене админки нет (её отдаёт только
+ * admin.liga-live.ru), и редирект туда упёрся бы в 404 от nginx.
+ */
+function homeForRole(role: string): string {
+  return role === 'org_admin' ? '/dashboard' : '/';
+}
+
+/**
+ * Ответ с учётом роли: чужой раздел — редирект, свой — проход дальше.
+ * Роль неизвестна (payload не разобрался) — пускаем: решение остаётся за API,
+ * который в любом случае проверит её сам.
+ */
+function responseForRole(
+  payload: Record<string, unknown> | null,
+  section: string,
+  req: NextRequest,
+): NextResponse {
+  const role = typeof payload?.role === 'string' ? payload.role : null;
+  if (role && role !== SECTION_ROLE[section]) {
+    return NextResponse.redirect(new URL(homeForRole(role), req.url));
+  }
+  return NextResponse.next();
+}
+
+/** Достаёт свежий access-токен из заголовков Set-Cookie ответа /auth/refresh. */
+function accessFromSetCookie(cookies: string[]): string | undefined {
+  for (const cookie of cookies) {
+    const match = /(?:^|;\s*)access_token=([^;]+)/.exec(cookie);
+    if (match) return match[1];
+  }
+  return undefined;
 }
 
 function base64UrlToBytes(input: string): Uint8Array<ArrayBuffer> {
@@ -63,14 +107,16 @@ async function verifyAccessToken(token: string | undefined): Promise<Record<stri
 }
 
 export async function middleware(req: NextRequest) {
-  if (!isProtected(req.nextUrl.pathname)) return NextResponse.next();
+  const section = sectionFor(req.nextUrl.pathname);
+  if (!section) return NextResponse.next();
 
   const access = req.cookies.get('access_token')?.value;
   const refresh = req.cookies.get('refresh_token')?.value;
 
   // 1) Действующий access — пускаем сразу, без обращения к API.
-  if (await verifyAccessToken(access)) {
-    return NextResponse.next();
+  const payload = await verifyAccessToken(access);
+  if (payload) {
+    return responseForRole(payload, section, req);
   }
 
   // 2) Access истёк/отсутствует, но есть refresh — продлеваем сессию серверным
@@ -88,9 +134,14 @@ export async function middleware(req: NextRequest) {
         headers: { cookie: `refresh_token=${refresh}` },
       });
       if (apiRes.ok) {
-        const res = NextResponse.next();
         const headers = apiRes.headers as Headers & { getSetCookie?: () => string[] };
         const setCookies = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : [];
+        // Роль берём из свежего токена: иначе истёкший access давал бы обход
+        // проверки — раздел открывался бы любому, у кого жив refresh.
+        const fresh = await verifyAccessToken(accessFromSetCookie(setCookies));
+        // Продлённую сессию отдаём и вместе с редиректом: иначе следующая
+        // навигация снова пошла бы за refresh.
+        const res = responseForRole(fresh, section, req);
         for (const cookie of setCookies) res.headers.append('set-cookie', cookie);
         return res;
       }

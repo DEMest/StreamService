@@ -157,6 +157,18 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 - Cookies: `access_token` (HttpOnly, 1h) + `refresh_token` (HttpOnly, 90d). `POST /v1/auth/refresh` rotates both. `JwtAuthGuard` reads the access cookie; `apps/web/src/lib/api.ts` auto-refreshes once on a 401 and otherwise redirects to `/login`.
 - `AuthService.login` tries `User` (superadmin) first, then `Organization` by slug (org_admin).
 - On HTTP test stands set `COOKIE_SECURE=false`, otherwise the browser drops the cookie and `/v1/org/me` returns 401.
+- **Админка суперадмина отвечает только на `admin.liga-live.ru`**, на основном
+  домене nginx отдаёт 404 на `/admin` и `/api/v1/admin/`. Это не украшение, а
+  единственный способ держать в одном браузере две сессии сразу: cookie
+  ставятся без атрибута `domain`, то есть host-only, и на разных именах живут
+  независимо. На одном домене второй вход просто перезаписывал бы первый.
+  Разделение целиком в `infra/deploy/nginx-streamservice.conf` — в
+  `docker-compose.yml` для него ничего нет (и не должно появиться: любая правка
+  compose тянет за собой перезапуск MediaMTX с разрывом ингеста).
+- `apps/web/src/middleware.ts` проверяет **роль**, а не только валидность
+  токена: `/admin` — суперадмин, `/dashboard` — организация, чужой раздел даёт
+  редирект. Иначе страница чужого раздела отрисовывалась бы каркасом, сыплющим
+  403 из API.
 
 ### Studio gateway + SlotState (`studio/`, `stream/slot-state.service.ts`)
 - `StudioGateway` (`/studio` namespace, org_admin only via JWT cookie) powers the streamer's live console. Client emits `join { streamId }`; server validates org ownership, joins room `studio:<streamId>`, sends a snapshot, then forwards live `slotState` events.
