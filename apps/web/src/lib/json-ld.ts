@@ -28,6 +28,16 @@ export function websiteJsonLd(site: string) {
         inLanguage: 'ru-RU',
         description:
           'Платформа прямых трансляций спортивных матчей и мероприятий: живой эфир, чат и архив записей.',
+        // Из этого Google строит строку поиска по сайту прямо в выдаче.
+        // Работает, только если /search?q= реально отвечает: адрес проверяют.
+        potentialAction: {
+          '@type': 'SearchAction',
+          target: {
+            '@type': 'EntryPoint',
+            urlTemplate: `${site}/search?q={search_term_string}`,
+          },
+          'query-input': 'required name=search_term_string',
+        },
       },
       {
         '@type': 'Organization',

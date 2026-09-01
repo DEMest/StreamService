@@ -4,7 +4,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/lib/api';
-import { Broadcast, SignIn, SignOut, Monitor, List, X, Buildings } from '@phosphor-icons/react';
+import { Broadcast, SignIn, SignOut, Monitor, List, X, Buildings, MagnifyingGlass } from '@phosphor-icons/react';
 import { FeedbackTrigger } from '@/components/FeedbackButton';
 import { FeedbackModal } from '@/components/FeedbackModal';
 
@@ -67,6 +67,18 @@ export function Header() {
             </Link>
           ))}
           <FeedbackTrigger variant="nav" onClick={() => setFeedbackOpen(true)} />
+          <Link
+            href="/search"
+            aria-label="Поиск"
+            title="Поиск"
+            className={`px-3 py-1.5 rounded-lg no-underline transition-colors flex items-center ${
+              isActive('/search')
+                ? 'text-zinc-50 bg-zinc-800/70'
+                : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/40'
+            }`}
+          >
+            <MagnifyingGlass size={18} weight="bold" />
+          </Link>
         </nav>
 
         {/* Desktop auth — right */}
@@ -145,6 +157,17 @@ export function Header() {
                 {link.label}
               </Link>
             ))}
+            <Link
+              href="/search"
+              onClick={() => setMenuOpen(false)}
+              className={`px-4 py-3 rounded-lg text-sm no-underline transition-colors ${
+                isActive('/search')
+                  ? 'text-zinc-50 bg-zinc-800/70 font-medium'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40'
+              }`}
+            >
+              Поиск
+            </Link>
 
             <FeedbackTrigger
               variant="menu"
