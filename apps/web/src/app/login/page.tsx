@@ -1,32 +1,10 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { Footer } from '@/components/Footer';
 import { Eye, EyeSlash, Warning, Broadcast, VideoCamera, ChatCircle, Archive } from '@phosphor-icons/react';
-
-const ADMIN_HOST_PREFIX = 'admin.';
-
-/**
- * Имя хоста, на котором на самом деле живёт раздел этой роли, либо null, если
- * менять адрес не нужно. Админка отвечает только на `admin.<домен>`, кабинет
- * организации — только на основном.
- *
- * Разъехались они ради cookie: те ставятся host-only, поэтому две роли могут
- * держать сессии одновременно, но и перенести уже выданную сессию на соседнее
- * имя нельзя — войти придётся там, где раздел живёт.
- *
- * Локальная разработка сюда не попадает: у `localhost` нет точки в имени, а
- * поддомена нет и подавно — оба раздела остаются на одном адресе.
- */
-function hostForRole(role: string, host: string): string | null {
-  if (!host.includes('.')) return null;
-  const onAdminHost = host.startsWith(ADMIN_HOST_PREFIX);
-  if (role === 'superadmin' && !onAdminHost) return ADMIN_HOST_PREFIX + host;
-  if (role !== 'superadmin' && onAdminHost) return host.slice(ADMIN_HOST_PREFIX.length);
-  return null;
-}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -35,13 +13,6 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [movedHost, setMovedHost] = useState(false);
-
-  // Метку о переезде читаем из адреса уже после гидрации: страница статическая,
-  // а useSearchParams потребовал бы оборачивать её в Suspense.
-  useEffect(() => {
-    setMovedHost(new URLSearchParams(window.location.search).has('moved'));
-  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,14 +20,6 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await api.post<{ role: string }>('/v1/auth/login', { login, password });
-      const target = hostForRole(res.role, window.location.host);
-      if (target) {
-        // Сессию на этом имени гасим: она бесполезна (раздел живёт на другом
-        // адресе), но шапка по ней предлагала бы ссылку в чужой раздел.
-        await api.post('/v1/auth/logout', {});
-        window.location.href = `https://${target}/login?moved=1`;
-        return;
-      }
       router.push(res.role === 'superadmin' ? '/admin' : '/dashboard');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Неверный логин или пароль');
@@ -171,13 +134,6 @@ export default function LoginPage() {
                     </button>
                   </div>
                 </div>
-
-                {movedHost && !error && (
-                  <div className="flex items-start gap-2 text-sm text-zinc-400 bg-zinc-400/5 border border-zinc-400/10 rounded-lg px-3 py-2.5">
-                    <Warning size={16} weight="fill" className="shrink-0 mt-0.5" />
-                    <span>Этот раздел живёт на другом адресе — мы вас сюда перевели. Войдите ещё раз: сессии на разных адресах независимы.</span>
-                  </div>
-                )}
 
                 {error && (
                   <div className="flex items-center gap-2 text-sm text-red-400 bg-red-400/5 border border-red-400/10 rounded-lg px-3 py-2.5">

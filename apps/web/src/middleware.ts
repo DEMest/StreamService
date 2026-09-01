@@ -16,12 +16,16 @@ function sectionFor(pathname: string): string | null {
 }
 
 /**
- * Куда уводить того, кто попал в чужой раздел. Суперадмин отправляется на
- * главную, а не в /admin: на основном домене админки нет (её отдаёт только
- * admin.liga-live.ru), и редирект туда упёрся бы в 404 от nginx.
+ * Куда уводить того, кто попал в чужой раздел — его собственный раздел.
+ * Считается из той же таблицы, а не задаётся вторым списком: разъехавшись, они
+ * отправляли бы человека ровно туда, откуда его только что развернули.
+ *
+ * Хост при этом не важен. Если суперадмин окажется на основном домене, `/admin`
+ * там встретит редирект nginx на admin.<домен> — топологию знает конфиг, а не
+ * приложение.
  */
 function homeForRole(role: string): string {
-  return role === 'org_admin' ? '/dashboard' : '/';
+  return Object.entries(SECTION_ROLE).find(([, r]) => r === role)?.[0] ?? '/';
 }
 
 /**
@@ -44,7 +48,9 @@ function responseForRole(
 /** Достаёт свежий access-токен из заголовков Set-Cookie ответа /auth/refresh. */
 function accessFromSetCookie(cookies: string[]): string | undefined {
   for (const cookie of cookies) {
-    const match = /(?:^|;\s*)access_token=([^;]+)/.exec(cookie);
+    // Имя cookie в Set-Cookie всегда стоит первым — искать его в середине
+    // строки незачем, там уже атрибуты (Path, HttpOnly, ...).
+    const match = /^access_token=([^;]+)/.exec(cookie);
     if (match) return match[1];
   }
   return undefined;
@@ -154,4 +160,8 @@ export async function middleware(req: NextRequest) {
   return NextResponse.redirect(new URL('/login', req.url));
 }
 
+// Второй список тех же разделов, и обойтись одним нельзя: Next.js читает
+// matcher статически на сборке, вычислить его из SECTION_ROLE не выйдет.
+// Добавляя раздел туда, добавь и сюда — иначе middleware для него просто не
+// запустится, молча и без ошибки сборки.
 export const config = { matcher: ['/dashboard/:path*', '/admin/:path*'] };
