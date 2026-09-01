@@ -13,6 +13,7 @@ import { ThumbnailModule } from './thumbnail/thumbnail.module';
 import { StreamModule } from './stream/stream.module';
 import { StatsModule } from './stats/stats.module';
 import { SeoModule } from './seo/seo.module';
+import { SearchModule } from './search/search.module';
 import { CapacityModule } from './capacity/capacity.module';
 
 @Module({
@@ -30,6 +31,7 @@ import { CapacityModule } from './capacity/capacity.module';
     StreamModule,
     StatsModule,
     SeoModule,
+    SearchModule,
     CapacityModule,
   ],
   controllers: [HealthController],
