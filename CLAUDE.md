@@ -157,6 +157,27 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 - Cookies: `access_token` (HttpOnly, 1h) + `refresh_token` (HttpOnly, 90d). `POST /v1/auth/refresh` rotates both. `JwtAuthGuard` reads the access cookie; `apps/web/src/lib/api.ts` auto-refreshes once on a 401 and otherwise redirects to `/login`.
 - `AuthService.login` tries `User` (superadmin) first, then `Organization` by slug (org_admin).
 - On HTTP test stands set `COOKIE_SECURE=false`, otherwise the browser drops the cookie and `/v1/org/me` returns 401.
+- **Админка суперадмина отвечает только на `admin.liga-live.ru`**: на основном
+  домене `/admin` уезжает 301-м на поддомен, а `/api/v1/admin` отдаёт 404. Это
+  не украшение, а единственный способ держать в одном браузере две сессии
+  сразу: cookie ставятся без атрибута `domain`, то есть host-only, и на разных
+  именах живут независимо. На одном домене второй вход просто перезаписывал бы
+  первый. Обратная сторона того же свойства: перенести уже выданную сессию на
+  соседнее имя нельзя. Суперадмин, вошедший на основном домене, доедет по
+  редиректу до админки, но войти ему придётся там ещё раз — это цена
+  разделения, а не недоработка. Клиентский код про хосты ничего не знает
+  намеренно: топология описана только в конфиге nginx.
+- **Исключение из правила «мерж = релиз»**: разделение живёт в
+  `infra/deploy/nginx-streamservice.conf`, а его `deploy.sh` не копирует и не
+  перезагружает. Пока конфиг не применён на сервере руками (порядок — в
+  `infra/deploy/DEPLOY.md`), мерж в этой части не меняет ничего. В
+  `docker-compose.yml` для поддомена нет ничего намеренно: любая правка compose
+  тянет за собой перезапуск MediaMTX с разрывом ингеста.
+- `apps/web/src/middleware.ts` проверяет **роль**, а не только валидность
+  токена: `/admin` — суперадмин, `/dashboard` — организация, чужой раздел даёт
+  редирект. Иначе страница чужого раздела отрисовывалась бы каркасом, сыплющим
+  403 из API. Он же знает про топологию хостов: суперадмина с `/dashboard`
+  уводит на `/`, а не в `/admin`, которого на этом имени нет.
 
 ### Studio gateway + SlotState (`studio/`, `stream/slot-state.service.ts`)
 - `StudioGateway` (`/studio` namespace, org_admin only via JWT cookie) powers the streamer's live console. Client emits `join { streamId }`; server validates org ownership, joins room `studio:<streamId>`, sends a snapshot, then forwards live `slotState` events.
@@ -183,7 +204,7 @@ iOS fullscreen captures the canvas via `captureStream(30)` into a temporary `<vi
 |-------|------|
 | `/` | Landing / public catalog of live orgs |
 | `/login` | Login (superadmin + org_admin) |
-| `/admin`, `/admin/requests` | Superadmin: orgs/users, contact requests |
+| `/admin`, `/admin/requests`, `/admin/feedback`, `/admin/capacity` | Superadmin: orgs/users, contact requests, feedback, ёмкость сервера. **Отвечают только на `admin.<домен>`** — на основном домене nginx уводит 301-м (см. раздел про cookie выше) |
 | `/dashboard` | Org dashboard (streams, events, broadcasts) |
 | `/dashboard/streams/[id]/studio` | Streamer Studio console (uses `/studio` WS) |
 | `/streams`, `/organizations`, `/archive` | Public listings |
