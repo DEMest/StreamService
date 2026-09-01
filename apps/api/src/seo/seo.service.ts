@@ -32,6 +32,16 @@ export interface SeoPageMeta {
     /** Начало текущего эфира — для BroadcastEvent в JSON-LD. */
     startedAt: string | null;
   } | null;
+  /**
+   * Путь к картинке, которая ТОЧНО отдаётся (200), или null.
+   *
+   * Считается на бэкенде, потому что только он знает, есть ли кадр эфира,
+   * загруженное превью или картинка организации. Раньше фронт всегда ставил
+   * `…/streams/<slug>/thumbnail`, а тот отдаёт 404, когда эфир не идёт и
+   * превью не загружали, — Google на это отвечал «не указан URL значка видео»
+   * и не индексировал ролик.
+   */
+  thumbnailPath: string | null;
   stats: {
     liveCount: number;
     finishedBroadcasts: number;
@@ -146,7 +156,15 @@ export class SeoService {
 
     const streams = await this.prisma.stream.findMany({
       where: { orgId: org.id, isPublic: true },
-      select: { id: true, slug: true, name: true, description: true, isLive: true, currentBroadcastId: true },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        description: true,
+        isLive: true,
+        currentBroadcastId: true,
+        previewImagePath: true,
+      },
     });
 
     const orgCard = {
@@ -192,12 +210,45 @@ export class SeoService {
             startedAt,
           }
         : null,
+      thumbnailPath: await this.resolveThumbnail(org.slug, org.imagePath, target),
       stats: {
         liveCount: streams.filter((s) => s.isLive).length,
         finishedBroadcasts: finished.count,
         lastBroadcastAt: finished.lastAt?.toISOString() ?? null,
       },
     };
+  }
+
+  /**
+   * Ищет картинку, которую точно отдаст сервер, в порядке убывания полезности:
+   * кадр идущего эфира → загруженное превью стрима → превью последней записи →
+   * картинка организации. Ничего нет — null, и тогда фронт не выдаёт ни
+   * `og:image`, ни VideoObject: разметка с недоступным значком хуже, чем её
+   * отсутствие, — Google из-за неё отказывается индексировать видео.
+   *
+   * Порядок именно такой: кадр эфира актуальнее статичного превью, а превью
+   * стрима относится к нему целиком, тогда как превью записи — к одному матчу.
+   */
+  private async resolveThumbnail(
+    orgSlug: string,
+    orgImagePath: string | null,
+    stream?: { id: string; slug: string; isLive: boolean; previewImagePath: string | null },
+  ): Promise<string | null> {
+    if (stream) {
+      const base = `/api/v1/public/orgs/${orgSlug}/streams/${stream.slug}`;
+      // Оба случая обслуживает один endpoint: в эфире он отдаёт кадр, вне —
+      // загруженное превью.
+      if (stream.isLive || stream.previewImagePath) return `${base}/thumbnail`;
+
+      const withPreview = await this.prisma.broadcast.findFirst({
+        where: { streamId: stream.id, previewImagePath: { not: null } },
+        orderBy: { startedAt: 'desc' },
+        select: { id: true },
+      });
+      if (withPreview) return `${base}/broadcasts/${withPreview.id}/preview`;
+    }
+
+    return orgImagePath ? `/api/v1/public/orgs/${orgSlug}/image` : null;
   }
 
   /**
@@ -288,6 +339,7 @@ function notFound(): SeoPageMeta {
     indexable: false,
     org: null,
     stream: null,
+    thumbnailPath: null,
     stats: { liveCount: 0, finishedBroadcasts: 0, lastBroadcastAt: null },
   };
 }
