@@ -47,7 +47,7 @@ export async function generateMetadata({ params }: { params: { orgSlug: string }
       title: live ? `${org.name} — прямой эфир` : `${org.name} — трансляции`,
       description,
       url: `/watch/${org.slug}`,
-      ...(org.hasImage ? { images: [`/api/v1/public/orgs/${org.slug}/image`] } : {}),
+      ...(meta.thumbnailPath ? { images: [meta.thumbnailPath] } : {}),
     },
     // Ключ robots добавляем ТОЛЬКО для noindex: явный undefined затёр бы
     // унаследованные из корня max-image-preview/max-video-preview, а без них

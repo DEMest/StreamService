@@ -53,7 +53,7 @@ export function orgPageJsonLd(site: string, meta: SeoPageMeta) {
         name: meta.org.name,
         url,
         ...(meta.org.description ? { description: meta.org.description } : {}),
-        ...(meta.org.hasImage ? { logo: `${site}/api/v1/public/orgs/${meta.org.slug}/image` } : {}),
+        ...(meta.thumbnailPath ? { logo: `${site}${meta.thumbnailPath}` } : {}),
       },
       breadcrumbs(site, [
         { name: 'Организации', path: '/organizations' },
@@ -75,12 +75,26 @@ export function streamPageJsonLd(site: string, meta: SeoPageMeta) {
   if (!meta.org || !meta.stream) return null;
 
   const { org, stream } = meta;
+  // Google требует у VideoObject доступный thumbnailUrl и без него отказывается
+  // индексировать ролик («не указан URL значка видео»). Если картинки нет —
+  // отдаём только хлебные крошки: неполная разметка честнее битой.
+  const thumbnail = meta.thumbnailPath ? `${site}${meta.thumbnailPath}` : null;
   const url = `${site}/watch/${org.slug}/${stream.slug}`;
   const title = stream.name || org.name;
   const description =
     stream.description ??
     org.description ??
     `Прямая трансляция «${title}» — организация ${org.name} на ${BRAND}.`;
+
+  const breadcrumb = breadcrumbs(site, [
+    { name: 'Трансляции', path: '/streams' },
+    { name: org.name, path: `/watch/${org.slug}` },
+    { name: title, path: `/watch/${org.slug}/${stream.slug}` },
+  ]);
+
+  if (!thumbnail) {
+    return { '@context': 'https://schema.org', '@graph': [breadcrumb] };
+  }
 
   return {
     '@context': 'https://schema.org',
@@ -91,7 +105,7 @@ export function streamPageJsonLd(site: string, meta: SeoPageMeta) {
         name: title,
         description,
         url,
-        thumbnailUrl: [`${site}/api/v1/public/orgs/${org.slug}/streams/${stream.slug}/thumbnail`],
+        thumbnailUrl: [thumbnail],
         // uploadDate обязателен для VideoObject: для живого эфира это его
         // начало, для оффлайн-страницы — дата последнего эфира.
         uploadDate: stream.startedAt ?? meta.stats.lastBroadcastAt ?? undefined,
@@ -110,11 +124,7 @@ export function streamPageJsonLd(site: string, meta: SeoPageMeta) {
           url: `${site}/watch/${org.slug}`,
         },
       },
-      breadcrumbs(site, [
-        { name: 'Трансляции', path: '/streams' },
-        { name: org.name, path: `/watch/${org.slug}` },
-        { name: title, path: `/watch/${org.slug}/${stream.slug}` },
-      ]),
+      breadcrumb,
     ],
   };
 }

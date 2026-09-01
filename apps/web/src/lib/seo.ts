@@ -85,6 +85,8 @@ export interface SeoPageMeta {
     isLive: boolean;
     startedAt: string | null;
   } | null;
+  /** Путь к картинке, которая точно отдаётся, или null (см. seo.service.ts). */
+  thumbnailPath: string | null;
   stats: { liveCount: number; finishedBroadcasts: number; lastBroadcastAt: string | null };
 }
 

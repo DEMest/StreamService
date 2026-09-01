@@ -26,6 +26,14 @@ export function GET(req: Request) {
     'Allow: /',
     'Disallow: /dashboard',
     'Disallow: /admin',
+    // Картинки живут под /api/, и без этих исключений Googlebot не может
+    // скачать превью: в отчёте о видео это выглядит как «не указан URL значка
+    // видео», и ролик не индексируется. Allow длиннее Disallow, поэтому
+    // выигрывает и у Google, и у Яндекса.
+    'Allow: /api/v1/public/orgs/*/image',
+    'Allow: /api/v1/public/orgs/*/streams/*/thumbnail',
+    'Allow: /api/v1/public/orgs/*/streams/*/broadcasts/*/preview',
+    'Allow: /api/v1/public/orgs/*/broadcasts/*/preview',
     'Disallow: /api/',
     'Disallow: /hls/',
     'Disallow: /static/',

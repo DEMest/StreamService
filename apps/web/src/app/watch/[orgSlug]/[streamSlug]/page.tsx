@@ -51,7 +51,9 @@ export async function generateMetadata({
       title: stream.isLive ? `${title} — прямой эфир` : title,
       description,
       url: `/watch/${org.slug}/${stream.slug}`,
-      images: [`/api/v1/public/orgs/${org.slug}/streams/${stream.slug}/thumbnail`],
+      // Только реальная картинка: путь к несуществующему превью в og:image
+      // даёт пустую карточку при шаринге и «значок недоступен» у Google.
+      ...(meta.thumbnailPath ? { images: [meta.thumbnailPath] } : {}),
     },
     // Только для noindex: явный undefined затёр бы унаследованные
     // max-image-preview/max-video-preview, а на них держится видео-сниппет.

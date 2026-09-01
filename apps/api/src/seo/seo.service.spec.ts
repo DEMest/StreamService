@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const mockPrisma = {
   stream: { findMany: jest.fn() },
   organization: { findFirst: jest.fn() },
-  broadcast: { groupBy: jest.fn(), aggregate: jest.fn(), findUnique: jest.fn() },
+  broadcast: { groupBy: jest.fn(), aggregate: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn() },
 };
 
 const NOW = new Date('2026-08-28T12:00:00.000Z');
@@ -146,6 +146,73 @@ describe('SeoService', () => {
       expect(meta).toMatchObject({ found: true, indexable: true });
       expect(meta.org).toMatchObject({ name: 'Лига', hasImage: true });
       expect(meta.stream).toMatchObject({ isLive: true, startedAt: startedAt.toISOString() });
+    });
+
+    describe('thumbnailPath — картинка, которая точно отдаётся', () => {
+      const org = { id: 'o1', slug: 'liga', name: 'Лига', description: null, imagePath: null };
+      const stream = {
+        id: 's1', slug: 'main', name: 'Корт', description: null,
+        isLive: false, currentBroadcastId: null, previewImagePath: null,
+      };
+
+      it('идёт эфир — кадр из эфира', async () => {
+        mockPrisma.organization.findFirst.mockResolvedValueOnce(org);
+        mockPrisma.stream.findMany.mockResolvedValueOnce([
+          { ...stream, isLive: true, currentBroadcastId: 'b1' },
+        ]);
+        mockPrisma.broadcast.aggregate.mockResolvedValueOnce({ _count: { _all: 1 }, _max: { endedAt: null } });
+        mockPrisma.broadcast.findUnique.mockResolvedValueOnce({ startedAt: new Date() });
+
+        const meta = await service.getPageMeta('liga', 'main');
+
+        expect(meta.thumbnailPath).toBe('/api/v1/public/orgs/liga/streams/main/thumbnail');
+        expect(mockPrisma.broadcast.findFirst).not.toHaveBeenCalled();
+      });
+
+      it('эфира нет, но есть загруженное превью стрима — тот же endpoint', async () => {
+        mockPrisma.organization.findFirst.mockResolvedValueOnce(org);
+        mockPrisma.stream.findMany.mockResolvedValueOnce([
+          { ...stream, previewImagePath: 'images/stream/s1.jpg' },
+        ]);
+        mockPrisma.broadcast.aggregate.mockResolvedValueOnce({ _count: { _all: 1 }, _max: { endedAt: new Date() } });
+
+        const meta = await service.getPageMeta('liga', 'main');
+
+        expect(meta.thumbnailPath).toBe('/api/v1/public/orgs/liga/streams/main/thumbnail');
+      });
+
+      it('своего превью нет — берётся превью последней записи', async () => {
+        mockPrisma.organization.findFirst.mockResolvedValueOnce(org);
+        mockPrisma.stream.findMany.mockResolvedValueOnce([stream]);
+        mockPrisma.broadcast.aggregate.mockResolvedValueOnce({ _count: { _all: 3 }, _max: { endedAt: new Date() } });
+        mockPrisma.broadcast.findFirst.mockResolvedValueOnce({ id: 'b7' });
+
+        const meta = await service.getPageMeta('liga', 'main');
+
+        expect(meta.thumbnailPath).toBe('/api/v1/public/orgs/liga/streams/main/broadcasts/b7/preview');
+      });
+
+      it('ни эфира, ни превью, ни записей — картинка организации', async () => {
+        mockPrisma.organization.findFirst.mockResolvedValueOnce({ ...org, imagePath: 'images/org/o1.jpg' });
+        mockPrisma.stream.findMany.mockResolvedValueOnce([stream]);
+        mockPrisma.broadcast.aggregate.mockResolvedValueOnce({ _count: { _all: 1 }, _max: { endedAt: new Date() } });
+        mockPrisma.broadcast.findFirst.mockResolvedValueOnce(null);
+
+        const meta = await service.getPageMeta('liga', 'main');
+
+        expect(meta.thumbnailPath).toBe('/api/v1/public/orgs/liga/image');
+      });
+
+      it('совсем ничего — null, чтобы не отдать битую ссылку в разметку', async () => {
+        mockPrisma.organization.findFirst.mockResolvedValueOnce(org);
+        mockPrisma.stream.findMany.mockResolvedValueOnce([stream]);
+        mockPrisma.broadcast.aggregate.mockResolvedValueOnce({ _count: { _all: 1 }, _max: { endedAt: new Date() } });
+        mockPrisma.broadcast.findFirst.mockResolvedValueOnce(null);
+
+        const meta = await service.getPageMeta('liga', 'main');
+
+        expect(meta.thumbnailPath).toBeNull();
+      });
     });
 
     it('организация без эфиров индексироваться не должна — то же решение, что и в sitemap', async () => {
