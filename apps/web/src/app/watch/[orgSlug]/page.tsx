@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { OrgOverview } from '@/components/OrgOverview';
 import { JsonLd } from '@/components/JsonLd';
 import { orgPageJsonLd } from '@/lib/json-ld';
-import { fetchPageMeta, siteUrlForPage } from '@/lib/seo';
+import { fetchPageMeta, ogImages, siteUrlForPage } from '@/lib/seo';
 
 /**
  * Обзор орги: список её публичных Stream'ов + опциональный режим совместного
@@ -47,7 +47,7 @@ export async function generateMetadata({ params }: { params: { orgSlug: string }
       title: live ? `${org.name} — прямой эфир` : `${org.name} — трансляции`,
       description,
       url: `/watch/${org.slug}`,
-      ...(meta.thumbnailPath ? { images: [meta.thumbnailPath] } : {}),
+      images: ogImages(meta.thumbnailPath),
     },
     // Ключ robots добавляем ТОЛЬКО для noindex: явный undefined затёр бы
     // унаследованные из корня max-image-preview/max-video-preview, а без них
