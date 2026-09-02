@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { DEFAULT_OG_IMAGE } from '@/lib/seo';
 
 export const metadata: Metadata = {
   title: 'Трансляции',
@@ -9,6 +10,7 @@ export const metadata: Metadata = {
     title: 'Трансляции в прямом эфире',
     description: 'Матчи и мероприятия, которые идут прямо сейчас.',
     url: '/streams',
+    images: [DEFAULT_OG_IMAGE],
   },
 };
 

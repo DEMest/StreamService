@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { DEFAULT_OG_IMAGE } from '@/lib/seo';
 
 export const metadata: Metadata = {
   title: 'Организации',
@@ -9,6 +10,7 @@ export const metadata: Metadata = {
     title: 'Организации на Liga Live',
     description: 'Клубы, лиги и организаторы, которые ведут трансляции.',
     url: '/organizations',
+    images: [DEFAULT_OG_IMAGE],
   },
 };
 

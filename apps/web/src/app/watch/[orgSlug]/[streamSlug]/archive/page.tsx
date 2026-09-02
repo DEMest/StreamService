@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { ArchiveView } from '@/components/ArchiveView';
-import { fetchPageMeta, siteUrlForPage } from '@/lib/seo';
+import { fetchPageMeta, ogImages, siteUrlForPage } from '@/lib/seo';
 
 /**
  * Archive-страница конкретного Stream'а орги.
@@ -38,6 +38,7 @@ export async function generateMetadata({
       title: `Архив — ${title}`,
       description: `Записи прошедших трансляций «${title}».`,
       url: `/watch/${org.slug}/${stream.slug}/archive`,
+      images: ogImages(meta.thumbnailPath),
     },
     ...(meta.indexable && hasRecordings ? {} : { robots: { index: false, follow: true } }),
   };

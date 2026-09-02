@@ -67,6 +67,18 @@ export function siteUrlForPage(): string {
   }
 }
 
+/**
+ * og:image по умолчанию для страниц без своего превью — сгенерированный
+ * баннер из `app/opengraph-image.tsx`. Ширина/высота проставляем явно: без
+ * них VK не всегда берёт картинку в карточку.
+ */
+export const DEFAULT_OG_IMAGE = { url: '/opengraph-image', width: 1200, height: 630, alt: 'Liga Live' };
+
+/** og:image для страницы: реальный кадр/превью, если есть, иначе дефолтный баннер. */
+export function ogImages(thumbnailPath: string | null) {
+  return [thumbnailPath ? { url: thumbnailPath } : DEFAULT_OG_IMAGE];
+}
+
 export interface SitemapUrl {
   path: string;
   lastModified: string;

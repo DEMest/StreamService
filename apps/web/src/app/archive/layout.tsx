@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { DEFAULT_OG_IMAGE } from '@/lib/seo';
 
 export const metadata: Metadata = {
   title: 'Архив трансляций',
@@ -9,6 +10,7 @@ export const metadata: Metadata = {
     title: 'Архив трансляций',
     description: 'Записи прошедших матчей и мероприятий.',
     url: '/archive',
+    images: [DEFAULT_OG_IMAGE],
   },
 };
 
