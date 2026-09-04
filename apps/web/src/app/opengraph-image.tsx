@@ -10,6 +10,12 @@ import { ImageResponse } from 'next/og';
  * (Telegram/VK/MAX разворачивают превью синхронно при первой отправке ссылки)
  * — лишняя внешняя зависимость и точка отказа. Русский заголовок и описание
  * приходят отдельными og:title/og:description, картинка их не дублирует.
+ *
+ * Контент строго по центру, не у левого края: часть платформ (замечено на
+ * VK) показывает не сам баннер целиком, а квадратный кроп из его середины —
+ * при левом выравнивании в такой кроп попадал только край с точкой-индикатором,
+ * а сам вордмарк обрезался. По центру вордмарк переживает любой крой сверху
+ * донизу или слева направо.
  */
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
@@ -24,10 +30,10 @@ export default function Image() {
           height: '100%',
           display: 'flex',
           flexDirection: 'column',
+          alignItems: 'center',
           justifyContent: 'center',
-          padding: '90px',
           backgroundColor: '#0C0C0E',
-          backgroundImage: 'radial-gradient(circle at 82% 78%, rgba(229,68,51,0.35), rgba(229,68,51,0) 55%)',
+          backgroundImage: 'radial-gradient(circle at 50% 50%, rgba(229,68,51,0.35), rgba(229,68,51,0) 60%)',
           fontFamily: 'sans-serif',
         }}
       >
@@ -49,16 +55,16 @@ export default function Image() {
         <div
           style={{
             display: 'flex',
-            fontSize: 116,
+            fontSize: 100,
             fontWeight: 700,
             letterSpacing: -2,
             color: '#FAFAFA',
-            marginTop: 32,
+            marginTop: 28,
           }}
         >
           Liga Live
         </div>
-        <div style={{ display: 'flex', fontSize: 30, color: '#9A9AA0', marginTop: 28 }}>liga-live.ru</div>
+        <div style={{ display: 'flex', fontSize: 28, color: '#9A9AA0', marginTop: 24 }}>liga-live.ru</div>
       </div>
     ),
     { ...size }
