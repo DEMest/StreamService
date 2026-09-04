@@ -32,6 +32,8 @@ export async function generateMetadata({ params }: { params: { orgSlug: string }
     description: `Записи прошедших трансляций ${org.name}: матчи и мероприятия в записи на Liga Live.`,
     alternates: { canonical: `/watch/${org.slug}/archive` },
     openGraph: {
+      // Обязателен для Telegram — см. пояснение в app/streams/layout.tsx.
+      type: 'website',
       title: `Архив трансляций — ${org.name}`,
       description: `Записи прошедших трансляций ${org.name}.`,
       url: `/watch/${org.slug}/archive`,

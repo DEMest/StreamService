@@ -7,6 +7,8 @@ export const metadata: Metadata = {
     'Записи прошедших матчей и мероприятий: полный архив трансляций Liga Live с возможностью смотреть в любое время.',
   alternates: { canonical: '/archive' },
   openGraph: {
+    // Обязателен для Telegram — см. пояснение в app/streams/layout.tsx.
+    type: 'website',
     title: 'Архив трансляций',
     description: 'Записи прошедших матчей и мероприятий.',
     url: '/archive',
