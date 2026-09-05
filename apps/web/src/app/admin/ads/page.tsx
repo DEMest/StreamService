@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { PublicLayout } from '@/components/PublicLayout';
+import { ImageCropModal } from '@/components/ImageCropModal';
 import { adGradient, adInitials } from '@/lib/ad-fallback';
 import type { AdminAd, AdStats } from '@/lib/types';
 import {
@@ -14,22 +15,33 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '/api';
 
 /**
- * Ожидаемый размер под плейсмент — стандартные IAB-форматы: рекламодатель
- * присылает уже готовый баннер под конкретный размер, это не фото для кропа,
- * поэтому кропа тут больше нет — сервер только вписывает картинку целиком
- * (fit: contain, без обрезки, см. AdsService). `aspect` должен совпадать с
- * PLACEMENT_IMAGE_SIZE в apps/api/src/ads/ads.service.ts.
+ * Ожидаемый размер под плейсмент — стандартные IAB-форматы (рекламодатели
+ * присылают готовые баннеры под них). Присланный баннер не всегда будет
+ * ровно нужного соотношения, поэтому при загрузке админ сам выбирает область
+ * через ImageCropModal — то же окно, что у превью организации/стрима, но со
+ * своим соотношением сторон под плейсмент. После этого сервер только
+ * вписывает результат без дальнейшей обрезки (fit: contain, см. AdsService),
+ * а на публичных страницах баннер просто масштабируется с сохранением
+ * пропорций внутри своего блока — одинаково на телефоне и на десктопе.
+ * `outputWidth`/`outputHeight` должны совпадать с PLACEMENT_IMAGE_SIZE в
+ * apps/api/src/ads/ads.service.ts.
  */
-const AD_IMAGE_SPECS: Record<'watch' | 'catalog', { aspect: number; label: string; hint: string }> = {
+const AD_IMAGE_SPECS: Record<'watch' | 'catalog', {
+  aspect: number; outputWidth: number; outputHeight: number; label: string; description: string;
+}> = {
   watch: {
     aspect: 300 / 250,
+    outputWidth: 300,
+    outputHeight: 250,
     label: '300 × 250 px (Medium Rectangle)',
-    hint: 'Стандартный оверлей поверх видео — готовый баннер, не логотип.',
+    description: 'Небольшой почти квадратный баннер для оверлея поверх видео — выберите область 300×250.',
   },
   catalog: {
     aspect: 728 / 90,
+    outputWidth: 728,
+    outputHeight: 90,
     label: '728 × 90 px (Leaderboard)',
-    hint: 'Стандартная полоса над списком трансляций.',
+    description: 'Широкая полоса над списком трансляций — выберите область 728×90.',
   },
 };
 
@@ -261,6 +273,7 @@ function AdImageSlot({
 }) {
   const hasImage = placement === 'watch' ? !!ad.imagePathWatch : !!ad.imagePathCatalog;
   const [bump, setBump] = useState(0);
+  const [cropFile, setCropFile] = useState<File | null>(null);
   const spec = AD_IMAGE_SPECS[placement];
 
   const uploadMutation = useMutation({
@@ -323,7 +336,7 @@ function AdImageSlot({
         accept="image/jpeg,image/png,image/webp"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) uploadMutation.mutate(file);
+          if (file) setCropFile(file);
           e.target.value = '';
         }}
         className="mt-2 text-[10px] text-zinc-500 file:mr-2 file:px-2 file:py-1 file:bg-zinc-800 file:hover:bg-zinc-700 file:text-zinc-200 file:text-[10px] file:font-medium file:rounded file:border-0 file:cursor-pointer cursor-pointer w-full"
@@ -331,8 +344,21 @@ function AdImageSlot({
       {uploadMutation.isPending && <p className="text-[10px] text-zinc-500 mt-1">Загрузка...</p>}
       {uploadMutation.isError && <p className="text-[10px] text-red-400 mt-1">{uploadMutation.error?.message}</p>}
       <p className="text-[10px] text-zinc-600 mt-1">
-        {hasImage ? spec.hint : `Готовый баннер ${spec.label}. Без картинки — градиент с инициалами.`}
+        {hasImage ? spec.label : `Готовый баннер ${spec.label}. Без картинки — градиент с инициалами.`}
       </p>
+
+      {cropFile && (
+        <ImageCropModal
+          file={cropFile}
+          title={label}
+          aspect={spec.aspect}
+          outputWidth={spec.outputWidth}
+          outputHeight={spec.outputHeight}
+          description={spec.description}
+          onCancel={() => setCropFile(null)}
+          onApply={(cropped) => { setCropFile(null); uploadMutation.mutate(cropped); }}
+        />
+      )}
     </div>
   );
 }
