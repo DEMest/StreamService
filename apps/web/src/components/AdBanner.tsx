@@ -1,10 +1,13 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from '@phosphor-icons/react';
 import type { PublicAd } from '@/lib/types';
 import { adGradient, adInitials } from '@/lib/ad-fallback';
 import { sendAdEvent } from '@/lib/ad-events';
 import { useAdsGate } from '@/hooks/useAdsGate';
+
+/** Medium Rectangle — стандартный формат оверлея поверх видео. */
+const AD_ASPECT = '300 / 250';
 
 /** Показ на 15 секунд — реальное продуктовое число, не демо-сжатие. */
 const AD_DURATION_MS = 15_000;
@@ -22,9 +25,17 @@ const REASONS = ['Неинтересно', 'Слишком часто', 'Не п
  * роль) гейтят именно рендер, а не таймер: расписание показов продолжает
  * идти в фоне, чтобы уход в fullscreen на минуту не откатывал следующий показ
  * к самому началу пятиминутки.
+ *
+ * Баннер — готовый креатив рекламодателя (Medium Rectangle 300×250), а не
+ * логотип с текстом: показывается как есть, без наложения своего текста
+ * поверх картинки. Метка «Реклама» и крестик — отдельной полосой сверху,
+ * чтобы не перекрывать содержимое баннера.
  */
 export function AdBanner({ isFullscreen }: { isFullscreen: boolean }) {
   const { isOrgOrSuperadmin, ads } = useAdsGate();
+  // Крутим только объявления, у которых есть картинка под этот плейсмент —
+  // без неё показывать нечего (текст поверх больше не рисуем).
+  const watchAds = useMemo(() => (ads ?? []).filter((a) => a.watchImageUrl), [ads]);
 
   const [currentAd, setCurrentAd] = useState<PublicAd | null>(null);
   const [cycle, setCycle] = useState(0);
@@ -32,18 +43,18 @@ export function AdBanner({ isFullscreen }: { isFullscreen: boolean }) {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const adIndexRef = useRef(0);
   const dismissedRef = useRef(false);
-  const adsRef = useRef<PublicAd[] | undefined>(undefined);
+  const adsRef = useRef<PublicAd[]>([]);
   const startedRef = useRef(false);
 
   useEffect(() => {
-    adsRef.current = ads;
-  }, [ads]);
+    adsRef.current = watchAds;
+  }, [watchAds]);
 
   useEffect(() => {
-    if (!ads || ads.length === 0 || startedRef.current) return;
+    if (watchAds.length === 0 || startedRef.current) return;
     startedRef.current = true;
     // Случайный старт — чтобы не у всех зрителей первой шла одна и та же реклама.
-    adIndexRef.current = Math.floor(Math.random() * ads.length);
+    adIndexRef.current = Math.floor(Math.random() * watchAds.length);
 
     let cancelled = false;
     let hideTimer: ReturnType<typeof setTimeout> | undefined;
@@ -55,7 +66,7 @@ export function AdBanner({ isFullscreen }: { isFullscreen: boolean }) {
       // (staleTime истёк, фокус вкладки) не должен перезапускать всю цепочку
       // таймеров — период фиксированный, не зависит от рефетчей.
       const list = adsRef.current;
-      if (!list || list.length === 0) return;
+      if (list.length === 0) return;
       const ad = list[adIndexRef.current % list.length];
       adIndexRef.current += 1;
       dismissedRef.current = false;
@@ -81,7 +92,7 @@ export function AdBanner({ isFullscreen }: { isFullscreen: boolean }) {
       clearTimeout(hideTimer);
       clearTimeout(periodTimer);
     };
-  }, [ads]);
+  }, [watchAds]);
 
   if (isOrgOrSuperadmin || isFullscreen || !visible || !currentAd) return null;
 
@@ -106,39 +117,33 @@ export function AdBanner({ isFullscreen }: { isFullscreen: boolean }) {
   }
 
   return (
-    <div
-      className="absolute right-4 z-10 w-[272px] rounded-xl border border-white/10 bg-black/70 backdrop-blur-md shadow-[0_10px_30px_rgba(0,0,0,0.45)] cursor-pointer overflow-hidden transition-transform hover:-translate-y-0.5"
-      style={{ bottom: 76 }}
-      onClick={() => window.open(currentAd.targetUrl, '_blank', 'noopener,noreferrer')}
-    >
-      <span className="absolute top-[9px] left-3 text-[9px] font-bold uppercase tracking-wider text-zinc-400 pointer-events-none">
-        Реклама
-      </span>
-      <button
-        onClick={close}
-        className="absolute top-[6px] right-[6px] w-5 h-5 rounded-md bg-white/10 hover:bg-white/20 flex items-center justify-center text-zinc-300 hover:text-white border-none cursor-pointer"
-      >
-        <X size={11} weight="bold" />
-      </button>
+    <div className="absolute right-4 z-10 w-[240px] rounded-xl border border-white/10 bg-surface-2 shadow-[0_10px_30px_rgba(0,0,0,0.45)] overflow-hidden" style={{ bottom: 76 }}>
+      <div className="flex items-center justify-between px-2.5 py-1.5 bg-black/85">
+        <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">Реклама</span>
+        <button
+          onClick={close}
+          className="w-5 h-5 -mr-1 rounded-md hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white border-none bg-transparent cursor-pointer"
+        >
+          <X size={11} weight="bold" />
+        </button>
+      </div>
 
       {!feedbackOpen ? (
-        <div className="relative flex gap-2.5 items-start p-3">
-          <div
-            className="w-10 h-10 rounded-[9px] shrink-0 mt-2 flex items-center justify-center text-white font-bold text-[15px] overflow-hidden"
-            style={currentAd.watchImageUrl ? undefined : { background: adGradient(currentAd.id) }}
-          >
-            {currentAd.watchImageUrl ? (
-              <img src={currentAd.watchImageUrl} alt="" className="w-full h-full object-cover" />
-            ) : (
-              adInitials(currentAd.title)
-            )}
-          </div>
-          <div className="min-w-0 mt-2">
-            <div className="text-[13px] font-semibold text-zinc-100 truncate">{currentAd.title}</div>
-            {currentAd.subtitle && (
-              <div className="text-[11px] text-zinc-400 mt-0.5 truncate">{currentAd.subtitle}</div>
-            )}
-          </div>
+        <div
+          className="relative w-full cursor-pointer"
+          style={{ aspectRatio: AD_ASPECT }}
+          onClick={() => window.open(currentAd.targetUrl, '_blank', 'noopener,noreferrer')}
+        >
+          {currentAd.watchImageUrl ? (
+            <img src={currentAd.watchImageUrl} alt={currentAd.title} className="absolute inset-0 w-full h-full object-contain bg-black" />
+          ) : (
+            <div
+              className="absolute inset-0 flex items-center justify-center text-white font-bold text-xl"
+              style={{ background: adGradient(currentAd.id) }}
+            >
+              {adInitials(currentAd.title)}
+            </div>
+          )}
           <div className="absolute left-0 right-0 bottom-0 h-[3px] bg-white/10 overflow-hidden">
             <div key={cycle} className="h-full bg-brand" style={{ animation: `ad-drain ${AD_DURATION_MS / 1000}s linear forwards` }} />
           </div>

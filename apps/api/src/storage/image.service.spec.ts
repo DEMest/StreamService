@@ -52,6 +52,14 @@ describe('ImageService', () => {
       expect(sharpChain.resize).toHaveBeenCalledWith(320, 320, { fit: 'cover' });
     });
 
+    it('fit=contain не обрезает готовый баннер, а вписывает целиком с фоном-подложкой', async () => {
+      await service.processToJpeg(Buffer.from('raw'), 728, 90, 'contain');
+      expect(sharpChain.resize).toHaveBeenCalledWith(728, 90, {
+        fit: 'contain',
+        background: { r: 12, g: 12, b: 14, alpha: 1 },
+      });
+    });
+
     it('throws BadRequestException when sharp cannot decode', async () => {
       sharpChain.toBuffer.mockRejectedValue(new Error('unsupported format'));
       await expect(service.processToJpeg(Buffer.from('not-an-image')))

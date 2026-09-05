@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { PublicLayout } from '@/components/PublicLayout';
-import { ImageCropModal } from '@/components/ImageCropModal';
 import { adGradient, adInitials } from '@/lib/ad-fallback';
 import type { AdminAd, AdStats } from '@/lib/types';
 import {
@@ -15,25 +14,22 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '/api';
 
 /**
- * Соотношение сторон и итоговый размер кропа под плейсмент — должны один в
- * один совпадать с PLACEMENT_IMAGE_SIZE в apps/api/src/ads/ads.service.ts,
- * иначе кроп, который админ выбрал глазами, сервер обрежет ещё раз вслепую
- * под другие пропорции.
+ * Ожидаемый размер под плейсмент — стандартные IAB-форматы: рекламодатель
+ * присылает уже готовый баннер под конкретный размер, это не фото для кропа,
+ * поэтому кропа тут больше нет — сервер только вписывает картинку целиком
+ * (fit: contain, без обрезки, см. AdsService). `aspect` должен совпадать с
+ * PLACEMENT_IMAGE_SIZE в apps/api/src/ads/ads.service.ts.
  */
-const AD_IMAGE_SPECS: Record<'watch' | 'catalog', {
-  aspect: number; outputWidth: number; outputHeight: number; description: string;
-}> = {
+const AD_IMAGE_SPECS: Record<'watch' | 'catalog', { aspect: number; label: string; hint: string }> = {
   watch: {
-    aspect: 1,
-    outputWidth: 320,
-    outputHeight: 320,
-    description: 'Квадратная область — логотип рядом с текстом в баннере плеера.',
+    aspect: 300 / 250,
+    label: '300 × 250 px (Medium Rectangle)',
+    hint: 'Стандартный оверлей поверх видео — готовый баннер, не логотип.',
   },
   catalog: {
-    aspect: 4,
-    outputWidth: 1600,
-    outputHeight: 400,
-    description: 'Широкая область — фон полосы над списком в каталоге.',
+    aspect: 728 / 90,
+    label: '728 × 90 px (Leaderboard)',
+    hint: 'Стандартная полоса над списком трансляций.',
   },
 };
 
@@ -168,11 +164,11 @@ function AdRow({
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="flex items-center gap-3 min-w-0">
           <div
-            className="w-10 h-10 rounded-lg shrink-0 flex items-center justify-center text-white font-bold text-sm overflow-hidden"
+            className="w-14 h-10 rounded-lg shrink-0 flex items-center justify-center text-white font-bold text-sm overflow-hidden bg-surface-primary"
             style={ad.imagePathWatch ? undefined : { background: adGradient(ad.id) }}
           >
             {ad.imagePathWatch ? (
-              <img src={`${API_BASE}/v1/public/ads/${ad.id}/image/watch`} alt="" className="w-full h-full object-cover" />
+              <img src={`${API_BASE}/v1/public/ads/${ad.id}/image/watch`} alt="" className="w-full h-full object-contain" />
             ) : (
               adInitials(ad.title)
             )}
@@ -198,8 +194,8 @@ function AdRow({
       {ad.subtitle && <p className="text-sm text-zinc-400 mb-4">{ad.subtitle}</p>}
 
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <AdImageSlot ad={ad} placement="watch" label="Картинка для плеера" onChanged={onImagesChanged} />
-        <AdImageSlot ad={ad} placement="catalog" label="Картинка для каталога" onChanged={onImagesChanged} />
+        <AdImageSlot ad={ad} placement="watch" label="Баннер для плеера" onChanged={onImagesChanged} />
+        <AdImageSlot ad={ad} placement="catalog" label="Баннер для каталога" onChanged={onImagesChanged} />
       </div>
 
       {editing && (
@@ -265,7 +261,6 @@ function AdImageSlot({
 }) {
   const hasImage = placement === 'watch' ? !!ad.imagePathWatch : !!ad.imagePathCatalog;
   const [bump, setBump] = useState(0);
-  const [cropFile, setCropFile] = useState<File | null>(null);
   const spec = AD_IMAGE_SPECS[placement];
 
   const uploadMutation = useMutation({
@@ -294,7 +289,7 @@ function AdImageSlot({
   return (
     <div className="border border-zinc-800/60 rounded-lg p-2.5">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-[11px] text-zinc-500">{label}</span>
+        <span className="text-[11px] text-zinc-500">{label} — {spec.label}</span>
         {hasImage && (
           <button
             onClick={() => deleteMutation.mutate()}
@@ -309,7 +304,9 @@ function AdImageSlot({
         <img
           src={`${API_BASE}/v1/public/ads/${ad.id}/image/${placement}?t=${bump}`}
           alt=""
-          className="w-full rounded-md object-cover"
+          // object-contain, не cover: это готовый баннер рекламодателя, обрезать
+          // его в превью нельзя — иначе админ не увидит, что реально уйдёт зрителю.
+          className="w-full rounded-md object-contain bg-surface-primary"
           style={{ aspectRatio: spec.aspect }}
         />
       ) : (
@@ -326,27 +323,16 @@ function AdImageSlot({
         accept="image/jpeg,image/png,image/webp"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) setCropFile(file);
+          if (file) uploadMutation.mutate(file);
           e.target.value = '';
         }}
         className="mt-2 text-[10px] text-zinc-500 file:mr-2 file:px-2 file:py-1 file:bg-zinc-800 file:hover:bg-zinc-700 file:text-zinc-200 file:text-[10px] file:font-medium file:rounded file:border-0 file:cursor-pointer cursor-pointer w-full"
       />
       {uploadMutation.isPending && <p className="text-[10px] text-zinc-500 mt-1">Загрузка...</p>}
       {uploadMutation.isError && <p className="text-[10px] text-red-400 mt-1">{uploadMutation.error?.message}</p>}
-      {!hasImage && <p className="text-[10px] text-zinc-600 mt-1">Без картинки — градиент с инициалами.</p>}
-
-      {cropFile && (
-        <ImageCropModal
-          file={cropFile}
-          title={label}
-          aspect={spec.aspect}
-          outputWidth={spec.outputWidth}
-          outputHeight={spec.outputHeight}
-          description={spec.description}
-          onCancel={() => setCropFile(null)}
-          onApply={(cropped) => { setCropFile(null); uploadMutation.mutate(cropped); }}
-        />
-      )}
+      <p className="text-[10px] text-zinc-600 mt-1">
+        {hasImage ? spec.hint : `Готовый баннер ${spec.label}. Без картинки — градиент с инициалами.`}
+      </p>
     </div>
   );
 }
@@ -385,7 +371,7 @@ function AdForm({
       <input
         value={values.subtitle}
         onChange={(e) => setValues((v) => ({ ...v, subtitle: e.target.value }))}
-        placeholder="Подзаголовок (необязательно)"
+        placeholder="Заметка для себя (необязательно, зрителям не показывается — весь текст уже в баннере)"
         className="bg-surface-primary border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none focus:border-zinc-600"
       />
       <input

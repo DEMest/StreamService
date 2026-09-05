@@ -28,16 +28,17 @@ const PLACEMENT_FIELD: Record<AdPlacement, 'imagePathWatch' | 'imagePathCatalog'
 };
 
 /**
- * Целевой размер картинки под плейсмент: на watch-баннере это квадратный
- * логотип рядом с текстом, в каталоге — широкая полоса-фон. Должно один в
- * один совпадать с `aspect`/`outputWidth`/`outputHeight`, которые
- * AdImageSlot (apps/web/src/app/admin/ads/page.tsx) передаёт в
- * ImageCropModal — иначе кроп, который админ выбрал глазами, здесь обрежется
- * ещё раз вслепую под другое соотношение сторон.
+ * Целевой размер картинки под плейсмент — стандартные IAB-форматы, а не
+ * произвольная пропорция: рекламодатели присылают уже готовый баннер под
+ * конкретный размер, а не фото для кропа. watch — Medium Rectangle (300×250,
+ * стандарт для оверлея поверх видео), catalog — Leaderboard (728×90,
+ * стандартная полоса над контентом). Должно совпадать с `spec` в
+ * AD_IMAGE_SPECS (apps/web/src/app/admin/ads/page.tsx) — иначе подсказанный
+ * админу размер разойдётся с тем, что реально ждёт сервер.
  */
 const PLACEMENT_IMAGE_SIZE: Record<AdPlacement, { width: number; height: number }> = {
-  watch: { width: 320, height: 320 },
-  catalog: { width: 1600, height: 400 },
+  watch: { width: 300, height: 250 },
+  catalog: { width: 728, height: 90 },
 };
 
 const TITLE_MAX = 120;
@@ -96,7 +97,8 @@ export class AdsService {
     await this.requireAd(id);
     const key = `images/ad/${id}-${placement}.jpg`;
     const { width, height } = PLACEMENT_IMAGE_SIZE[placement];
-    await this.images.upload(key, buffer, width, height);
+    // contain, не cover: это готовый баннер рекламодателя, обрезать его нельзя.
+    await this.images.upload(key, buffer, width, height, 'contain');
     return this.prisma.ad.update({ where: { id }, data: { [PLACEMENT_FIELD[placement]]: key } });
   }
 
