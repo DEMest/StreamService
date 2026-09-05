@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowCounterClockwise, Crop, MagnifyingGlassMinus, MagnifyingGlassPlus, WarningCircle, X } from '@phosphor-icons/react';
 import {
+  CROP_ASPECT,
   CROP_JPEG_QUALITY,
   CROP_OUTPUT_HEIGHT,
   CROP_OUTPUT_WIDTH,
@@ -31,19 +32,38 @@ interface Props {
   file: File;
   /** Заголовок окна — куда именно уедет картинка («Картинка организации» и т.п.). */
   title: string;
+  /** Соотношение сторон рамки. По умолчанию — 16:9, как у превью орги/стрима/записи. */
+  aspect?: number;
+  /** Размер итогового кадра в пикселях. По умолчанию — 1280×720. */
+  outputWidth?: number;
+  outputHeight?: number;
+  /** Подсказка под рамкой; по умолчанию упоминает 16:9. */
+  description?: string;
   onCancel: () => void;
   onApply: (file: File) => void;
 }
 
 /**
- * Выбор области 16:9 перед загрузкой превью.
+ * Выбор области нужного соотношения сторон перед загрузкой картинки.
  *
  * Рамка стоит на месте, картинка под ней двигается и масштабируется; минимальный
  * зум равен «cover», поэтому пустых полей внутри рамки не бывает. По «Применить»
- * видимая область перерисовывается на canvas в JPEG 1280×720 — на сервер уходит
- * уже готовый кадр, а не оригинал.
+ * видимая область перерисовывается на canvas в JPEG нужного размера — на сервер
+ * уходит уже готовый кадр, а не оригинал. `aspect`/`outputWidth`/`outputHeight`
+ * обязаны совпадать с тем, что вызывающий код (например AdsService на бэкенде)
+ * ожидает для этого места — иначе один и тот же кроп будет обрезан дважды под
+ * разные пропорции.
  */
-export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
+export function ImageCropModal({
+  file,
+  title,
+  aspect = CROP_ASPECT,
+  outputWidth = CROP_OUTPUT_WIDTH,
+  outputHeight = CROP_OUTPUT_HEIGHT,
+  description,
+  onCancel,
+  onApply,
+}: Props) {
   const tooLarge = file.size > MAX_SOURCE_BYTES;
 
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
@@ -106,7 +126,7 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
   // Мемоизация здесь не про скорость арифметики, а про стабильность ссылок:
   // от них зависят эффекты ниже, и без неё слушатель колеса переподписывался бы
   // на каждый рендер, то есть 60 раз в секунду во время перетаскивания.
-  const frame = useMemo(() => (stage ? fitFrame(stage, STAGE_PADDING) : null), [stage]);
+  const frame = useMemo(() => (stage ? fitFrame(stage, STAGE_PADDING, aspect) : null), [stage, aspect]);
   const origin = useMemo(() => (stage && frame ? frameOrigin(stage, frame) : null), [stage, frame]);
   const ready = Boolean(image && frame && frame.width > 0 && crop);
 
@@ -194,10 +214,10 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
     setBusy(true);
     setApplyError(null);
     try {
-      const rect = toDestRect(crop, image, frame);
+      const rect = toDestRect(crop, image, frame, outputWidth, outputHeight);
       const canvas = document.createElement('canvas');
-      canvas.width = CROP_OUTPUT_WIDTH;
-      canvas.height = CROP_OUTPUT_HEIGHT;
+      canvas.width = outputWidth;
+      canvas.height = outputHeight;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('canvas context unavailable');
       ctx.imageSmoothingEnabled = true;
@@ -234,7 +254,7 @@ export function ImageCropModal({ file, title, onCancel, onApply }: Props) {
             <Crop size={18} className="text-brand" />
             {title}
           </h2>
-          <p className="text-xs text-zinc-500">Выберите область 16:9 — она и станет превью.</p>
+          <p className="text-xs text-zinc-500">{description ?? 'Выберите область 16:9 — она и станет превью.'}</p>
         </div>
 
         {fatalError ? (

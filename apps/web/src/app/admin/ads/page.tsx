@@ -4,13 +4,38 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { PublicLayout } from '@/components/PublicLayout';
+import { ImageCropModal } from '@/components/ImageCropModal';
 import { adGradient, adInitials } from '@/lib/ad-fallback';
 import type { AdminAd, AdStats } from '@/lib/types';
 import {
   ArrowLeft, Megaphone, Plus, Trash, PencilSimple, ChartBar, X, Image as ImageIcon,
+  Pause, Play,
 } from '@phosphor-icons/react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '/api';
+
+/**
+ * Соотношение сторон и итоговый размер кропа под плейсмент — должны один в
+ * один совпадать с PLACEMENT_IMAGE_SIZE в apps/api/src/ads/ads.service.ts,
+ * иначе кроп, который админ выбрал глазами, сервер обрежет ещё раз вслепую
+ * под другие пропорции.
+ */
+const AD_IMAGE_SPECS: Record<'watch' | 'catalog', {
+  aspect: number; outputWidth: number; outputHeight: number; description: string;
+}> = {
+  watch: {
+    aspect: 1,
+    outputWidth: 320,
+    outputHeight: 320,
+    description: 'Квадратная область — логотип рядом с текстом в баннере плеера.',
+  },
+  catalog: {
+    aspect: 4,
+    outputWidth: 1600,
+    outputHeight: 400,
+    description: 'Широкая область — фон полосы над списком в каталоге.',
+  },
+};
 
 interface AdFormValues {
   title: string;
@@ -94,7 +119,11 @@ export default function AdminAdsPage() {
               onToggleStats={() => setStatsId(statsId === ad.id ? null : ad.id)}
               onSaveEdit={(data) => { updateMutation.mutate({ id: ad.id, data }); setEditingId(null); }}
               onToggleActive={() => updateMutation.mutate({ id: ad.id, data: { isActive: !ad.isActive } })}
-              onDelete={() => { if (confirm(`Удалить «${ad.title}»?`)) deleteMutation.mutate(ad.id); }}
+              onDelete={() => {
+                if (confirm(`Удалить «${ad.title}» вместе с картинками безвозвратно?\n\nЕсли рекламодатель может вернуться позже — используйте «Приостановить» вместо удаления.`)) {
+                  deleteMutation.mutate(ad.id);
+                }
+              }}
               onImagesChanged={invalidate}
             />
           ))}
@@ -156,14 +185,13 @@ function AdRow({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={onToggleActive}
-            className={`text-[10px] uppercase tracking-wider font-mono px-2 py-0.5 rounded-full border-none cursor-pointer ${
+          <span
+            className={`text-[10px] uppercase tracking-wider font-mono px-2 py-0.5 rounded-full ${
               ad.isActive ? 'bg-emerald-600/20 text-emerald-400' : 'bg-zinc-800 text-zinc-500'
             }`}
           >
-            {ad.isActive ? 'Активно' : 'Выключено'}
-          </button>
+            {ad.isActive ? 'Показывается' : 'На паузе'}
+          </span>
         </div>
       </div>
 
@@ -185,7 +213,19 @@ function AdRow({
 
       {statsOpen && <AdStatsPanel adId={ad.id} />}
 
-      <div className="flex gap-2 justify-end mt-2">
+      <div className="flex gap-2 justify-end mt-2 flex-wrap">
+        <button
+          onClick={onToggleActive}
+          title={ad.isActive ? 'Скрыть от зрителей, не удаляя — можно будет включить снова в любой момент' : 'Показывать зрителям снова'}
+          className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer border-none ${
+            ad.isActive
+              ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
+              : 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400'
+          }`}
+        >
+          {ad.isActive ? <Pause size={12} /> : <Play size={12} />}
+          {ad.isActive ? 'Приостановить' : 'Возобновить показ'}
+        </button>
         <button
           onClick={onToggleStats}
           className="flex items-center gap-1 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer border-none"
@@ -200,9 +240,10 @@ function AdRow({
         </button>
         <button
           onClick={onDelete}
+          title="Удаляет объявление и обе картинки безвозвратно — для временной остановки используйте «Приостановить»"
           className="flex items-center gap-1 px-3 py-1.5 bg-red-900/30 hover:bg-red-900/60 text-red-400 hover:text-red-300 text-xs font-medium rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer border-none"
         >
-          <Trash size={12} /> Удалить
+          <Trash size={12} /> Удалить навсегда
         </button>
       </div>
     </div>
@@ -224,6 +265,8 @@ function AdImageSlot({
 }) {
   const hasImage = placement === 'watch' ? !!ad.imagePathWatch : !!ad.imagePathCatalog;
   const [bump, setBump] = useState(0);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const spec = AD_IMAGE_SPECS[placement];
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -266,10 +309,14 @@ function AdImageSlot({
         <img
           src={`${API_BASE}/v1/public/ads/${ad.id}/image/${placement}?t=${bump}`}
           alt=""
-          className="w-full aspect-video object-cover rounded-md"
+          className="w-full rounded-md object-cover"
+          style={{ aspectRatio: spec.aspect }}
         />
       ) : (
-        <div className="w-full aspect-video rounded-md bg-surface-primary border border-dashed border-zinc-800 flex items-center justify-center">
+        <div
+          className="w-full rounded-md bg-surface-primary border border-dashed border-zinc-800 flex items-center justify-center"
+          style={{ aspectRatio: spec.aspect }}
+        >
           <ImageIcon size={20} className="text-zinc-700" weight="thin" />
         </div>
       )}
@@ -279,7 +326,7 @@ function AdImageSlot({
         accept="image/jpeg,image/png,image/webp"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) uploadMutation.mutate(file);
+          if (file) setCropFile(file);
           e.target.value = '';
         }}
         className="mt-2 text-[10px] text-zinc-500 file:mr-2 file:px-2 file:py-1 file:bg-zinc-800 file:hover:bg-zinc-700 file:text-zinc-200 file:text-[10px] file:font-medium file:rounded file:border-0 file:cursor-pointer cursor-pointer w-full"
@@ -287,6 +334,19 @@ function AdImageSlot({
       {uploadMutation.isPending && <p className="text-[10px] text-zinc-500 mt-1">Загрузка...</p>}
       {uploadMutation.isError && <p className="text-[10px] text-red-400 mt-1">{uploadMutation.error?.message}</p>}
       {!hasImage && <p className="text-[10px] text-zinc-600 mt-1">Без картинки — градиент с инициалами.</p>}
+
+      {cropFile && (
+        <ImageCropModal
+          file={cropFile}
+          title={label}
+          aspect={spec.aspect}
+          outputWidth={spec.outputWidth}
+          outputHeight={spec.outputHeight}
+          description={spec.description}
+          onCancel={() => setCropFile(null)}
+          onApply={(cropped) => { setCropFile(null); uploadMutation.mutate(cropped); }}
+        />
+      )}
     </div>
   );
 }

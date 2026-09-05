@@ -2,13 +2,17 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import * as sharp from 'sharp';
 import { S3Service } from './s3.service';
 
+/** Дефолт для орги/стрима/записи — единственных превью, которые всегда 16:9. */
+const DEFAULT_WIDTH = 1280;
+const DEFAULT_HEIGHT = 720;
+
 /**
- * Единый пайплайн статичных картинок-превью (орга / стрим / запись):
- * нормализация в JPEG 1280×720 (cover) → S3; отдача — прокси Buffer'ом через
- * API (объекты маленькие, presigned-редирект не нужен, кешируется браузером).
- * Ключи задают вызывающие:
+ * Единый пайплайн статичных картинок-превью (орга / стрим / запись / реклама):
+ * нормализация в JPEG нужного размера (cover) → S3; отдача — прокси Buffer'ом
+ * через API (объекты маленькие, presigned-редирект не нужен, кешируется
+ * браузером). Ключи задают вызывающие:
  *   images/org/<orgId>.jpg | images/stream/<streamId>.jpg |
- *   archive/<basePath>/<broadcastId>/preview.jpg
+ *   archive/<basePath>/<broadcastId>/preview.jpg | images/ad/<adId>-<placement>.jpg
  */
 @Injectable()
 export class ImageService {
@@ -19,14 +23,20 @@ export class ImageService {
   /**
    * sharp не смог декодировать → 400: загрузили не картинку.
    *
-   * Кроп 16:9 выбирает пользователь в браузере ещё до отправки, так что
-   * `cover` здесь обычно уже ничего не режет — он остаётся страховкой для
-   * картинок, пришедших мимо UI (curl, старые клиенты).
+   * Кроп нужного соотношения выбирает пользователь в браузере ещё до
+   * отправки (см. ImageCropModal), так что `cover` здесь обычно уже ничего
+   * не режет — он остаётся страховкой для картинок, пришедших мимо UI (curl,
+   * старые клиенты), и для несовпадения на пиксель после сжатия в JPEG.
+   *
+   * `width`/`height` по умолчанию — 1280×720 (орга/стрим/запись); реклама
+   * передаёт свой размер под конкретный плейсмент (см. AdsService) — он
+   * обязан совпадать с тем, что задаёт клиенту ImageCropModal, иначе кроп,
+   * который админ выбрал глазами, будет ещё раз обрезан здесь вслепую.
    */
-  async processToJpeg(buffer: Buffer): Promise<Buffer> {
+  async processToJpeg(buffer: Buffer, width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT): Promise<Buffer> {
     try {
       return await sharp(buffer)
-        .resize(1280, 720, { fit: 'cover' })
+        .resize(width, height, { fit: 'cover' })
         .jpeg({ quality: 82 })
         .toBuffer();
     } catch {
@@ -34,8 +44,8 @@ export class ImageService {
     }
   }
 
-  async upload(key: string, buffer: Buffer): Promise<void> {
-    const jpeg = await this.processToJpeg(buffer);
+  async upload(key: string, buffer: Buffer, width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT): Promise<void> {
+    const jpeg = await this.processToJpeg(buffer, width, height);
     await this.s3.putObject(key, jpeg, 'image/jpeg');
   }
 
