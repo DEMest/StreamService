@@ -143,15 +143,16 @@ export function zoomAt(
 }
 
 /**
- * Рамка внутри «сцены»: максимальный прямоугольник 16:9, который влезает в
- * сцену с заданными полями. Поля нужны, чтобы вокруг рамки осталась видна
- * затемнённая часть картинки — пользователь видит, что именно он отрезает.
+ * Рамка внутри «сцены»: максимальный прямоугольник заданного соотношения
+ * сторон (по умолчанию 16:9), который влезает в сцену с заданными полями.
+ * Поля нужны, чтобы вокруг рамки осталась видна затемнённая часть картинки —
+ * пользователь видит, что именно он отрезает.
  */
-export function fitFrame(stage: Size, padding: number): Size {
+export function fitFrame(stage: Size, padding: number, aspect: number = CROP_ASPECT): Size {
   const maxWidth = Math.max(0, stage.width - padding * 2);
   const maxHeight = Math.max(0, stage.height - padding * 2);
-  const width = Math.min(maxWidth, maxHeight * CROP_ASPECT);
-  return { width, height: width / CROP_ASPECT };
+  const width = Math.min(maxWidth, maxHeight * aspect);
+  return { width, height: width / aspect };
 }
 
 /** Левый верхний угол рамки в координатах сцены (рамка всегда по центру). */
@@ -180,12 +181,18 @@ export function frameCenter(frame: Size): Offset {
  * а раздельные дают точное покрытие — кламп смещения гарантирует его в
  * координатах рамки, а умножение по осям переносит гарантию на холст.
  */
-export function toDestRect(state: CropState, image: Size, frame: Size): DestRect {
+export function toDestRect(
+  state: CropState,
+  image: Size,
+  frame: Size,
+  outputWidth: number = CROP_OUTPUT_WIDTH,
+  outputHeight: number = CROP_OUTPUT_HEIGHT,
+): DestRect {
   if (frame.width <= 0 || frame.height <= 0) {
-    return { dx: 0, dy: 0, dw: CROP_OUTPUT_WIDTH, dh: CROP_OUTPUT_HEIGHT };
+    return { dx: 0, dy: 0, dw: outputWidth, dh: outputHeight };
   }
-  const kx = CROP_OUTPUT_WIDTH / frame.width;
-  const ky = CROP_OUTPUT_HEIGHT / frame.height;
+  const kx = outputWidth / frame.width;
+  const ky = outputHeight / frame.height;
   const scale = scaleFor(image, frame, state.zoom);
   return {
     dx: state.offset.x * kx,

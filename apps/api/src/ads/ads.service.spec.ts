@@ -132,17 +132,18 @@ describe('AdsService', () => {
   });
 
   describe('изображения по плейсментам', () => {
-    it('загрузка watch-картинки пишет в imagePathWatch, не задевая imagePathCatalog', async () => {
+    it('загрузка watch-картинки пишет в imagePathWatch квадратом 320×320, не задевая imagePathCatalog', async () => {
       await service.uploadImage('ad1', 'watch', Buffer.from('img'));
-      expect(mockImages.upload).toHaveBeenCalledWith('images/ad/ad1-watch.jpg', expect.any(Buffer));
+      expect(mockImages.upload).toHaveBeenCalledWith('images/ad/ad1-watch.jpg', expect.any(Buffer), 320, 320);
       expect(mockPrisma.ad.update).toHaveBeenCalledWith({
         where: { id: 'ad1' },
         data: { imagePathWatch: 'images/ad/ad1-watch.jpg' },
       });
     });
 
-    it('загрузка catalog-картинки пишет в imagePathCatalog', async () => {
+    it('загрузка catalog-картинки пишет в imagePathCatalog широкой полосой 1600×400', async () => {
       await service.uploadImage('ad1', 'catalog', Buffer.from('img'));
+      expect(mockImages.upload).toHaveBeenCalledWith('images/ad/ad1-catalog.jpg', expect.any(Buffer), 1600, 400);
       expect(mockPrisma.ad.update).toHaveBeenCalledWith({
         where: { id: 'ad1' },
         data: { imagePathCatalog: 'images/ad/ad1-catalog.jpg' },

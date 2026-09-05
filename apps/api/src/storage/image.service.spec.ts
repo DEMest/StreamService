@@ -47,6 +47,11 @@ describe('ImageService', () => {
       expect(out).toEqual(Buffer.from('processed-jpeg'));
     });
 
+    it('принимает нестандартный размер — реклама режет не 16:9, а под свой плейсмент', async () => {
+      await service.processToJpeg(Buffer.from('raw'), 320, 320);
+      expect(sharpChain.resize).toHaveBeenCalledWith(320, 320, { fit: 'cover' });
+    });
+
     it('throws BadRequestException when sharp cannot decode', async () => {
       sharpChain.toBuffer.mockRejectedValue(new Error('unsupported format'));
       await expect(service.processToJpeg(Buffer.from('not-an-image')))
