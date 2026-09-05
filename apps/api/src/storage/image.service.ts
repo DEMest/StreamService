@@ -28,15 +28,27 @@ export class ImageService {
    * не режет — он остаётся страховкой для картинок, пришедших мимо UI (curl,
    * старые клиенты), и для несовпадения на пиксель после сжатия в JPEG.
    *
-   * `width`/`height` по умолчанию — 1280×720 (орга/стрим/запись); реклама
-   * передаёт свой размер под конкретный плейсмент (см. AdsService) — он
-   * обязан совпадать с тем, что задаёт клиенту ImageCropModal, иначе кроп,
-   * который админ выбрал глазами, будет ещё раз обрезан здесь вслепую.
+   * `width`/`height` по умолчанию — 1280×720 (орга/стрим/запись).
+   *
+   * `fit: 'cover'` (по умолчанию) обрезает лишнее — годится для фото, где
+   * кроп выбирает пользователь. Готовые рекламные баннеры — не фото: это
+   * уже собранный дизайнером креатив под конкретный IAB-размер, и `cover`
+   * обрезал бы часть текста/логотипа на нём. Для рекламы (см. AdsService)
+   * передаётся `fit: 'contain'` — картинка вписывается целиком, лишнее поле
+   * (если баннер прислали чуть не того соотношения) закрашивается фоном.
    */
-  async processToJpeg(buffer: Buffer, width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT): Promise<Buffer> {
+  async processToJpeg(
+    buffer: Buffer,
+    width = DEFAULT_WIDTH,
+    height = DEFAULT_HEIGHT,
+    fit: 'cover' | 'contain' = 'cover',
+  ): Promise<Buffer> {
     try {
       return await sharp(buffer)
-        .resize(width, height, { fit: 'cover' })
+        .resize(width, height, {
+          fit,
+          ...(fit === 'contain' ? { background: { r: 12, g: 12, b: 14, alpha: 1 } } : {}),
+        })
         .jpeg({ quality: 82 })
         .toBuffer();
     } catch {
@@ -44,8 +56,14 @@ export class ImageService {
     }
   }
 
-  async upload(key: string, buffer: Buffer, width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT): Promise<void> {
-    const jpeg = await this.processToJpeg(buffer, width, height);
+  async upload(
+    key: string,
+    buffer: Buffer,
+    width = DEFAULT_WIDTH,
+    height = DEFAULT_HEIGHT,
+    fit: 'cover' | 'contain' = 'cover',
+  ): Promise<void> {
+    const jpeg = await this.processToJpeg(buffer, width, height, fit);
     await this.s3.putObject(key, jpeg, 'image/jpeg');
   }
 
