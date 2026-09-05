@@ -8,6 +8,8 @@ export const metadata: Metadata = {
     'Правила пользования Liga Live: права на трансляции, правила чата, ответственность сторон.',
   alternates: { canonical: '/legal/terms' },
   openGraph: {
+    // Обязателен для Telegram — см. пояснение в app/streams/layout.tsx.
+    type: 'website',
     title: 'Пользовательское соглашение Liga Live',
     description: 'Права на трансляции, правила чата и ответственность сторон.',
     url: '/legal/terms',

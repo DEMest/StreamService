@@ -14,6 +14,8 @@ export const metadata: Metadata = {
     'Вход для организаций и администраторов Liga Live: управление трансляциями, ключами вещания, записями и чатом.',
   alternates: { canonical: '/login' },
   openGraph: {
+    // Обязателен для Telegram — см. пояснение в app/streams/layout.tsx.
+    type: 'website',
     title: 'Вход в личный кабинет Liga Live',
     description: 'Управление трансляциями, записями и настройками организации.',
     url: '/login',
