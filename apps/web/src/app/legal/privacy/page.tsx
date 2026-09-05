@@ -8,6 +8,8 @@ export const metadata: Metadata = {
     'Какие персональные данные обрабатывает Liga Live, зачем, сколько они хранятся и как их удалить.',
   alternates: { canonical: '/legal/privacy' },
   openGraph: {
+    // Обязателен для Telegram — см. пояснение в app/streams/layout.tsx.
+    type: 'website',
     title: 'Политика конфиденциальности Liga Live',
     description: 'Состав данных, цели обработки, сроки хранения и права пользователя.',
     url: '/legal/privacy',

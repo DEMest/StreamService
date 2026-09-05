@@ -13,6 +13,8 @@ export const metadata: Metadata = {
     'Ответы зрителям Liga Live: почему тормозит видео, как переключать камеры, где найти запись матча.',
   alternates: { canonical: '/faq' },
   openGraph: {
+    // Обязателен для Telegram — см. пояснение в app/streams/layout.tsx.
+    type: 'website',
     title: 'Вопросы и ответы — Liga Live',
     description: 'Почему тормозит видео, как переключать камеры и где найти запись матча.',
     url: '/faq',

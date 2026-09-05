@@ -8,6 +8,8 @@ export const metadata: Metadata = {
     'Реквизиты владельца сайта, требования к заявлению правообладателя и сроки его рассмотрения.',
   alternates: { canonical: '/legal/copyright' },
   openGraph: {
+    // Обязателен для Telegram — см. пояснение в app/streams/layout.tsx.
+    type: 'website',
     title: 'Правообладателям — Liga Live',
     description: 'Куда и как направить заявление о нарушении прав на контент.',
     url: '/legal/copyright',
