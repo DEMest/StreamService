@@ -14,6 +14,7 @@ import { Header } from '@/components/Header';
 import { MobileSeekBar } from '@/components/MobileSeekBar';
 import { OrgAvatar } from '@/components/OrgAvatar';
 import { FeedbackButton } from '@/components/FeedbackButton';
+import { AdBanner } from '@/components/AdBanner';
 import { useQoeBeacon } from '@/hooks/useQoeBeacon';
 import {
   Eye, CornersOut, CornersIn,
@@ -751,6 +752,8 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
               <div className="w-12 h-12 border-3 border-zinc-600 border-t-white rounded-full animate-spin" />
             </div>
           )}
+
+          <AdBanner isFullscreen={isFullscreen} />
 
           {!isFullscreen && (
             <>

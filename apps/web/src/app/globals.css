@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Полоса-таймер рекламного баннера — чистая CSS-анимация вместо JS-тика на
+   каждую секунду, так она не подёргивается (см. AdBanner/AdCatalogBanner). */
+@keyframes ad-drain {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;

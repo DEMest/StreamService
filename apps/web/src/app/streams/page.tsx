@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { OrgCard, SkeletonCard } from '@/components/OrgCard';
+import { AdCatalogBanner } from '@/components/AdCatalogBanner';
 import { fadeUp, staggerContainer, cardFadeUp } from '@/lib/motion';
 import type { CatalogItem } from '@/lib/types';
 import { Broadcast, TelevisionSimple } from '@phosphor-icons/react';
@@ -37,6 +38,8 @@ export default function StreamsPage() {
             <Broadcast size={18} weight="fill" className="text-brand animate-pulse" />
             Трансляции
           </motion.h2>
+
+          <AdCatalogBanner />
 
           {isLoading && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">

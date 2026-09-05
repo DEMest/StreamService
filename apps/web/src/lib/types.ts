@@ -36,4 +36,41 @@ export interface ArchiveFeedItem {
   streamName: string;
 }
 
+/**
+ * Активное рекламное объявление (backend: `GET /v1/public/ads`). Картинка —
+ * своя на каждый плейсмент; `null` — клиент рисует градиент с инициалами
+ * заголовка (см. `lib/ad-fallback.ts`).
+ */
+export interface PublicAd {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  targetUrl: string;
+  watchImageUrl: string | null;
+  catalogImageUrl: string | null;
+}
+
+/** Объявление в админке (backend: `GET /v1/admin/ads`) — с внутренними полями. */
+export interface AdminAd {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  targetUrl: string;
+  isActive: boolean;
+  sortOrder: number;
+  imagePathWatch: string | null;
+  imagePathCatalog: string | null;
+  createdAt: string;
+}
+
+/** Статистика назойливости объявления (backend: `GET /v1/admin/ads/:id/stats`). */
+export interface AdStats {
+  impressions: number;
+  dismissed: number;
+  dismissTimeout: number;
+  dismissNoReason: number;
+  reasons: Record<string, number>;
+  dismissRate: number;
+}
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '/api';

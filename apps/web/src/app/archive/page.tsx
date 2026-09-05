@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { OrgAvatar } from '@/components/OrgAvatar';
+import { AdCatalogBanner } from '@/components/AdCatalogBanner';
 import { fadeUp, staggerContainer, cardFadeUp } from '@/lib/motion';
 import { API_BASE, type ArchiveFeedItem } from '@/lib/types';
 import { Monitor, Play, VideoCamera } from '@phosphor-icons/react';
@@ -52,6 +53,8 @@ export default function ArchivePage() {
           <motion.p variants={fadeUp} className="text-zinc-500 text-sm mb-5">
             Все записи, от новых к старым
           </motion.p>
+
+          <AdCatalogBanner />
 
           {isLoading && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">

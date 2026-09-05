@@ -15,6 +15,7 @@ import { StatsModule } from './stats/stats.module';
 import { SeoModule } from './seo/seo.module';
 import { SearchModule } from './search/search.module';
 import { CapacityModule } from './capacity/capacity.module';
+import { AdsModule } from './ads/ads.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { CapacityModule } from './capacity/capacity.module';
     SeoModule,
     SearchModule,
     CapacityModule,
+    AdsModule,
   ],
   controllers: [HealthController],
 })

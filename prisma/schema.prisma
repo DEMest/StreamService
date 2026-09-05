@@ -216,3 +216,45 @@ model CapacityIncident {
   @@index([startedAt])
   @@index([kind, endedAt])
 }
+
+/// Рекламный плейсхолдер — платформенная фича (управляется суперадмином из
+/// /admin/ads), а не сущность организации. Показывается зрителям на
+/// watch-странице и в каталоге; организациям (org_admin/суперадмин) не
+/// показывается никогда — это решает клиент по своей сессии, не бэкенд.
+///
+/// Картинка — отдельная на каждый плейсмент (`imagePathWatch`/`imagePathCatalog`,
+/// S3-ключи по тому же принципу, что `Organization.imagePath`), потому что
+/// требования к пропорциям разные. NULL — клиент рисует градиент с
+/// инициалами заголовка вместо фото.
+model Ad {
+  id               String    @id @default(cuid())
+  title            String
+  subtitle         String?
+  targetUrl        String
+  isActive         Boolean   @default(true)
+  sortOrder        Int       @default(0)
+  imagePathWatch   String?
+  imagePathCatalog String?
+  createdAt        DateTime  @default(now())
+  events           AdEvent[]
+}
+
+/// Событие показа/закрытия рекламы. Никакой привязки к человеку — тот же
+/// принцип приватности, что у QoE-телеметрии плеера (см. CapacitySample):
+/// только счётчики, на них строится ответ на вопрос «не слишком ли навязчива
+/// реклама», а не профиль зрителя. Клики не считаем — трекинг перехода
+/// зашивает в свою ссылку сам рекламодатель.
+model AdEvent {
+  id        String   @id @default(cuid())
+  adId      String
+  ad        Ad       @relation(fields: [adId], references: [id], onDelete: Cascade)
+  /// 'watch' | 'catalog'
+  placement String
+  /// 'impression' | 'dismiss_timeout' | 'dismiss_no_reason' | 'dismiss_reason'
+  kind      String
+  /// Заполняется только при kind = 'dismiss_reason'.
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([adId, kind])
+}
