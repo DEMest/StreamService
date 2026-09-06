@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from '@phosphor-icons/react';
-import type { PublicAd } from '@/lib/types';
+import { API_BASE, type PublicAd } from '@/lib/types';
 import { adGradient, adInitials } from '@/lib/ad-fallback';
 import { sendAdEvent } from '@/lib/ad-events';
 import { useAdsGate } from '@/hooks/useAdsGate';
@@ -81,7 +81,7 @@ export function AdCatalogBanner() {
           onClick={() => window.open(ad.targetUrl, '_blank', 'noopener,noreferrer')}
         >
           {ad.catalogImageUrl ? (
-            <img src={ad.catalogImageUrl} alt={ad.title} className="absolute inset-0 w-full h-full object-contain bg-black" />
+            <img src={`${API_BASE}${ad.catalogImageUrl}`} alt={ad.title} className="absolute inset-0 w-full h-full object-contain bg-black" />
           ) : (
             <div
               className="absolute inset-0 flex items-center justify-center text-white font-bold text-lg"
