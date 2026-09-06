@@ -31,8 +31,16 @@ export const SECTIONS: Section[] = [
   { path: '/dashboard', roles: ['org_admin'], home: 'org_admin' },
 ];
 
+/**
+ * Раздел, которому принадлежит путь.
+ *
+ * Сравнение по границе сегмента, а не голым `startsWith`: иначе будущий
+ * `/admin/adsettings` попал бы под правило `/admin/ads` и открылся бы
+ * рекламному менеджеру — молча, без единой ошибки. Сейчас таких маршрутов нет,
+ * но цена ошибки здесь — чужой раздел у чужой роли.
+ */
 export function sectionFor(pathname: string): Section | null {
-  return SECTIONS.find((s) => pathname.startsWith(s.path)) ?? null;
+  return SECTIONS.find((s) => pathname === s.path || pathname.startsWith(`${s.path}/`)) ?? null;
 }
 
 /**
