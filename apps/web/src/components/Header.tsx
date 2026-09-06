@@ -4,7 +4,8 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/lib/api';
-import { Broadcast, SignIn, SignOut, Monitor, List, X, Buildings, MagnifyingGlass } from '@phosphor-icons/react';
+import { Broadcast, SignIn, SignOut, Monitor, List, X, Buildings, MagnifyingGlass, Megaphone } from '@phosphor-icons/react';
+import type { Icon } from '@phosphor-icons/react';
 import { FeedbackTrigger } from '@/components/FeedbackButton';
 import { FeedbackModal } from '@/components/FeedbackModal';
 
@@ -16,6 +17,20 @@ const NAV_LINKS = [
   { href: '/archive', label: 'Архив' },
   { href: '/organizations', label: 'Организации' },
 ];
+
+/**
+ * Главная кнопка шапки у вошедшего — путь в его собственный раздел. Таблицей, а
+ * не тернаркой: с появлением рекламного менеджера ролей стало три, и ветка «все,
+ * кто не суперадмин» отправляла бы его в /dashboard, откуда middleware тут же
+ * развернёт.
+ */
+const HOME_LINK: Record<string, { href: string; label: string; icon: Icon }> = {
+  superadmin: { href: '/admin', label: 'Организации', icon: Buildings },
+  ad_manager: { href: '/admin/ads', label: 'Реклама', icon: Megaphone },
+  org_admin: { href: '/dashboard', label: 'Студия', icon: Broadcast },
+};
+
+const DEFAULT_HOME = HOME_LINK.org_admin;
 
 export function Header() {
   const qc = useQueryClient();
@@ -31,6 +46,9 @@ export function Header() {
     queryFn: () => api.get<Me>('/v1/auth/me'),
     retry: false,
   });
+
+  const home = me ? (HOME_LINK[me.role] ?? DEFAULT_HOME) : null;
+  const HomeIcon = home?.icon;
 
   async function handleLogout() {
     await api.post('/v1/auth/logout', {});
@@ -94,21 +112,13 @@ export function Header() {
                   Моя страница
                 </Link>
               )}
-              {me.role === 'superadmin' ? (
+              {home && HomeIcon && (
                 <Link
-                  href="/admin"
+                  href={home.href}
                   className="flex items-center gap-1.5 bg-brand hover:bg-brand-hover text-white no-underline text-sm font-medium px-3 py-1.5 rounded-lg transition-all duration-200 active:scale-[0.98]"
                 >
-                  <Buildings size={16} weight="fill" />
-                  Организации
-                </Link>
-              ) : (
-                <Link
-                  href="/dashboard"
-                  className="flex items-center gap-1.5 bg-brand hover:bg-brand-hover text-white no-underline text-sm font-medium px-3 py-1.5 rounded-lg transition-all duration-200 active:scale-[0.98]"
-                >
-                  <Broadcast size={16} weight="fill" />
-                  Студия
+                  <HomeIcon size={16} weight="fill" />
+                  {home.label}
                 </Link>
               )}
               <button
@@ -183,15 +193,10 @@ export function Header() {
                       <Monitor size={16} /> Моя страница
                     </Link>
                   )}
-                  {me.role === 'superadmin' ? (
-                    <Link href="/admin" onClick={() => setMenuOpen(false)}
+                  {home && HomeIcon && (
+                    <Link href={home.href} onClick={() => setMenuOpen(false)}
                       className="flex items-center gap-2 px-4 py-3 text-brand no-underline text-sm font-medium rounded-lg hover:bg-brand/10 transition-colors">
-                      <Buildings size={16} weight="fill" /> Организации
-                    </Link>
-                  ) : (
-                    <Link href="/dashboard" onClick={() => setMenuOpen(false)}
-                      className="flex items-center gap-2 px-4 py-3 text-brand no-underline text-sm font-medium rounded-lg hover:bg-brand/10 transition-colors">
-                      <Broadcast size={16} weight="fill" /> Студия
+                      <HomeIcon size={16} weight="fill" /> {home.label}
                     </Link>
                   )}
                   <button onClick={() => { handleLogout(); setMenuOpen(false); }}

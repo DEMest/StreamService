@@ -64,6 +64,14 @@ export default function AdminAdsPage() {
     queryFn: () => api.get<AdminAd[]>('/v1/admin/ads'),
   });
 
+  // Тот же ключ и тот же запрос, что в Header — React Query отдаст ответ из
+  // кэша, второго похода в сеть не будет.
+  const { data: me } = useQuery({
+    queryKey: ['me'],
+    queryFn: () => api.get<{ role: string }>('/v1/auth/me'),
+    retry: false,
+  });
+
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin-ads'] });
 
   const createMutation = useMutation({
@@ -86,12 +94,16 @@ export default function AdminAdsPage() {
   return (
     <PublicLayout>
       <div className="max-w-[920px] mx-auto px-6 py-8">
-        <Link
-          href="/admin"
-          className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 mb-4 no-underline transition-colors"
-        >
-          <ArrowLeft size={12} /> К организациям
-        </Link>
+        {/* Рекламному менеджеру этой ссылки не показываем: раздела организаций
+            у него нет, а на его поддомене /admin даже не проксируется. */}
+        {me?.role === 'superadmin' && (
+          <Link
+            href="/admin"
+            className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 mb-4 no-underline transition-colors"
+          >
+            <ArrowLeft size={12} /> К организациям
+          </Link>
+        )}
 
         <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
           <h1 className="text-xl font-semibold text-zinc-50 tracking-tight">Реклама</h1>

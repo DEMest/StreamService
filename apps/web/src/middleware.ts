@@ -5,20 +5,33 @@ import { NextRequest, NextResponse } from 'next/server';
  * гвард вернёт 403 на запросы к API, но страницу это не остановит — админ
  * организации до сих пор мог открыть /admin и смотреть на пустой каркас,
  * который сыплет 403 в консоль. Роль решается здесь, до рендера.
+ *
+ * Массив, а не объект: порядок задаёт приоритет поиска префикса, и
+ * `/admin/ads` обязан стоять раньше `/admin` — иначе рекламный менеджер
+ * упрётся в правило раздела организаций, куда ему нельзя.
+ *
+ * `home` помечает, чей это раздел по умолчанию. Это по-прежнему один список, а
+ * не два расходящихся, но вычислить дом из одних `roles` больше нельзя: у
+ * /admin/ads их две, и обе имеют на раздел полное право.
  */
-const SECTION_ROLE: Record<string, string> = {
-  '/admin': 'superadmin',
-  '/dashboard': 'org_admin',
-};
+interface Section {
+  path: string;
+  roles: string[];
+  home: string;
+}
 
-function sectionFor(pathname: string): string | null {
-  return Object.keys(SECTION_ROLE).find((p) => pathname.startsWith(p)) ?? null;
+const SECTIONS: Section[] = [
+  { path: '/admin/ads', roles: ['superadmin', 'ad_manager'], home: 'ad_manager' },
+  { path: '/admin', roles: ['superadmin'], home: 'superadmin' },
+  { path: '/dashboard', roles: ['org_admin'], home: 'org_admin' },
+];
+
+function sectionFor(pathname: string): Section | null {
+  return SECTIONS.find((s) => pathname.startsWith(s.path)) ?? null;
 }
 
 /**
- * Куда уводить того, кто попал в чужой раздел — его собственный раздел.
- * Считается из той же таблицы, а не задаётся вторым списком: разъехавшись, они
- * отправляли бы человека ровно туда, откуда его только что развернули.
+ * Куда уводить того, кто попал в чужой раздел — в его собственный.
  *
  * Хост при этом не важен, топологию знает конфиг nginx, а не приложение. У
  * суперадмина на основном домене `/admin` встретит редирект на admin.<домен>;
@@ -27,7 +40,7 @@ function sectionFor(pathname: string): string | null {
  * но приводят человека туда, где его раздел действительно работает.
  */
 function homeForRole(role: string): string {
-  return Object.entries(SECTION_ROLE).find(([, r]) => r === role)?.[0] ?? '/';
+  return SECTIONS.find((s) => s.home === role)?.path ?? '/';
 }
 
 /**
@@ -37,11 +50,11 @@ function homeForRole(role: string): string {
  */
 function responseForRole(
   payload: Record<string, unknown> | null,
-  section: string,
+  section: Section,
   req: NextRequest,
 ): NextResponse {
   const role = typeof payload?.role === 'string' ? payload.role : null;
-  if (role && role !== SECTION_ROLE[section]) {
+  if (role && !section.roles.includes(role)) {
     return NextResponse.redirect(new URL(homeForRole(role), req.url));
   }
   return NextResponse.next();

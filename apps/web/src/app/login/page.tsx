@@ -6,6 +6,17 @@ import { api } from '@/lib/api';
 import { Footer } from '@/components/Footer';
 import { Eye, EyeSlash, Warning, Broadcast, VideoCamera, ChatCircle, Archive } from '@phosphor-icons/react';
 
+/**
+ * Куда уводить после входа. Совпадает с таблицей разделов в middleware.ts —
+ * промахнувшись, отправили бы человека на страницу, с которой тот же
+ * middleware его тут же и развернёт.
+ */
+const HOME_BY_ROLE: Record<string, string> = {
+  superadmin: '/admin',
+  ad_manager: '/admin/ads',
+  org_admin: '/dashboard',
+};
+
 export default function LoginPage() {
   const router = useRouter();
   const [login, setLogin] = useState('');
@@ -20,7 +31,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await api.post<{ role: string }>('/v1/auth/login', { login, password });
-      router.push(res.role === 'superadmin' ? '/admin' : '/dashboard');
+      router.push(HOME_BY_ROLE[res.role] ?? '/dashboard');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Неверный логин или пароль');
     } finally {
