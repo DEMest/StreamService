@@ -11,8 +11,12 @@ model User {
   id           String   @id @default(cuid())
   login        String   @unique
   passwordHash String
+  /// 'superadmin' | 'ad_manager'. Рекламный менеджер — не администратор
+  /// платформы: ему доступна только вкладка рекламы (см. Ad.ownerId).
   role         String   @default("superadmin")
   createdAt    DateTime @default(now())
+  // Relations
+  ads          Ad[]
 }
 
 model Organization {
@@ -235,8 +239,17 @@ model Ad {
   sortOrder        Int       @default(0)
   imagePathWatch   String?
   imagePathCatalog String?
+  /// Кто завёл объявление. На одном и том же экране /admin/ads суперадмин
+  /// видит только свои строки, а рекламный менеджер (role='ad_manager') —
+  /// все: это разделение видимости, а не разграничение прав.
+  /// NULL — владелец удалён (onDelete: SetNull); такое объявление остаётся
+  /// видно только менеджеру.
+  ownerId          String?
+  owner            User?     @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   createdAt        DateTime  @default(now())
   events           AdEvent[]
+
+  @@index([ownerId])
 }
 
 /// Событие показа/закрытия рекламы. Никакой привязки к человеку — тот же
