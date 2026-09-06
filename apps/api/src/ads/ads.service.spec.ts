@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AdsService } from './ads.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ImageService } from '../storage/image.service';
+import type { JwtPayload } from '../auth/auth.service';
 
 const mockPrisma = {
   ad: {
@@ -34,8 +35,13 @@ const AD = {
   sortOrder: 0,
   imagePathWatch: null,
   imagePathCatalog: null,
+  ownerId: 'admin1',
   createdAt: new Date('2026-09-01T00:00:00.000Z'),
 };
+
+const ADMIN: JwtPayload = { sub: 'admin1', role: 'superadmin' };
+const OTHER_ADMIN: JwtPayload = { sub: 'admin2', role: 'superadmin' };
+const MANAGER: JwtPayload = { sub: 'mgr1', role: 'ad_manager' };
 
 describe('AdsService', () => {
   let service: AdsService;
@@ -58,23 +64,23 @@ describe('AdsService', () => {
 
   describe('create', () => {
     it('отвергает пустой заголовок', async () => {
-      await expect(service.create({ title: '  ', targetUrl: 'https://x.com' })).rejects.toBeInstanceOf(
+      await expect(service.create({ title: '  ', targetUrl: 'https://x.com' }, ADMIN)).rejects.toBeInstanceOf(
         BadRequestException,
       );
     });
 
     it('отвергает отсутствующую ссылку', async () => {
-      await expect(service.create({ title: 'Реклама' } as any)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.create({ title: 'Реклама' } as any, ADMIN)).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('отвергает ссылку без http/https схемы — иначе хранимая XSS через javascript:', async () => {
       await expect(
-        service.create({ title: 'Реклама', targetUrl: 'javascript:alert(1)' }),
+        service.create({ title: 'Реклама', targetUrl: 'javascript:alert(1)' }, ADMIN),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('обрезает пробелы в заголовке и ссылке', async () => {
-      await service.create({ title: '  Реклама  ', targetUrl: '  https://x.com  ' });
+      await service.create({ title: '  Реклама  ', targetUrl: '  https://x.com  ' }, ADMIN);
       expect(mockPrisma.ad.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ title: 'Реклама', targetUrl: 'https://x.com' }) }),
       );
@@ -82,7 +88,7 @@ describe('AdsService', () => {
 
     it('создаёт объявление с валидными полями', async () => {
       await expect(
-        service.create({ title: 'Реклама', targetUrl: 'https://example.com', subtitle: 'Подзаголовок' }),
+        service.create({ title: 'Реклама', targetUrl: 'https://example.com', subtitle: 'Подзаголовок' }, ADMIN),
       ).resolves.toMatchObject({ title: 'Реклама' });
     });
   });
@@ -90,16 +96,16 @@ describe('AdsService', () => {
   describe('update', () => {
     it('404, если объявления нет', async () => {
       mockPrisma.ad.findUnique.mockResolvedValue(null);
-      await expect(service.update('нет', { title: 'X' })).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.update('нет', { title: 'X' }, ADMIN)).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('позволяет частичное обновление без остальных полей', async () => {
-      await service.update('ad1', { isActive: false });
+      await service.update('ad1', { isActive: false }, ADMIN);
       expect(mockPrisma.ad.update).toHaveBeenCalledWith({ where: { id: 'ad1' }, data: { isActive: false } });
     });
 
     it('отвергает подмену ссылки на javascript: так же, как create', async () => {
-      await expect(service.update('ad1', { targetUrl: 'javascript:alert(1)' })).rejects.toBeInstanceOf(
+      await expect(service.update('ad1', { targetUrl: 'javascript:alert(1)' }, ADMIN)).rejects.toBeInstanceOf(
         BadRequestException,
       );
       expect(mockPrisma.ad.update).not.toHaveBeenCalled();
@@ -107,7 +113,7 @@ describe('AdsService', () => {
 
     it('P2025 из Prisma превращается в 404', async () => {
       mockPrisma.ad.update.mockRejectedValue({ code: 'P2025' });
-      await expect(service.update('ad1', { title: 'X' })).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.update('ad1', { title: 'X' }, ADMIN)).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
@@ -119,7 +125,7 @@ describe('AdsService', () => {
         imagePathCatalog: 'images/ad/ad1-catalog.jpg',
       });
 
-      await service.remove('ad1');
+      await service.remove('ad1', ADMIN);
 
       expect(mockImages.delete).toHaveBeenCalledWith('images/ad/ad1-watch.jpg');
       expect(mockImages.delete).toHaveBeenCalledWith('images/ad/ad1-catalog.jpg');
@@ -127,14 +133,14 @@ describe('AdsService', () => {
     });
 
     it('не трогает ImageService, если картинок не было', async () => {
-      await service.remove('ad1');
+      await service.remove('ad1', ADMIN);
       expect(mockImages.delete).not.toHaveBeenCalled();
     });
   });
 
   describe('изображения по плейсментам', () => {
     it('загрузка watch-картинки пишет в imagePathWatch как Medium Rectangle 300×250 без обрезки (contain), не задевая imagePathCatalog', async () => {
-      await service.uploadImage('ad1', 'watch', Buffer.from('img'), 'image/jpeg');
+      await service.uploadImage('ad1', 'watch', Buffer.from('img'), 'image/jpeg', ADMIN);
       expect(mockImages.upload).toHaveBeenCalledWith('images/ad/ad1-watch.jpg', expect.any(Buffer), 300, 250, 'contain');
       expect(mockPrisma.ad.update).toHaveBeenCalledWith({
         where: { id: 'ad1' },
@@ -143,7 +149,7 @@ describe('AdsService', () => {
     });
 
     it('загрузка catalog-картинки пишет в imagePathCatalog как Leaderboard 728×90 без обрезки (contain)', async () => {
-      await service.uploadImage('ad1', 'catalog', Buffer.from('img'), 'image/jpeg');
+      await service.uploadImage('ad1', 'catalog', Buffer.from('img'), 'image/jpeg', ADMIN);
       expect(mockImages.upload).toHaveBeenCalledWith('images/ad/ad1-catalog.jpg', expect.any(Buffer), 728, 90, 'contain');
       expect(mockPrisma.ad.update).toHaveBeenCalledWith({
         where: { id: 'ad1' },
@@ -175,7 +181,7 @@ describe('AdsService', () => {
 
     it('удаление картинки чистит S3-объект и обнуляет колонку', async () => {
       mockPrisma.ad.findUnique.mockResolvedValue({ ...AD, imagePathWatch: 'images/ad/ad1-watch.jpg' });
-      await service.deleteImage('ad1', 'watch');
+      await service.deleteImage('ad1', 'watch', ADMIN);
       expect(mockImages.delete).toHaveBeenCalledWith('images/ad/ad1-watch.jpg');
       expect(mockPrisma.ad.update).toHaveBeenCalledWith({ where: { id: 'ad1' }, data: { imagePathWatch: null } });
     });
@@ -256,7 +262,7 @@ describe('AdsService', () => {
   describe('stats', () => {
     it('404, если объявления нет', async () => {
       mockPrisma.ad.findUnique.mockResolvedValue(null);
-      await expect(service.stats('нет')).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.stats('нет', ADMIN)).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('агрегирует показы, тайм-ауты и причины закрытия по отдельности', async () => {
@@ -268,7 +274,7 @@ describe('AdsService', () => {
         { kind: 'dismiss_reason', reason: 'Слишком часто', _count: 1 },
       ]);
 
-      const stats = await service.stats('ad1');
+      const stats = await service.stats('ad1', ADMIN);
 
       expect(stats).toMatchObject({
         impressions: 10,
@@ -282,8 +288,70 @@ describe('AdsService', () => {
 
     it('dismissRate = 0, если показов ещё не было', async () => {
       mockPrisma.adEvent.groupBy.mockResolvedValue([]);
-      const stats = await service.stats('ad1');
+      const stats = await service.stats('ad1', ADMIN);
       expect(stats.dismissRate).toBe(0);
+    });
+  });
+
+  describe('владение объявлением', () => {
+    it('суперадмину список фильтруется по его ownerId', async () => {
+      mockPrisma.ad.findMany.mockResolvedValue([]);
+      await service.listAdmin(ADMIN);
+      expect(mockPrisma.ad.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ownerId: 'admin1' } }),
+      );
+    });
+
+    it('рекламному менеджеру список не фильтруется — он видит всю платформу', async () => {
+      mockPrisma.ad.findMany.mockResolvedValue([]);
+      await service.listAdmin(MANAGER);
+      expect(mockPrisma.ad.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: {} }),
+      );
+    });
+
+    it('create проставляет владельцем того, кто создаёт', async () => {
+      await service.create({ title: 'Банк', targetUrl: 'https://a.example' }, MANAGER);
+      expect(mockPrisma.ad.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ ownerId: 'mgr1' }) }),
+      );
+    });
+
+    it('чужое объявление для суперадмина — 404, а не 403: существование не подтверждаем', async () => {
+      await expect(service.update('ad1', { title: 'Новый' }, OTHER_ADMIN))
+        .rejects.toBeInstanceOf(NotFoundException);
+      expect(mockPrisma.ad.update).not.toHaveBeenCalled();
+    });
+
+    it('чужое объявление нельзя и удалить — картинки при этом не трогаются', async () => {
+      await expect(service.remove('ad1', OTHER_ADMIN)).rejects.toBeInstanceOf(NotFoundException);
+      expect(mockPrisma.ad.delete).not.toHaveBeenCalled();
+      expect(mockImages.delete).not.toHaveBeenCalled();
+    });
+
+    it('статистика чужого объявления суперадмину тоже не отдаётся', async () => {
+      await expect(service.stats('ad1', OTHER_ADMIN)).rejects.toBeInstanceOf(NotFoundException);
+      expect(mockPrisma.adEvent.groupBy).not.toHaveBeenCalled();
+    });
+
+    it('менеджер правит чужое объявление свободно', async () => {
+      await expect(service.update('ad1', { title: 'Новый' }, MANAGER)).resolves.toBeDefined();
+      expect(mockPrisma.ad.update).toHaveBeenCalled();
+    });
+
+    it('объявление без владельца видит менеджер, но не суперадмин', async () => {
+      mockPrisma.ad.findUnique.mockResolvedValue({ ...AD, ownerId: null });
+      await expect(service.update('ad1', { title: 'Новый' }, MANAGER)).resolves.toBeDefined();
+      await expect(service.update('ad1', { title: 'Новый' }, ADMIN))
+        .rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('публичная выдача не смотрит на владельца', async () => {
+      mockPrisma.ad.findMany.mockResolvedValue([]);
+      await service.listActive();
+      expect(mockPrisma.ad.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { isActive: true } }),
+      );
     });
   });
 });
