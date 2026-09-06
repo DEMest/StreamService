@@ -12,7 +12,10 @@ const mockPrisma = {
   organization: { findUnique: jest.fn() },
 };
 
-const mockJwt = { signAsync: jest.fn().mockResolvedValue('token') };
+const mockJwt = {
+  signAsync: jest.fn().mockResolvedValue('token'),
+  verifyAsync: jest.fn(),
+};
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -61,5 +64,31 @@ describe('AuthService', () => {
       id: 'org1', slug: 'club', passwordHash: hash('key'), isActive: false,
     });
     await expect(service.login('club', 'key')).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('выдаёт роль ad_manager пользователю с этой ролью в БД, а не superadmin', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 'u2', login: 'admanager', passwordHash: hash('pass'), role: 'ad_manager',
+    });
+    const result = await service.login('admanager', 'pass');
+    expect(result.role).toBe('ad_manager');
+  });
+
+  it('неизвестную роль в БД трактует как superadmin — это дефолт схемы', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 'u3', login: 'legacy', passwordHash: hash('pass'), role: 'что-то своё',
+    });
+    const result = await service.login('legacy', 'pass');
+    expect(result.role).toBe('superadmin');
+  });
+
+  it('refresh перечитывает роль ad_manager из БД, а не берёт её из токена', async () => {
+    mockJwt.verifyAsync.mockResolvedValue({ sub: 'u2', role: 'ad_manager', type: 'refresh' });
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 'u2', login: 'admanager', passwordHash: hash('pass'), role: 'ad_manager',
+    });
+    const result = await service.refresh('raw-refresh-token');
+    expect(result.role).toBe('ad_manager');
+    expect(result.login).toBe('admanager');
   });
 });
