@@ -333,10 +333,17 @@ function AdImageSlot({
 
       <input
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept="image/jpeg,image/png,image/webp,image/gif"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) setCropFile(file);
+          if (!file) return;
+          if (file.type === 'image/gif') {
+            // GIF — сразу на сервер: canvas-кроппер умеет только один кадр,
+            // а обрезать анимацию по кадрам мы не беремся (см. AdsService).
+            uploadMutation.mutate(file);
+          } else {
+            setCropFile(file);
+          }
           e.target.value = '';
         }}
         className="mt-2 text-[10px] text-zinc-500 file:mr-2 file:px-2 file:py-1 file:bg-zinc-800 file:hover:bg-zinc-700 file:text-zinc-200 file:text-[10px] file:font-medium file:rounded file:border-0 file:cursor-pointer cursor-pointer w-full"
@@ -345,6 +352,7 @@ function AdImageSlot({
       {uploadMutation.isError && <p className="text-[10px] text-red-400 mt-1">{uploadMutation.error?.message}</p>}
       <p className="text-[10px] text-zinc-600 mt-1">
         {hasImage ? spec.label : `Готовый баннер ${spec.label}. Без картинки — градиент с инициалами.`}
+        {' '}GIF — сразу как есть, без окна кропа: подготовьте нужный размер заранее.
       </p>
 
       {cropFile && (

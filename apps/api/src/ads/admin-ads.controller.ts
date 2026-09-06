@@ -52,8 +52,10 @@ export class AdminAdsController {
     return this.ads.stats(id);
   }
 
+  // GIF допускаем ради анимированных баннеров (см. AdsService.uploadImage) —
+  // такие файлы тяжелее статичных, отсюда лимит выше, чем у превью орги/стрима.
   @Post(':id/image/:placement')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
   uploadImage(
     @Param('id') id: string,
     @Param('placement') placement: string,
@@ -61,10 +63,10 @@ export class AdminAdsController {
   ) {
     const p = parsePlacement(placement);
     if (!file) throw new BadRequestException('No file uploaded');
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
-      throw new BadRequestException('Only JPEG, PNG and WebP images are allowed');
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype)) {
+      throw new BadRequestException('Only JPEG, PNG, WebP and GIF images are allowed');
     }
-    return this.ads.uploadImage(id, p, file.buffer);
+    return this.ads.uploadImage(id, p, file.buffer, file.mimetype);
   }
 
   @Delete(':id/image/:placement')

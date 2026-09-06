@@ -93,12 +93,33 @@ export class AdsService {
     return { ok: true };
   }
 
-  async uploadImage(id: string, placement: AdPlacement, buffer: Buffer) {
-    await this.requireAd(id);
-    const key = `images/ad/${id}-${placement}.jpg`;
+  /**
+   * `mimetype === 'image/gif'` идёт отдельным путём: анимация сохраняется
+   * (выход всегда webp — JPEG анимировать не умеет), но кроп на входе не
+   * применяется (canvas-кроппер видит только один кадр), поэтому картинка
+   * только вписывается в размер (см. ImageService.uploadAnimated).
+   *
+   * Расширение хранимого ключа меняется в зависимости от формата
+   * (.jpg / .webp) — если у объявления уже была картинка другого формата
+   * под этим плейсментом, старый файл в S3 не переживёт замену и его нужно
+   * подчистить отдельно, иначе он останется висеть мусором.
+   */
+  async uploadImage(id: string, placement: AdPlacement, buffer: Buffer, mimetype: string) {
+    const ad = await this.requireAd(id);
     const { width, height } = PLACEMENT_IMAGE_SIZE[placement];
-    // contain, не cover: это готовый баннер рекламодателя, обрезать его нельзя.
-    await this.images.upload(key, buffer, width, height, 'contain');
+    const animated = mimetype === 'image/gif';
+    const key = `images/ad/${id}-${placement}.${animated ? 'webp' : 'jpg'}`;
+
+    if (animated) {
+      await this.images.uploadAnimated(key, buffer, width, height);
+    } else {
+      // contain, не cover: это готовый баннер рекламодателя, обрезать его нельзя.
+      await this.images.upload(key, buffer, width, height, 'contain');
+    }
+
+    const oldKey = ad[PLACEMENT_FIELD[placement]];
+    if (oldKey && oldKey !== key) await this.images.delete(oldKey);
+
     return this.prisma.ad.update({ where: { id }, data: { [PLACEMENT_FIELD[placement]]: key } });
   }
 
@@ -192,14 +213,18 @@ export class AdsService {
     }));
   }
 
-  async serveImage(id: string, placement: AdPlacement): Promise<Buffer | null> {
+  async serveImage(id: string, placement: AdPlacement): Promise<{ buffer: Buffer; contentType: string } | null> {
     const ad = await this.prisma.ad.findUnique({
       where: { id },
       select: { imagePathWatch: true, imagePathCatalog: true },
     });
     const key = ad?.[PLACEMENT_FIELD[placement]];
     if (!key) return null;
-    return this.images.serve(key);
+    const buffer = await this.images.serve(key);
+    if (!buffer) return null;
+    // Формат зашит в расширение ключа (см. uploadImage) — отдельного поля в
+    // базе под это заводить незачем, S3-ключ уже несёт эту информацию.
+    return { buffer, contentType: key.endsWith('.webp') ? 'image/webp' : 'image/jpeg' };
   }
 
   /**
