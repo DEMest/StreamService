@@ -1,8 +1,9 @@
-// Мокаем sharp целиком: цепочка resize().jpeg().toBuffer().
+// Мокаем sharp целиком: цепочка resize().jpeg()/webp().toBuffer().
 jest.mock('sharp', () => {
   const chain = {
     resize: jest.fn().mockReturnThis(),
     jpeg: jest.fn().mockReturnThis(),
+    webp: jest.fn().mockReturnThis(),
     toBuffer: jest.fn().mockResolvedValue(Buffer.from('processed-jpeg')),
   };
   const factory = jest.fn(() => chain);
@@ -31,6 +32,7 @@ describe('ImageService', () => {
     jest.clearAllMocks();
     sharpChain.resize.mockReturnThis();
     sharpChain.jpeg.mockReturnThis();
+    sharpChain.webp.mockReturnThis();
     sharpChain.toBuffer.mockResolvedValue(Buffer.from('processed-jpeg'));
     const module = await Test.createTestingModule({
       providers: [ImageService, { provide: S3Service, useValue: mockS3 }],
@@ -73,6 +75,31 @@ describe('ImageService', () => {
       expect(mockS3.putObject).toHaveBeenCalledWith(
         'images/stream/st-1.jpg', Buffer.from('processed-jpeg'), 'image/jpeg',
       );
+    });
+  });
+
+  describe('processToAnimatedWebp / uploadAnimated', () => {
+    it('декодирует все кадры (animated:true), вписывает без обрезки и кодирует в webp', async () => {
+      await service.processToAnimatedWebp(Buffer.from('raw-gif'), 728, 90);
+      expect(sharp).toHaveBeenCalledWith(Buffer.from('raw-gif'), { animated: true });
+      expect(sharpChain.resize).toHaveBeenCalledWith(728, 90, {
+        fit: 'contain',
+        background: { r: 12, g: 12, b: 14, alpha: 1 },
+      });
+      expect(sharpChain.webp).toHaveBeenCalledWith({ quality: 80 });
+    });
+
+    it('uploadAnimated кладёт результат в S3 с Content-Type image/webp', async () => {
+      await service.uploadAnimated('images/ad/a1-catalog.webp', Buffer.from('raw-gif'), 728, 90);
+      expect(mockS3.putObject).toHaveBeenCalledWith(
+        'images/ad/a1-catalog.webp', Buffer.from('processed-jpeg'), 'image/webp',
+      );
+    });
+
+    it('throws BadRequestException when sharp cannot decode', async () => {
+      sharpChain.toBuffer.mockRejectedValue(new Error('unsupported format'));
+      await expect(service.processToAnimatedWebp(Buffer.from('not-an-image'), 728, 90))
+        .rejects.toBeInstanceOf(BadRequestException);
     });
   });
 

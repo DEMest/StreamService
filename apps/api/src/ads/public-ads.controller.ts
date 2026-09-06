@@ -26,13 +26,13 @@ export class PublicAdsController {
     @Res() res: Response,
   ) {
     const p = parsePlacement(placement);
-    const buffer = p ? await this.ads.serveImage(id, p) : null;
-    if (!buffer) {
+    const result = p ? await this.ads.serveImage(id, p) : null;
+    if (!result) {
       res.status(404).end();
       return;
     }
-    res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=300' });
-    res.send(buffer);
+    res.set({ 'Content-Type': result.contentType, 'Cache-Control': 'public, max-age=300' });
+    res.send(result.buffer);
   }
 
   /**

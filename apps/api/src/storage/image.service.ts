@@ -67,6 +67,33 @@ export class ImageService {
     await this.s3.putObject(key, jpeg, 'image/jpeg');
   }
 
+  /**
+   * Как upload(), но сохраняет анимацию (GIF → анимированный WebP). JPEG
+   * анимацию не умеет в принципе, поэтому формат вывода тут всегда webp.
+   * `{ animated: true }` в конструкторе sharp — иначе он возьмёт только
+   * первый кадр, как и обычный `upload()`.
+   *
+   * Кроп на входе не проходит (см. AdsService/AdImageSlot): canvas-кроппер
+   * умеет работать только с одним кадром, поэтому анимированный баннер
+   * сервер только безопасно вписывает в размер (fit: contain, как и статику
+   * с чужими пропорциями) — обрезать анимацию по кадрам мы не беремся.
+   */
+  async processToAnimatedWebp(buffer: Buffer, width: number, height: number): Promise<Buffer> {
+    try {
+      return await sharp(buffer, { animated: true })
+        .resize(width, height, { fit: 'contain', background: { r: 12, g: 12, b: 14, alpha: 1 } })
+        .webp({ quality: 80 })
+        .toBuffer();
+    } catch {
+      throw new BadRequestException('Invalid image file');
+    }
+  }
+
+  async uploadAnimated(key: string, buffer: Buffer, width: number, height: number): Promise<void> {
+    const webp = await this.processToAnimatedWebp(buffer, width, height);
+    await this.s3.putObject(key, webp, 'image/webp');
+  }
+
   /** null — объекта нет/S3 недоступен; контроллеры превращают это в 404. */
   async serve(key: string): Promise<Buffer | null> {
     try {

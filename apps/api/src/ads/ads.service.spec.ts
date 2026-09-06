@@ -20,6 +20,7 @@ const mockPrisma = {
 
 const mockImages = {
   upload: jest.fn(),
+  uploadAnimated: jest.fn(),
   serve: jest.fn(),
   delete: jest.fn(),
 };
@@ -133,7 +134,7 @@ describe('AdsService', () => {
 
   describe('изображения по плейсментам', () => {
     it('загрузка watch-картинки пишет в imagePathWatch как Medium Rectangle 300×250 без обрезки (contain), не задевая imagePathCatalog', async () => {
-      await service.uploadImage('ad1', 'watch', Buffer.from('img'));
+      await service.uploadImage('ad1', 'watch', Buffer.from('img'), 'image/jpeg');
       expect(mockImages.upload).toHaveBeenCalledWith('images/ad/ad1-watch.jpg', expect.any(Buffer), 300, 250, 'contain');
       expect(mockPrisma.ad.update).toHaveBeenCalledWith({
         where: { id: 'ad1' },
@@ -142,12 +143,34 @@ describe('AdsService', () => {
     });
 
     it('загрузка catalog-картинки пишет в imagePathCatalog как Leaderboard 728×90 без обрезки (contain)', async () => {
-      await service.uploadImage('ad1', 'catalog', Buffer.from('img'));
+      await service.uploadImage('ad1', 'catalog', Buffer.from('img'), 'image/jpeg');
       expect(mockImages.upload).toHaveBeenCalledWith('images/ad/ad1-catalog.jpg', expect.any(Buffer), 728, 90, 'contain');
       expect(mockPrisma.ad.update).toHaveBeenCalledWith({
         where: { id: 'ad1' },
         data: { imagePathCatalog: 'images/ad/ad1-catalog.jpg' },
       });
+    });
+
+    it('GIF идёт через uploadAnimated и сохраняется как .webp, а не .jpg', async () => {
+      await service.uploadImage('ad1', 'catalog', Buffer.from('gif'), 'image/gif');
+      expect(mockImages.uploadAnimated).toHaveBeenCalledWith('images/ad/ad1-catalog.webp', expect.any(Buffer), 728, 90);
+      expect(mockImages.upload).not.toHaveBeenCalled();
+      expect(mockPrisma.ad.update).toHaveBeenCalledWith({
+        where: { id: 'ad1' },
+        data: { imagePathCatalog: 'images/ad/ad1-catalog.webp' },
+      });
+    });
+
+    it('смена формата (jpg → gif) подчищает старый файл в S3, чтобы не оставался мусором', async () => {
+      mockPrisma.ad.findUnique.mockResolvedValue({ ...AD, imagePathCatalog: 'images/ad/ad1-catalog.jpg' });
+      await service.uploadImage('ad1', 'catalog', Buffer.from('gif'), 'image/gif');
+      expect(mockImages.delete).toHaveBeenCalledWith('images/ad/ad1-catalog.jpg');
+    });
+
+    it('повторная загрузка в том же формате не трогает ImageService.delete — ключ не меняется', async () => {
+      mockPrisma.ad.findUnique.mockResolvedValue({ ...AD, imagePathCatalog: 'images/ad/ad1-catalog.jpg' });
+      await service.uploadImage('ad1', 'catalog', Buffer.from('img-2'), 'image/jpeg');
+      expect(mockImages.delete).not.toHaveBeenCalled();
     });
 
     it('удаление картинки чистит S3-объект и обнуляет колонку', async () => {
@@ -186,15 +209,33 @@ describe('AdsService', () => {
       expect(mockImages.serve).not.toHaveBeenCalled();
     });
 
-    it('отдаёт буфер из ImageService по ключу нужного плейсмента', async () => {
+    it('отдаёт буфер из ImageService по ключу нужного плейсмента с Content-Type image/jpeg', async () => {
       mockPrisma.ad.findUnique.mockResolvedValue({
         imagePathWatch: 'images/ad/ad1-watch.jpg',
         imagePathCatalog: 'images/ad/ad1-catalog.jpg',
       });
       mockImages.serve.mockResolvedValue(Buffer.from('jpeg'));
 
-      await service.serveImage('ad1', 'catalog');
+      const result = await service.serveImage('ad1', 'catalog');
       expect(mockImages.serve).toHaveBeenCalledWith('images/ad/ad1-catalog.jpg');
+      expect(result).toEqual({ buffer: Buffer.from('jpeg'), contentType: 'image/jpeg' });
+    });
+
+    it('ключ .webp отдаётся с Content-Type image/webp — это анимированный баннер', async () => {
+      mockPrisma.ad.findUnique.mockResolvedValue({
+        imagePathWatch: null,
+        imagePathCatalog: 'images/ad/ad1-catalog.webp',
+      });
+      mockImages.serve.mockResolvedValue(Buffer.from('webp'));
+
+      const result = await service.serveImage('ad1', 'catalog');
+      expect(result).toEqual({ buffer: Buffer.from('webp'), contentType: 'image/webp' });
+    });
+
+    it('null, если ImageService.serve не нашёл объект в S3 (не только когда пути нет в базе)', async () => {
+      mockPrisma.ad.findUnique.mockResolvedValue({ imagePathCatalog: 'images/ad/ad1-catalog.jpg' });
+      mockImages.serve.mockResolvedValue(null);
+      await expect(service.serveImage('ad1', 'catalog')).resolves.toBeNull();
     });
   });
 
