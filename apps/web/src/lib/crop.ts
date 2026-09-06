@@ -29,6 +29,27 @@ export interface Size {
   height: number;
 }
 
+/**
+ * Натуральные пиксельные размеры файла-картинки — используется, чтобы решить,
+ * нужен ли вообще кроп (см. AdImageSlot): баннер, который уже не уже целевого
+ * соотношения сторон, можно грузить сразу без диалога.
+ */
+export function readImageSize(file: File): Promise<Size> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Не удалось прочитать изображение'));
+    };
+    img.src = url;
+  });
+}
+
 export interface Offset {
   x: number;
   y: number;
