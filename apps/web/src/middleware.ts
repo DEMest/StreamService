@@ -1,47 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-/**
- * Кому принадлежит раздел. Дублирует `@Roles(...)` на бэкенде намеренно:
- * гвард вернёт 403 на запросы к API, но страницу это не остановит — админ
- * организации до сих пор мог открыть /admin и смотреть на пустой каркас,
- * который сыплет 403 в консоль. Роль решается здесь, до рендера.
- *
- * Массив, а не объект: порядок задаёт приоритет поиска префикса, и
- * `/admin/ads` обязан стоять раньше `/admin` — иначе рекламный менеджер
- * упрётся в правило раздела организаций, куда ему нельзя.
- *
- * `home` помечает, чей это раздел по умолчанию. Это по-прежнему один список, а
- * не два расходящихся, но вычислить дом из одних `roles` больше нельзя: у
- * /admin/ads их две, и обе имеют на раздел полное право.
- */
-interface Section {
-  path: string;
-  roles: string[];
-  home: string;
-}
-
-const SECTIONS: Section[] = [
-  { path: '/admin/ads', roles: ['superadmin', 'ad_manager'], home: 'ad_manager' },
-  { path: '/admin', roles: ['superadmin'], home: 'superadmin' },
-  { path: '/dashboard', roles: ['org_admin'], home: 'org_admin' },
-];
-
-function sectionFor(pathname: string): Section | null {
-  return SECTIONS.find((s) => pathname.startsWith(s.path)) ?? null;
-}
-
-/**
- * Куда уводить того, кто попал в чужой раздел — в его собственный.
- *
- * Хост при этом не важен, топологию знает конфиг nginx, а не приложение. У
- * суперадмина на основном домене `/admin` встретит редирект на admin.<домен>;
- * у организации, забредшей на поддомен, `/dashboard` — редирект обратно, где
- * её host-only cookie нет, и попросят войти. Оба пути длиннее одного перехода,
- * но приводят человека туда, где его раздел действительно работает.
- */
-function homeForRole(role: string): string {
-  return SECTIONS.find((s) => s.home === role)?.path ?? '/';
-}
+import { homeForRole, sectionFor, type Section } from '@/lib/sections';
 
 /**
  * Ответ с учётом роли: чужой раздел — редирект, свой — проход дальше.

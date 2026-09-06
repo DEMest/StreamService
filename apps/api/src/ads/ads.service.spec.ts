@@ -158,7 +158,7 @@ describe('AdsService', () => {
     });
 
     it('GIF идёт через uploadAnimated и сохраняется как .webp, а не .jpg', async () => {
-      await service.uploadImage('ad1', 'catalog', Buffer.from('gif'), 'image/gif');
+      await service.uploadImage('ad1', 'catalog', Buffer.from('gif'), 'image/gif', ADMIN);
       expect(mockImages.uploadAnimated).toHaveBeenCalledWith('images/ad/ad1-catalog.webp', expect.any(Buffer), 728, 90);
       expect(mockImages.upload).not.toHaveBeenCalled();
       expect(mockPrisma.ad.update).toHaveBeenCalledWith({
@@ -169,13 +169,13 @@ describe('AdsService', () => {
 
     it('смена формата (jpg → gif) подчищает старый файл в S3, чтобы не оставался мусором', async () => {
       mockPrisma.ad.findUnique.mockResolvedValue({ ...AD, imagePathCatalog: 'images/ad/ad1-catalog.jpg' });
-      await service.uploadImage('ad1', 'catalog', Buffer.from('gif'), 'image/gif');
+      await service.uploadImage('ad1', 'catalog', Buffer.from('gif'), 'image/gif', ADMIN);
       expect(mockImages.delete).toHaveBeenCalledWith('images/ad/ad1-catalog.jpg');
     });
 
     it('повторная загрузка в том же формате не трогает ImageService.delete — ключ не меняется', async () => {
       mockPrisma.ad.findUnique.mockResolvedValue({ ...AD, imagePathCatalog: 'images/ad/ad1-catalog.jpg' });
-      await service.uploadImage('ad1', 'catalog', Buffer.from('img-2'), 'image/jpeg');
+      await service.uploadImage('ad1', 'catalog', Buffer.from('img-2'), 'image/jpeg', ADMIN);
       expect(mockImages.delete).not.toHaveBeenCalled();
     });
 
@@ -326,6 +326,20 @@ describe('AdsService', () => {
     it('чужое объявление нельзя и удалить — картинки при этом не трогаются', async () => {
       await expect(service.remove('ad1', OTHER_ADMIN)).rejects.toBeInstanceOf(NotFoundException);
       expect(mockPrisma.ad.delete).not.toHaveBeenCalled();
+      expect(mockImages.delete).not.toHaveBeenCalled();
+    });
+
+    it('чужому объявлению суперадмин не подменит баннер', async () => {
+      await expect(service.uploadImage('ad1', 'watch', Buffer.from('img'), 'image/jpeg', OTHER_ADMIN))
+        .rejects.toBeInstanceOf(NotFoundException);
+      expect(mockImages.upload).not.toHaveBeenCalled();
+      expect(mockImages.uploadAnimated).not.toHaveBeenCalled();
+    });
+
+    it('чужому объявлению суперадмин не снесёт баннер', async () => {
+      mockPrisma.ad.findUnique.mockResolvedValue({ ...AD, imagePathWatch: 'images/ad/ad1-watch.jpg' });
+      await expect(service.deleteImage('ad1', 'watch', OTHER_ADMIN))
+        .rejects.toBeInstanceOf(NotFoundException);
       expect(mockImages.delete).not.toHaveBeenCalled();
     });
 

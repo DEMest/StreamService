@@ -150,6 +150,7 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 | `public` | `/v1/public/*` (catalog, watch, broadcasts, thumbnail, event landing, contact) | none |
 | `recording` | live + archive HLS serving, download | none (HLS) / org_admin JWT (download) |
 | `mediamtx` (webhook) | `/v1/internal/mediamtx/{auth,webhook}` | shared secret (`MEDIAMTX_WEBHOOK_SECRET`) |
+| `ads` | `/v1/admin/ads/*` (CRUD, баннеры, статистика), `/v1/public/ads/*` (активные объявления, картинки, события) | superadmin+ad_manager JWT / none |
 | `seo` | `/v1/public/seo/{sitemap,page-meta}` | none |
 | `capacity` | `/v1/admin/capacity` (ёмкость сервера), `/v1/public/qoe` (телеметрия плеера) | superadmin JWT / none |
 | `chat` | WebSocket `/chat` namespace | none |
@@ -225,7 +226,7 @@ iOS fullscreen captures the canvas via `captureStream(30)` into a temporary `<vi
 | Route | Page |
 |-------|------|
 | `/` | Landing / public catalog of live orgs |
-| `/login` | Login (superadmin + org_admin) |
+| `/login` | Login (superadmin + org_admin + ad_manager). Куда вести после входа, решает общая таблица разделов `apps/web/src/lib/sections.ts` — та же, что питает middleware и шапку |
 | `/admin`, `/admin/requests`, `/admin/feedback`, `/admin/capacity` | Superadmin: orgs/users, contact requests, feedback, ёмкость сервера. **Отвечают только на `admin.<домен>`** — на основном домене nginx уводит 301-м (см. раздел про cookie выше) |
 | `/admin/ads` | Управление рекламой. Единственная страница, отвечающая на **двух** именах: `admin.<домен>` (суперадмину — его объявления) и `ads.<домен>` (рекламному менеджеру — вся реклама платформы) |
 | `/dashboard` | Org dashboard (streams, events, broadcasts) |

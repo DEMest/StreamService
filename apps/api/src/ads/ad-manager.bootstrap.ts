@@ -12,7 +12,7 @@ const DEFAULT_LOGIN = 'admanager';
  * вводят руками, и «нолик или буква?» — ровно та ошибка, которую не хочется
  * потом разбирать по телефону.
  */
-const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+export const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
 const PASSWORD_LENGTH = 20;
 
 /** Максимальное значение байта, при котором остаток от деления не смещён. */

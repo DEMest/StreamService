@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
-import { AdManagerBootstrap, generatePassword } from './ad-manager.bootstrap';
+import { AdManagerBootstrap, generatePassword, ALPHABET } from './ad-manager.bootstrap';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../notify/mail.service';
 
@@ -40,10 +40,15 @@ describe('AdManagerBootstrap', () => {
     it('отдаёт 20 символов из алфавита без визуально спорных знаков', () => {
       const password = generatePassword();
       expect(password).toHaveLength(20);
-      // Точный алфавит: без I, L, O в верхнем регистре, без l и o в нижнем,
-      // без 0 и 1. Диапазон пошире пропустил бы как раз тот символ, ради
-      // отсутствия которого алфавит и урезан.
-      expect(password).toMatch(/^[A-HJKMNP-Za-kmnp-z2-9]+$/);
+      // Регэксп собран из самого алфавита, а не выписан диапазонами: любой
+      // диапазон вроде [P-Za-k] заодно пропускает служебные символы между
+      // Z и a, то есть проверяет не то, что обещает.
+      expect(password).toMatch(new RegExp(`^[${ALPHABET}]+$`));
+    });
+
+    it('в алфавите нет визуально спорных знаков и нет повторов', () => {
+      expect(ALPHABET).not.toMatch(/[ILO0 1lo]/);
+      expect(new Set(ALPHABET).size).toBe(ALPHABET.length);
     });
 
     it('два вызова дают разные пароли', () => {

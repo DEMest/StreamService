@@ -17,7 +17,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
-import type { JwtPayload } from '../auth/auth.service';
+import { AD_MANAGER_ROLE, type JwtPayload } from '../auth/auth.service';
 
 /**
  * Управление рекламными плейсхолдерами — платформенная фича, а не инструмент
@@ -30,7 +30,9 @@ import type { JwtPayload } from '../auth/auth.service';
  */
 @Controller('v1/admin/ads')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('superadmin', 'ad_manager')
+// Константой, а не литералом: `Roles` объявлен как `(...roles: string[])`, и
+// опечатку здесь компилятор не поймает — менеджер молча получил бы 403.
+@Roles('superadmin', AD_MANAGER_ROLE)
 export class AdminAdsController {
   constructor(private ads: AdsService) {}
 
