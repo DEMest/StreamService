@@ -217,6 +217,12 @@ DELETE FROM "User" WHERE role = 'ad_manager';
    `~/edge/nginx/conf.d/streamservice.conf`, `nginx -t`, `reload`.
    Никогда `restart`: этот же nginx раздаёт live-HLS.
 
+   Внутри блока `:443` обратите внимание на пару правил, уводящих `/` и
+   `/admin` в `/admin/ads`. Без них голое имя и привычный `/admin` уходят в
+   catch-all на основной домен, а тот `/admin` отправляет на `admin.<домен>`:
+   поддомен рекламы приводит в чужую админку, и войти в кабинет по имени
+   нельзя вовсе.
+
 3. **Сертификат** — `certonly --expand` с **полным** перечнем имён
    (`liga-live.ru`, `www.liga-live.ru`, `admin.liga-live.ru`,
    `ads.liga-live.ru`), затем дописать новое имя в `renew-certs.sh` — иначе
