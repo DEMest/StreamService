@@ -63,7 +63,7 @@ export function AdCatalogBanner() {
   }
 
   return (
-    <div className="max-w-[728px] mx-auto mb-5 rounded-xl border border-white/10 bg-surface-elevated overflow-hidden">
+    <div className="mb-5 rounded-xl border border-white/15 bg-surface-elevated overflow-hidden shadow-lg shadow-black/20 transition-all hover:border-white/30 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/30">
       <div className="flex items-center justify-between px-3 py-1.5 bg-black/40">
         <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">Реклама</span>
         <button
