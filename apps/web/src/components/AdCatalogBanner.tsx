@@ -76,16 +76,18 @@ export function AdCatalogBanner() {
 
       {!feedbackOpen ? (
         <div
-          className="relative w-full cursor-pointer"
-          style={{ aspectRatio: AD_ASPECT }}
+          className="w-full cursor-pointer flex items-center justify-center bg-surface-primary p-3"
           onClick={() => window.open(ad.targetUrl, '_blank', 'noopener,noreferrer')}
         >
           {ad.catalogImageUrl ? (
-            <img src={`${API_BASE}${ad.catalogImageUrl}`} alt={ad.title} className="absolute inset-0 w-full h-full object-contain bg-black" />
+            // Натуральный размер картинки — только сжимается на узких экранах
+            // (max-w-full), никогда не растягивается: апскейл готового баннера
+            // портит резкость сильнее, чем поля по бокам на широком десктопе.
+            <img src={`${API_BASE}${ad.catalogImageUrl}`} alt={ad.title} className="max-w-full h-auto block" />
           ) : (
             <div
-              className="absolute inset-0 flex items-center justify-center text-white font-bold text-lg"
-              style={{ background: adGradient(ad.id) }}
+              className="w-full flex items-center justify-center text-white font-bold text-lg"
+              style={{ background: adGradient(ad.id), aspectRatio: AD_ASPECT }}
             >
               {adInitials(ad.title)}
             </div>
