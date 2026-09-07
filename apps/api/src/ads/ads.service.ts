@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ImageService } from '../storage/image.service';
+import { AD_MANAGER_ROLE, type JwtPayload } from '../auth/auth.service';
 
 export type AdPlacement = 'watch' | 'catalog';
 export type AdEventKind = 'impression' | 'dismiss_timeout' | 'dismiss_no_reason' | 'dismiss_reason';
@@ -46,9 +47,12 @@ const SUBTITLE_MAX = 200;
 const URL_MAX = 500;
 
 /**
- * Рекламные плейсхолдеры — платформенная фича одного суперадмина, а не
- * инструмент организации: создатель ролика доверенный, поэтому валидация
- * здесь лёгкая (длины полей + схема ссылки), а не как у публичных форм.
+ * Рекламные плейсхолдеры — платформенная фича, а не инструмент организации:
+ * создатель ролика доверенный, поэтому валидация здесь лёгкая (длины полей +
+ * схема ссылки), а не как у публичных форм.
+ *
+ * Экран управления один (/admin/ads), но видит его каждая роль по-своему —
+ * см. `seesEverything`.
  */
 @Injectable()
 export class AdsService {
@@ -59,24 +63,41 @@ export class AdsService {
     private images: ImageService,
   ) {}
 
-  // ── Админка ──────────────────────────────────────────────────────────
-
-  listAdmin() {
-    return this.prisma.ad.findMany({ orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] });
+  /**
+   * Видит ли `user` всю рекламу платформы.
+   *
+   * Рекламный менеджер — да, суперадмин — только заведённую им самим. Это
+   * бизнес-требование, а не разграничение прав: экран у обеих ролей один и тот
+   * же, разной делается только выборка. Единственное место, где это решается,
+   * — сведи его к двум, и роли начнут расходиться по разным методам.
+   */
+  private seesEverything(user: JwtPayload): boolean {
+    return user.role === AD_MANAGER_ROLE;
   }
 
-  async create(dto: CreateAdDto) {
+  // ── Админка ──────────────────────────────────────────────────────────
+
+  listAdmin(user: JwtPayload) {
+    return this.prisma.ad.findMany({
+      where: this.seesEverything(user) ? {} : { ownerId: user.sub },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
+  async create(dto: CreateAdDto, user: JwtPayload) {
     if (typeof dto?.title !== 'string' || !dto.title.trim()) {
       throw new BadRequestException('title: обязательное поле');
     }
     if (typeof dto?.targetUrl !== 'string' || !dto.targetUrl.trim()) {
       throw new BadRequestException('targetUrl: обязательное поле');
     }
-    return this.prisma.ad.create({ data: normalize(dto) as CreateAdDto });
+    return this.prisma.ad.create({
+      data: { ...(normalize(dto) as CreateAdDto), ownerId: user.sub },
+    });
   }
 
-  async update(id: string, dto: UpdateAdDto) {
-    await this.requireAd(id);
+  async update(id: string, dto: UpdateAdDto, user: JwtPayload) {
+    await this.requireAd(id, user);
     try {
       return await this.prisma.ad.update({ where: { id }, data: normalize(dto) });
     } catch (e: any) {
@@ -85,8 +106,8 @@ export class AdsService {
     }
   }
 
-  async remove(id: string): Promise<{ ok: true }> {
-    const ad = await this.requireAd(id);
+  async remove(id: string, user: JwtPayload): Promise<{ ok: true }> {
+    const ad = await this.requireAd(id, user);
     if (ad.imagePathWatch) await this.images.delete(ad.imagePathWatch);
     if (ad.imagePathCatalog) await this.images.delete(ad.imagePathCatalog);
     await this.prisma.ad.delete({ where: { id } });
@@ -104,8 +125,14 @@ export class AdsService {
    * под этим плейсментом, старый файл в S3 не переживёт замену и его нужно
    * подчистить отдельно, иначе он останется висеть мусором.
    */
-  async uploadImage(id: string, placement: AdPlacement, buffer: Buffer, mimetype: string) {
-    const ad = await this.requireAd(id);
+  async uploadImage(
+    id: string,
+    placement: AdPlacement,
+    buffer: Buffer,
+    mimetype: string,
+    user: JwtPayload,
+  ) {
+    const ad = await this.requireAd(id, user);
     const { width, height } = PLACEMENT_IMAGE_SIZE[placement];
     const animated = mimetype === 'image/gif';
     const key = `images/ad/${id}-${placement}.${animated ? 'webp' : 'jpg'}`;
@@ -123,8 +150,8 @@ export class AdsService {
     return this.prisma.ad.update({ where: { id }, data: { [PLACEMENT_FIELD[placement]]: key } });
   }
 
-  async deleteImage(id: string, placement: AdPlacement) {
-    const ad = await this.requireAd(id);
+  async deleteImage(id: string, placement: AdPlacement, user: JwtPayload) {
+    const ad = await this.requireAd(id, user);
     const key = ad[PLACEMENT_FIELD[placement]];
     if (key) await this.images.delete(key);
     return this.prisma.ad.update({ where: { id }, data: { [PLACEMENT_FIELD[placement]]: null } });
@@ -134,8 +161,8 @@ export class AdsService {
    * Насколько реклама навязчива: показы против того, чем закончился просмотр.
    * Кликов нет по замыслу — ссылку рекламодателя не мы измеряем.
    */
-  async stats(id: string) {
-    await this.requireAd(id);
+  async stats(id: string, user: JwtPayload) {
+    await this.requireAd(id, user);
     const rows = await this.prisma.adEvent.groupBy({
       by: ['kind', 'reason'],
       where: { adId: id },
@@ -253,9 +280,20 @@ export class AdsService {
     }
   }
 
-  private async requireAd(id: string) {
+  /**
+   * Объявление, к которому у `user` есть доступ.
+   *
+   * Чужое для суперадмина — 404, а не 403: существование чужой записи не
+   * подтверждаем (тот же приём, что у межтенантных проверок в /v1/org/*).
+   * Через эту одну точку проходят update / remove / uploadImage /
+   * deleteImage / stats — добавляя шестой метод, зови её же.
+   */
+  private async requireAd(id: string, user: JwtPayload) {
     const ad = await this.prisma.ad.findUnique({ where: { id } });
     if (!ad) throw new NotFoundException(`Ad '${id}' not found`);
+    if (!this.seesEverything(user) && ad.ownerId !== user.sub) {
+      throw new NotFoundException(`Ad '${id}' not found`);
+    }
     return ad;
   }
 }

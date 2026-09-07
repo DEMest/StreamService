@@ -1,34 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-/**
- * Кому принадлежит раздел. Дублирует `@Roles(...)` на бэкенде намеренно:
- * гвард вернёт 403 на запросы к API, но страницу это не остановит — админ
- * организации до сих пор мог открыть /admin и смотреть на пустой каркас,
- * который сыплет 403 в консоль. Роль решается здесь, до рендера.
- */
-const SECTION_ROLE: Record<string, string> = {
-  '/admin': 'superadmin',
-  '/dashboard': 'org_admin',
-};
-
-function sectionFor(pathname: string): string | null {
-  return Object.keys(SECTION_ROLE).find((p) => pathname.startsWith(p)) ?? null;
-}
-
-/**
- * Куда уводить того, кто попал в чужой раздел — его собственный раздел.
- * Считается из той же таблицы, а не задаётся вторым списком: разъехавшись, они
- * отправляли бы человека ровно туда, откуда его только что развернули.
- *
- * Хост при этом не важен, топологию знает конфиг nginx, а не приложение. У
- * суперадмина на основном домене `/admin` встретит редирект на admin.<домен>;
- * у организации, забредшей на поддомен, `/dashboard` — редирект обратно, где
- * её host-only cookie нет, и попросят войти. Оба пути длиннее одного перехода,
- * но приводят человека туда, где его раздел действительно работает.
- */
-function homeForRole(role: string): string {
-  return Object.entries(SECTION_ROLE).find(([, r]) => r === role)?.[0] ?? '/';
-}
+import { homeForRole, sectionFor, type Section } from '@/lib/sections';
 
 /**
  * Ответ с учётом роли: чужой раздел — редирект, свой — проход дальше.
@@ -37,11 +8,11 @@ function homeForRole(role: string): string {
  */
 function responseForRole(
   payload: Record<string, unknown> | null,
-  section: string,
+  section: Section,
   req: NextRequest,
 ): NextResponse {
   const role = typeof payload?.role === 'string' ? payload.role : null;
-  if (role && role !== SECTION_ROLE[section]) {
+  if (role && !section.roles.includes(role)) {
     return NextResponse.redirect(new URL(homeForRole(role), req.url));
   }
   return NextResponse.next();

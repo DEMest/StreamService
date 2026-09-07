@@ -110,6 +110,10 @@ The schema was refactored so that **`Stream`** — not `Organization` — owns t
 - `Recording` — per-slot recording of a Broadcast (`@@unique([broadcastId, slotIndex])`), with `status`, `manifestPath`, `expiresAt`.
 - `ChatMessage` — scoped by `streamId` and/or `eventId`. `orgId` is **deprecated/nullable** (kept during the chat→stream data migration; final DROP is a later migration).
 - `ContactRequest` — landing-page lead form submissions.
+- `Ad` / `AdEvent` — рекламные плейсхолдеры и обезличенные счётчики показов.
+  `Ad.ownerId` → `User` (`onDelete: SetNull`) определяет, кто увидит
+  объявление в `/admin/ads` (см. раздел про роли ниже). NULL — владелец
+  удалён; такое объявление остаётся видно только рекламному менеджеру.
 
 The `prisma` field in `apps/api/package.json` points the schema at the repo root.
 
@@ -146,6 +150,7 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 | `public` | `/v1/public/*` (catalog, watch, broadcasts, thumbnail, event landing, contact) | none |
 | `recording` | live + archive HLS serving, download | none (HLS) / org_admin JWT (download) |
 | `mediamtx` (webhook) | `/v1/internal/mediamtx/{auth,webhook}` | shared secret (`MEDIAMTX_WEBHOOK_SECRET`) |
+| `ads` | `/v1/admin/ads/*` (CRUD, баннеры, статистика), `/v1/public/ads/*` (активные объявления, картинки, события) | superadmin+ad_manager JWT / none |
 | `seo` | `/v1/public/seo/{sitemap,page-meta}` | none |
 | `capacity` | `/v1/admin/capacity` (ёмкость сервера), `/v1/public/qoe` (телеметрия плеера) | superadmin JWT / none |
 | `chat` | WebSocket `/chat` namespace | none |
@@ -153,7 +158,25 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 | `thumbnail`, `contact`, `prisma` | (internal services) | — |
 
 **Auth tokens & cookies** (`auth.controller.ts`):
-- JWT payload: `{ sub, role: 'superadmin'|'org_admin', orgId?, orgSlug? }`.
+- JWT payload: `{ sub, role: 'superadmin'|'org_admin'|'ad_manager', orgId?, orgSlug? }`.
+- **Роль `ad_manager`** — рекламный менеджер, не администратор платформы.
+  Живёт только на `ads.liga-live.ru` и открывает ровно одну страницу
+  `/admin/ads`. Экран у неё **общий с суперадмином**, а выборка разная:
+  менеджер видит всю рекламу платформы, суперадмин — только объявления со
+  своим `Ad.ownerId`. Это бизнес-требование, а не разграничение прав, и
+  решается оно в одном месте — `AdsService.seesEverything`. Чужое
+  объявление суперадмину отдаётся как 404, по тому же принципу, что
+  межтенантные проверки в `/v1/org/*`.
+- Аккаунт менеджера **создаётся сам** при старте API, если его нет
+  (`ads/ad-manager.bootstrap.ts`): логин `admanager`, пароль генерируется и
+  уходит письмом на `MAIL_TO` плюс баннером в лог. Сброс — удалить строку из
+  `User` и перезапустить API. Переменных окружения у этого нет намеренно:
+  правка `docker-compose.yml` тянет за собой перезапуск MediaMTX с разрывом
+  ингеста, а настраиваемый логин такой цены не стоит.
+- Роль читается из строки `User.role`, а не подставляется литералом в
+  `AuthService.login`. Зашитая константа там была ровно до тех пор, пока в
+  таблице жил один суперадмин; вернув её, вы выдадите менеджеру полный
+  доступ к админке.
 - Cookies: `access_token` (HttpOnly, 1h) + `refresh_token` (HttpOnly, 90d). `POST /v1/auth/refresh` rotates both. `JwtAuthGuard` reads the access cookie; `apps/web/src/lib/api.ts` auto-refreshes once on a 401 and otherwise redirects to `/login`.
 - `AuthService.login` tries `User` (superadmin) first, then `Organization` by slug (org_admin).
 - On HTTP test stands set `COOKIE_SECURE=false`, otherwise the browser drops the cookie and `/v1/org/me` returns 401.
@@ -203,8 +226,9 @@ iOS fullscreen captures the canvas via `captureStream(30)` into a temporary `<vi
 | Route | Page |
 |-------|------|
 | `/` | Landing / public catalog of live orgs |
-| `/login` | Login (superadmin + org_admin) |
+| `/login` | Login (superadmin + org_admin + ad_manager). Куда вести после входа, решает общая таблица разделов `apps/web/src/lib/sections.ts` — та же, что питает middleware и шапку |
 | `/admin`, `/admin/requests`, `/admin/feedback`, `/admin/capacity` | Superadmin: orgs/users, contact requests, feedback, ёмкость сервера. **Отвечают только на `admin.<домен>`** — на основном домене nginx уводит 301-м (см. раздел про cookie выше) |
+| `/admin/ads` | Управление рекламой. Единственная страница, отвечающая на **двух** именах: `admin.<домен>` (суперадмину — его объявления) и `ads.<домен>` (рекламному менеджеру — вся реклама платформы) |
 | `/dashboard` | Org dashboard (streams, events, broadcasts) |
 | `/dashboard/streams/[id]/studio` | Streamer Studio console (uses `/studio` WS) |
 | `/streams`, `/organizations`, `/archive` | Public listings |

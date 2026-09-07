@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { homeForRole } from '@/lib/sections';
 import { Footer } from '@/components/Footer';
 import { Eye, EyeSlash, Warning, Broadcast, VideoCamera, ChatCircle, Archive } from '@phosphor-icons/react';
 
@@ -20,7 +21,9 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await api.post<{ role: string }>('/v1/auth/login', { login, password });
-      router.push(res.role === 'superadmin' ? '/admin' : '/dashboard');
+      // Раздел роли берём из общей таблицы: разойдясь с middleware, отправили
+      // бы человека туда, откуда тот немедленно развернёт его обратно.
+      router.push(homeForRole(res.role));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Неверный логин или пароль');
     } finally {

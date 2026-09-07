@@ -5,11 +5,31 @@ import * as bcrypt from 'bcrypt';
 
 export interface JwtPayload {
   sub: string;
-  role: 'superadmin' | 'org_admin';
+  role: 'superadmin' | 'org_admin' | 'ad_manager';
   orgId?: string;
   orgSlug?: string;
   /** Тип токена. Если undefined — legacy access (старые куки до миграции). */
   type?: 'access' | 'refresh';
+}
+
+/**
+ * Роль рекламного менеджера. Константа, а не литерал по месту: строка живёт
+ * ещё и в запросе к БД (`where: { role }`), где union-тип `JwtPayload` уже не
+ * подстрахует от опечатки.
+ */
+export const AD_MANAGER_ROLE = 'ad_manager';
+
+/**
+ * Роль владельца записи в таблице `User`. Пока в ней жил один суперадмин, роль
+ * выдавалась литералом прямо в login() — с появлением рекламного менеджера так
+ * нельзя: он получил бы полный доступ к админке.
+ *
+ * Неизвестное значение трактуем как `superadmin`: это дефолт схемы, с которым
+ * созданы все строки до миграции, и терять на нём вход было бы хуже, чем
+ * сохранить существующее поведение.
+ */
+function userRole(role: string): 'superadmin' | 'ad_manager' {
+  return role === AD_MANAGER_ROLE ? AD_MANAGER_ROLE : 'superadmin';
 }
 
 const ACCESS_TTL = '1h';
@@ -36,13 +56,14 @@ export class AuthService {
     if (user) {
       const valid = await bcrypt.compare(password, user.passwordHash);
       if (!valid) throw new UnauthorizedException('Invalid credentials');
-      const base: Omit<JwtPayload, 'type'> = { sub: user.id, role: 'superadmin' };
+      const role = userRole(user.role);
+      const base: Omit<JwtPayload, 'type'> = { sub: user.id, role };
       const accessToken = await this.signAccess(base);
       const refreshToken = await this.signRefresh(base);
       return {
         accessToken,
         refreshToken,
-        role: 'superadmin' as const,
+        role,
         login: user.login,
       };
     }
@@ -86,14 +107,17 @@ export class AuthService {
     if (payload.type !== 'refresh') {
       throw new UnauthorizedException('Not a refresh token');
     }
-    if (payload.role === 'superadmin') {
+    // Обе роли из таблицы User обслуживаются одной веткой: роль всё равно
+    // перечитывается из БД, поэтому разделять их незачем.
+    if (payload.role === 'superadmin' || payload.role === AD_MANAGER_ROLE) {
       const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
       if (!user) throw new UnauthorizedException('User not found');
-      const base: Omit<JwtPayload, 'type'> = { sub: user.id, role: 'superadmin' };
+      const role = userRole(user.role);
+      const base: Omit<JwtPayload, 'type'> = { sub: user.id, role };
       return {
         accessToken: await this.signAccess(base),
         refreshToken: await this.signRefresh(base),
-        role: 'superadmin' as const,
+        role,
         login: user.login,
       };
     }
