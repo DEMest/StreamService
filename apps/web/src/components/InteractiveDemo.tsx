@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import Hls from 'hls.js';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CornersOut, GridFour, VideoCamera, CircleNotch } from '@phosphor-icons/react';
 
@@ -15,10 +16,23 @@ const CAMERAS: { id: CamId; label: string; shortLabel: string; col: number; row:
 ];
 
 /*
- * Демо-ролик (~97 МБ) лежит в объектном хранилище, а не в git и не в
- * apps/web/public — иначе он попадает в образ и раздувает репозиторий.
+ * Демо-ролик лежит в объектном хранилище, а не в git и не в apps/web/public —
+ * иначе он попадает в образ и раздувает репозиторий.
  * Прод: публичный бакет MinIO за edge-nginx (location /static/, см.
  * infra/deploy/nginx-streamservice.conf) — стабильный URL с immutable-кэшем.
+ *
+ * Ссылка ведёт на HLS-плейлист (`…/master.m3u8`), собранный скриптом
+ * `infra/scripts/build-demo-hls.sh`: ролик приезжает сегментами по 2 с, а ABR
+ * сам выбирает ступень под экран и канал. Раньше здесь лежал один
+ * прогрессивный MP4 — 3840×2180, H.264 Level 5.1, 16 с и 97 МБ (~50 Мбит/с).
+ * Такой файл мобильные не вывозили: iOS качал его почти целиком до первого
+ * кадра, а Android не показывал вовсе — 4K H.264 мимо аппаратного декодера
+ * большинства телефонов. Одной сегментации мало, поэтому лестница обрезана
+ * сверху 2560 px: любая её ступень декодируется железом.
+ *
+ * Прямая ссылка на .mp4 продолжает работать — ветка выбирается по расширению
+ * (IS_HLS ниже). Благодаря этому порядок «залить HLS» / «поменять переменную»
+ * не важен, и выкатка кода не обязана совпасть по времени с заливкой файлов.
  *
  * NEXT_PUBLIC_* инлайнится на build-time, поэтому после смены значения нужен
  * `docker compose build web`, а не просто restart.
@@ -27,6 +41,15 @@ const CAMERAS: { id: CamId; label: string; shortLabel: string; col: number; row:
  * заглушкой (см. hasVideo ниже), интерактив с квадрантами продолжает работать.
  */
 const DEMO_VIDEO_URL = process.env.NEXT_PUBLIC_DEMO_VIDEO_URL ?? '';
+const IS_HLS = /\.m3u8(\?|#|$)/i.test(DEMO_VIDEO_URL);
+
+/*
+ * Сколько раз пытаемся пережить фатальную сетевую ошибку, прежде чем сдаться.
+ * Без предела hls.js крутил бы startLoad() по кругу, а зритель — вечный
+ * спиннер вместо заглушки: демо не настолько важно, чтобы бороться за него
+ * бесконечно.
+ */
+const MAX_NETWORK_RETRIES = 3;
 
 /*
  * translate 51% (вместо 50%) сдвигает центральную границу видео
@@ -48,12 +71,119 @@ export function InteractiveDemo() {
   const [hasInteracted, setHasInteracted] = useState(false);
   // Без URL спиннер не показываем вовсе — иначе он крутился бы вечно.
   const [videoReady, setVideoReady] = useState(!hasVideo);
+  /*
+   * Грузим не на маунте, а когда блок доехал до экрана. На мобильном hero-
+   * текст занимает первый экран целиком, демо уходит под сгиб — и его трафик
+   * тратился бы ещё до того, как зритель вообще о нём узнал.
+   */
+  const [inView, setInView] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const handleCanPlay = useCallback(() => setVideoReady(true), []);
   // Хранилище недоступно или URL битый — гасим спиннер и оставляем тёмную
   // подложку с сеткой вместо бесконечной «Загрузки видео».
   const handleVideoError = useCallback(() => setVideoReady(true), []);
+
+  useEffect(() => {
+    if (!hasVideo) return;
+    const el = containerRef.current;
+    // Нет IntersectionObserver (очень старые браузеры) — грузим сразу,
+    // это хуже по трафику, но лучше, чем пустой блок навсегда.
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setInView(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        setInView(true);
+        io.disconnect();
+      },
+      // Запас в пол-экрана: к моменту, когда блок реально видно, первый
+      // сегмент уже в пути и спиннер почти не успевает мелькнуть.
+      { rootMargin: '50% 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasVideo]);
+
+  useEffect(() => {
+    if (!hasVideo || !inView) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    // muted+playsInline стоят на теге, поэтому автоплей разрешён везде;
+    // отказ (политика браузера, вкладка в фоне) демо не ломает — остаётся
+    // первый кадр, и обработчик молча гасит промис.
+    const play = () => video.play().catch(() => {});
+    // Хранилище недоступно или плейлист битый — гасим спиннер и оставляем
+    // тёмную подложку с сеткой вместо бесконечной «Загрузки видео».
+    const giveUp = () => setVideoReady(true);
+
+    if (!IS_HLS) {
+      video.src = DEMO_VIDEO_URL;
+      play();
+      return;
+    }
+
+    /*
+     * Нативный HLS (Safari, весь iOS) — вперёд hls.js: iOS играет плейлист
+     * сам, а лишний слой поверх MSE стоит памяти и батареи на устройстве,
+     * которому и так тяжелее всех. Где нативного HLS нет (Android Chrome,
+     * десктопные Chrome/Firefox) — работает hls.js.
+     */
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = DEMO_VIDEO_URL;
+      play();
+      return;
+    }
+
+    if (!Hls.isSupported()) {
+      giveUp();
+      return;
+    }
+
+    const hls = new Hls({
+      // Ролик короткий (~16 с) — буферим целиком и больше к сети не ходим.
+      maxBufferLength: 30,
+      backBufferLength: 30,
+      /*
+       * Потолок ступени по размеру плеера (с учётом dpr). Без него ABR на
+       * быстром Wi-Fi выбрал бы верхнюю ступень, и телефон снова упёрся бы в
+       * декодер — ровно та беда, из-за которой демо не работало на Android.
+       */
+      capLevelToPlayerSize: true,
+    });
+    let networkRetries = 0;
+
+    hls.loadSource(DEMO_VIDEO_URL);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, play);
+    hls.on(Hls.Events.ERROR, (_event, data) => {
+      if (!data.fatal) return;
+      switch (data.type) {
+        case Hls.ErrorTypes.NETWORK_ERROR:
+          if (networkRetries >= MAX_NETWORK_RETRIES) {
+            hls.destroy();
+            giveUp();
+            break;
+          }
+          networkRetries += 1;
+          hls.startLoad();
+          break;
+        case Hls.ErrorTypes.MEDIA_ERROR:
+          hls.recoverMediaError();
+          break;
+        default:
+          hls.destroy();
+          giveUp();
+          break;
+      }
+    });
+
+    return () => hls.destroy();
+  }, [hasVideo, inView]);
 
   function selectCam(cam: CamId) {
     setMode(cam);
@@ -68,6 +198,7 @@ export function InteractiveDemo() {
     <div>
       {/* ── Video container ───────────────────────── */}
       <div
+        ref={containerRef}
         className={`relative aspect-video rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800/50 shadow-2xl shadow-black/40 ${
           mode !== 'multicam' ? 'cursor-pointer' : ''
         }`}
@@ -96,8 +227,12 @@ export function InteractiveDemo() {
               muted
               loop
               playsInline
-              preload="auto"
-              src={DEMO_VIDEO_URL}
+              /*
+               * preload="none" и никакого src в разметке: источник
+               * подставляет эффект выше, когда блок доехал до экрана. Так
+               * браузер не начинает качать видео на маунте.
+               */
+              preload="none"
               onCanPlay={handleCanPlay}
               onError={handleVideoError}
               className="w-full h-full object-cover"
