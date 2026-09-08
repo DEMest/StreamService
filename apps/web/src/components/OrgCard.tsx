@@ -11,14 +11,27 @@ import { OrgAvatar } from '@/components/OrgAvatar';
  * обзор орги со списком её Stream'ов; можно переопределить `href` (например
  * на странице архива — сразу в архивный режим обзора орги).
  */
-export function OrgCard({ org, thumbKey, href }: { org: CatalogOrgCard; thumbKey: number; href?: string }) {
+export function OrgCard({ org, href }: { org: CatalogOrgCard; href?: string }) {
   const [imgError, setImgError] = useState(false);
   const isLive = org.liveCount > 0;
+  // Без cache-buster'а — по тому же правилу, что и в OrgAvatar: ручка отдаёт
+  // `Cache-Control: public, max-age=300`, а подставленный в URL таймер обнулял
+  // этот кеш каждые 30 секунд и заставлял КАЖДОГО посетителя каталога заново
+  // тянуть все аватарки из S3. Живых кадров на карточках давно нет — здесь
+  // только картинка орги, которая меняется раз в полгода.
+  //
+  // Свежесть после загрузки новой картинки держится на данных, а не на
+  // таймерах: `hasImage` приходит с каталогом и мгновенно переключает карточку
+  // между картинкой и монограммой, а тот, кто картинку загрузил, видит новую
+  // сразу — в кабинете URL версионируется по факту загрузки (`imgBump`).
+  // Остальным посетителям она достаётся максимум через 5 минут — ровно тот
+  // срок, который сервер сам объявил в Cache-Control.
   const thumbUrl = org.hasImage
-    ? `${API_BASE}/v1/public/orgs/${org.orgSlug}/image?t=${thumbKey}`
+    ? `${API_BASE}/v1/public/orgs/${org.orgSlug}/image`
     : null;
 
-  useEffect(() => { setImgError(false); }, [thumbKey]);
+  // Орга сменилась (или картинку загрузили/удалили) — даём <img> ещё попытку.
+  useEffect(() => { setImgError(false); }, [org.orgSlug, org.hasImage]);
 
   return (
     <Link href={href ?? `/watch/${org.orgSlug}`} className="no-underline group">

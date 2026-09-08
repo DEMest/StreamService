@@ -1,6 +1,5 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
-import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { Header } from '@/components/Header';
@@ -18,12 +17,6 @@ export default function OrganizationsPage() {
     refetchInterval: 30_000,
   });
   const orgs = items;
-
-  const [thumbKey, setThumbKey] = useState(() => Date.now());
-  useEffect(() => {
-    const interval = setInterval(() => setThumbKey(Date.now()), 30_000);
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-surface-primary text-zinc-200">
@@ -54,7 +47,7 @@ export default function OrganizationsPage() {
             <motion.div variants={staggerContainer} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
               {orgs.map((item) => (
                 <motion.div key={item.orgSlug} variants={cardFadeUp}>
-                  <OrgCard org={item} thumbKey={thumbKey} />
+                  <OrgCard org={item} />
                 </motion.div>
               ))}
             </motion.div>
