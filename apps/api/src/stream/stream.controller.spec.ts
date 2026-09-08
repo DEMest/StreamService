@@ -108,7 +108,7 @@ describe('StreamController', () => {
         description: null,
         ingestKey: 'secret-key', ingestKeyCreatedAt: new Date(),
         isPublic: true, previewKey: null, previewMode: 'multicam',
-        previewImagePath: null, isLive: false, autoStartMode: 'public',
+        previewImagePath: null, isLive: false,
         currentBroadcastId: null, createdAt: new Date(),
         recordingEnabled: false, recordingMode: 'manual',
       });
@@ -128,7 +128,7 @@ describe('StreamController', () => {
         description: null,
         ingestKey: 'secret-key', ingestKeyCreatedAt: new Date(),
         isPublic: true, previewKey: null, previewMode: 'multicam',
-        previewImagePath: null, isLive: false, autoStartMode: 'public',
+        previewImagePath: null, isLive: false,
         currentBroadcastId: null, createdAt: new Date(),
         recordingEnabled: false, recordingMode: 'manual',
       });
@@ -154,7 +154,7 @@ describe('StreamController', () => {
         {
           id: 'st-1', slug: '', name: 'Main', description: null,
           isPublic: true, previewKey: null, previewMode: 'multicam',
-          previewImagePath: null, isLive: false, autoStartMode: 'public',
+          previewImagePath: null, isLive: false,
           ingestKeyCreatedAt: new Date(), currentBroadcastId: null, createdAt: new Date(),
         },
       ]);
@@ -176,7 +176,7 @@ describe('StreamController', () => {
       id: 'st-1', orgId: 'org-1', slug: '', name: 'Main',
       ingestKey: 'key', ingestKeyCreatedAt: new Date(),
       isPublic: true, previewKey: null, previewMode: 'multicam',
-      previewImagePath: null, isLive: false, autoStartMode: 'public',
+      previewImagePath: null, isLive: false,
       currentBroadcastId: null, createdAt: new Date(),
       org: { slug: 'club' },
     };
@@ -213,7 +213,7 @@ describe('StreamController', () => {
         id: 'st-1', slug: '', name: 'Renamed', description: null,
         ingestKey: 'key-x', ingestKeyCreatedAt: new Date(),
         isPublic: true, previewKey: null, previewMode: 'multicam',
-        previewImagePath: null, isLive: false, autoStartMode: 'public',
+        previewImagePath: null, isLive: false,
         currentBroadcastId: null, createdAt: new Date(),
       });
       await controller.update(orgAdmin, 'st-1', { name: 'Renamed' });
@@ -231,7 +231,7 @@ describe('StreamController', () => {
         ingestKey: 'key-x', ingestKeyCreatedAt: new Date(),
         isPublic: false, previewKey: data.previewKey,
         previewMode: 'multicam', previewImagePath: null,
-        isLive: false, autoStartMode: 'public',
+        isLive: false,
         currentBroadcastId: null, createdAt: new Date(),
       }));
       const r = await controller.update(orgAdmin, 'st-1', { isPublic: false });
@@ -410,7 +410,7 @@ describe('StreamController', () => {
       id: 'st-new', slug: 'cam-a', name: 'cam-a', description: null,
       ingestKey: 'gen-key', ingestKeyCreatedAt: new Date(),
       isPublic: true, previewKey: null, previewMode: 'multicam',
-      previewImagePath: null, isLive: false, autoStartMode: 'public',
+      previewImagePath: null, isLive: false,
       currentBroadcastId: null, createdAt: new Date(),
       recordingEnabled: true, recordingMode: 'auto',
       ...overrides,
@@ -432,7 +432,7 @@ describe('StreamController', () => {
         data: expect.objectContaining({
           orgId: 'org-1', slug: 'cam-a', name: 'cam-a',
           isPublic: true,
-          previewMode: 'multicam', autoStartMode: 'public',
+          previewMode: 'multicam',
           ingestKey: expect.any(String),
         }),
       }));

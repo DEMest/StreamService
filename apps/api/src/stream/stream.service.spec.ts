@@ -556,7 +556,7 @@ describe('StreamService', () => {
       id: 'st-1', orgId: 'org-1', slug: '', name: 'Main',
       ingestKey: 'k', previewKey: null,
       isPublic: true, previewMode: 'multicam',
-      isLive: false, autoStartMode: 'public',
+      isLive: false,
       org: { slug: 'club' },
     };
 
@@ -595,7 +595,7 @@ describe('StreamService', () => {
         id: 'st-1', orgId: 'org-1', slug: '', name: 'Main',
         description: null, isPublic: true, previewKey: null,
         previewMode: 'multicam', previewImagePath: null,
-        isLive: false, autoStartMode: 'public',
+        isLive: false,
         ingestKeyCreatedAt: new Date(), currentBroadcastId: null,
         createdAt: new Date(),
         ingestKey: 'secret',

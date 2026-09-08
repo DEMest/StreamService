@@ -106,15 +106,4 @@ export class AuthController {
   me(@CurrentUser() user: JwtPayload) {
     return user;
   }
-
-  /**
-   * GET /v1/auth/verify — лёгкий health-check валидности access-токена.
-   * 200 + payload, если access-cookie валидна; 401 если нет/протухла.
-   * Семантически тот же /me — отдельный эндпоинт для clarity на стороне фронта.
-   */
-  @Get('verify')
-  @UseGuards(JwtAuthGuard)
-  verify(@CurrentUser() user: JwtPayload) {
-    return user;
-  }
 }

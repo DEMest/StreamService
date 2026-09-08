@@ -110,7 +110,7 @@ export class StreamController {
   /**
    * PATCH /v1/org/streams/:id — обновить конфигурацию Stream'а.
    *
-   * Body поля (все опциональны): name, description, isPublic, previewMode, autoStartMode.
+   * Body поля (все опциональны): name, description, isPublic, previewMode, feedMode.
    *
    * Валидация описана в `StreamService.updateConfig`.
    */
