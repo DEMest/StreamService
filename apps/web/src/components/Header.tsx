@@ -75,7 +75,7 @@ export function Header() {
         </Link>
 
         {/* Desktop nav — centered */}
-        <nav className="hidden md:flex items-center gap-1 flex-1 justify-center">
+        <nav className="hidden lg:flex items-center gap-1 flex-1 justify-center">
           {NAV_LINKS.map((link) => (
             <Link
               key={link.href}
@@ -105,7 +105,7 @@ export function Header() {
         </nav>
 
         {/* Desktop auth — right */}
-        <div className="hidden md:flex gap-2 items-center shrink-0">
+        <div className="hidden lg:flex gap-2 items-center shrink-0">
           {me ? (
             <>
               {me.orgSlug && (
@@ -148,7 +148,7 @@ export function Header() {
         {/* Mobile burger — right */}
         <button
           onClick={() => setMenuOpen((v) => !v)}
-          className="md:hidden ml-auto flex items-center justify-center w-9 h-9 text-zinc-400 hover:text-zinc-200 bg-transparent border-none cursor-pointer rounded-lg hover:bg-zinc-800/50 transition-colors"
+          className="lg:hidden ml-auto flex items-center justify-center w-9 h-9 text-zinc-400 hover:text-zinc-200 bg-transparent border-none cursor-pointer rounded-lg hover:bg-zinc-800/50 transition-colors"
         >
           {menuOpen ? <X size={20} /> : <List size={20} />}
         </button>
@@ -156,7 +156,7 @@ export function Header() {
 
       {/* Mobile menu */}
       {menuOpen && (
-        <div className="md:hidden border-t border-zinc-800/60 bg-surface-elevated absolute inset-x-0 z-50 shadow-xl shadow-black/30" style={{ top: 'calc(3.5rem + env(safe-area-inset-top))' }}>
+        <div className="lg:hidden border-t border-zinc-800/60 bg-surface-elevated absolute inset-x-0 z-50 shadow-xl shadow-black/30" style={{ top: 'calc(3.5rem + env(safe-area-inset-top))' }}>
           <nav className="flex flex-col p-3 gap-0.5">
             {NAV_LINKS.map((link) => (
               <Link

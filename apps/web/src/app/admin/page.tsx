@@ -121,7 +121,7 @@ export default function AdminPage() {
 
         <div className="bg-surface-elevated border border-zinc-800/50 rounded-xl divide-y divide-zinc-800/60">
           {orgs?.map((org) => (
-            <div key={org.id} className="flex items-center justify-between px-5 py-4">
+            <div key={org.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="font-semibold text-zinc-100 truncate">{org.name}</span>
                 <span className="text-zinc-600 text-xs font-mono shrink-0">@{org.slug}</span>
