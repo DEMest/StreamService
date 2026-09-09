@@ -3,6 +3,17 @@ import { Injectable } from '@nestjs/common';
 /** Плеер шлёт отчёт раз в 15 с; 45 с без отчёта — считаем, что вкладку закрыли. */
 const PLAYER_TTL_MS = 45_000;
 
+/**
+ * Предохранитель от разрастания реестра: `clientId` приходит от клиента и
+ * ничем не подтверждён, так что реестр по сути — Map, растущая на любой
+ * произвольный ключ снаружи. При `UPLINK_MBPS=750` (дефолт) и LQ-рендиции
+ * порядка 1.5 Мбит/с потолок в районе нескольких сотен одновременных
+ * зрителей на этот единственный сервер — 20 000 записей на пару порядков
+ * выше любой реалистичной нагрузки, но всё ещё копейки памяти (запись —
+ * несколько чисел и строк).
+ */
+export const MAX_PLAYERS = 20_000;
+
 export interface QoeReport {
   /** `<orgSlug>/<streamSlug>` — тот же ключ, что даёт разбор лога nginx. */
   streamKey: string;
@@ -48,6 +59,11 @@ export class QoeService {
   private readonly players = new Map<string, PlayerState>();
 
   ingest(r: QoeReport): void {
+    // Новый clientId сверх потолка — молча отбрасываем: существующих клиентов
+    // это не задевает (обновление их записи не создаёт новый ключ), а флуд
+    // случайными id перестаёт раздувать Map дальше этой точки.
+    if (!this.players.has(r.clientId) && this.players.size >= MAX_PLAYERS) return;
+
     this.players.set(r.clientId, {
       at: Date.now(),
       streamKey: r.streamKey,

@@ -1,4 +1,4 @@
-import { QoeService, percentile } from './qoe.service';
+import { QoeService, percentile, MAX_PLAYERS } from './qoe.service';
 
 describe('QoeService', () => {
   let svc: QoeService;
@@ -70,6 +70,18 @@ describe('QoeService', () => {
     svc.ingest(report('a'));
     jest.advanceTimersByTime(30_000);
     expect(svc.snapshot().players).toBe(1);
+  });
+
+  it('не растит реестр сверх предохранителя от произвольных clientId', () => {
+    for (let i = 0; i < MAX_PLAYERS + 100; i++) svc.ingest(report(`c${i}`));
+    expect(svc.snapshot().players).toBe(MAX_PLAYERS);
+  });
+
+  it('существующего клиента предохранитель не задевает даже на переполненном реестре', () => {
+    for (let i = 0; i < MAX_PLAYERS; i++) svc.ingest(report(`c${i}`));
+    svc.ingest(report('c0', { stalls: 7 }));
+    expect(svc.snapshot().players).toBe(MAX_PLAYERS);
+    expect(svc.snapshot().stallingShare).toBeCloseTo(1 / MAX_PLAYERS);
   });
 });
 

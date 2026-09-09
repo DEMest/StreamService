@@ -1,8 +1,22 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import { Body, Controller, Get, HttpCode, Param, Post, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { AD_EVENT_KINDS, AdEventKind, AdPlacement, AdsService } from './ads.service';
+import { SlidingWindowLimiter } from '../feedback/rate-limiter';
+import { clientIp } from '../feedback/client-ip';
 
 const REASON_MAX = 64;
+
+/**
+ * Анонимная запись строки в Postgres на каждый вызов, без проверки, что adId
+ * вообще существует (см. комментарий у `event` ниже) — отдельного лимита в
+ * nginx для этого пути нет, только общие 10 r/s на IP. За один просмотр
+ * трансляции у зрителя реалистично несколько событий (показ + закрытие
+ * баннера, возможно не один баннер за сессию). 60 в минуту — это условно
+ * десяток зрителей за одним адресом, отреагировавших на рекламу в одну
+ * минуту, а не потолок на одного человека.
+ */
+export const AD_EVENT_RATE_MAX = 60;
+export const AD_EVENT_RATE_WINDOW_MS = 60_000;
 
 /**
  * Активные объявления и события их показа — публично, без авторизации: зовёт
@@ -12,6 +26,11 @@ const REASON_MAX = 64;
  */
 @Controller('v1/public/ads')
 export class PublicAdsController {
+  private readonly eventLimiter = new SlidingWindowLimiter(
+    AD_EVENT_RATE_MAX,
+    AD_EVENT_RATE_WINDOW_MS,
+  );
+
   constructor(private ads: AdsService) {}
 
   @Get()
@@ -43,7 +62,15 @@ export class PublicAdsController {
    */
   @Post(':id/event')
   @HttpCode(204)
-  async event(@Param('id') id: string, @Body() body: Record<string, unknown>): Promise<void> {
+  async event(
+    @Param('id') id: string,
+    @Body() body: Record<string, unknown>,
+    @Req() req: Request,
+  ): Promise<void> {
+    // Превышение лимита — тихо игнорируем, как и любой другой некорректный
+    // вход этой ручки ниже: зритель не должен видеть ошибку из-за баннера.
+    if (!this.eventLimiter.tryHit(clientIp(req) ?? 'unknown')) return;
+
     const placement = parsePlacement(body?.placement);
     const kind = AD_EVENT_KINDS.includes(body?.kind as AdEventKind) ? (body!.kind as AdEventKind) : null;
     if (!placement || !kind) return;
