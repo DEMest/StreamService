@@ -141,7 +141,13 @@ export function OrgCanvasPlayer({ tiles }: OrgCanvasPlayerProps) {
           liveMaxLatencyDuration: 600,
           maxBufferLength: 30,
           maxMaxBufferLength: 60,
-          backBufferLength: 600,
+          // Проигранное держим коротко. Было 600 c — около 490 МБ на плитку
+          // при 6.5 Мбит/с, а плиток на холсте до четырёх, то есть под два
+          // гигабайта на вкладку. Перемотки здесь нет вовсе — мозаика
+          // показывает только живой эфир, — так что назад буфер не нужен ни
+          // для чего, кроме пары сегментов запаса, чтобы чистка SourceBuffer
+          // не догоняла точку воспроизведения.
+          backBufferLength: 30,
         });
         hlsRef.current.set(tile.streamSlug, hls);
         hls.loadSource(tile.hlsUrl);

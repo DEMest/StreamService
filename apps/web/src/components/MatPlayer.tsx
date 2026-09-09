@@ -142,6 +142,19 @@ function arrSig(arr: string[]): string {
   return arr.join('');
 }
 
+/**
+ * Доступ к `requestVideoFrameCallback` — такту «показан новый кадр видео».
+ *
+ * Метод есть не везде (Firefox получил его только в 132-й версии), а в
+ * типах DOM он появился позже, чем версия TypeScript у части сборок. Поэтому
+ * описываем его структурно и необязательным: наличие проверяется в рантайме,
+ * а без него плеер откатывается на requestAnimationFrame.
+ */
+interface VideoFrameCallbackHost {
+  requestVideoFrameCallback?(cb: () => void): number;
+  cancelVideoFrameCallback?(handle: number): void;
+}
+
 const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
   const {
     viewMode,
@@ -170,6 +183,15 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
   const primaryVideoRef = useRef<HTMLVideoElement>(null);
   const primaryHlsRef   = useRef<Hls | null>(null);
   const modeRef         = useRef(viewMode);
+  /**
+   * Перерисовать холст текущим кадром прямо сейчас.
+   *
+   * Живёт в ref, потому что дёргать её нужно из соседних эффектов: такты
+   * рисования теперь идут от кадров видео и молчат, пока нового кадра нет, а
+   * холст обновить надо и после ресайза (присвоение width/height его
+   * очищает), и при смене режима просмотра.
+   */
+  const paintRef        = useRef<() => void>(() => {});
 
   modeRef.current = viewMode;
 
@@ -314,7 +336,16 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
         maxMaxBufferLength: 60,
         // Перепрыгивать дыры до 1c (пропущенные/битые сегменты), а не вставать на них.
         maxBufferHole: 1,
-        backBufferLength: 600,
+        // Сколько уже проигранного держим в памяти вкладки. Было 600 c — около
+        // 490 МБ на ступени 6.5 Мбит/с, при том что отматывать дальше некуда:
+        // с liveDurationInfinity hls.js выставляет seekable по плейлисту
+        // (setLiveSeekableRange от fragmentStart до edge), а плейлист — это
+        // 40 сегментов по 2 c из on-ready.sh, то есть 80 c. Ровно этот отрезок
+        // и показывает ползунок перемотки в WatchView (min = seekable.start).
+        // 90 c — окно плюс сегмент запаса: вся доступная глубина эфира
+        // отматывается из памяти, без повторной загрузки сегментов, а расход
+        // падает почти в семь раз (~73 МБ).
+        backBufferLength: 90,
         startLevel: -1,
       });
       primaryHlsRef.current = hls;
@@ -468,6 +499,9 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
     const ro = new ResizeObserver(() => {
       canvas.width  = Math.round(canvas.offsetWidth  * dpr);
       canvas.height = Math.round(canvas.offsetHeight * dpr);
+      // Присвоение width/height очищает холст, а следующего кадра можно ждать
+      // сколько угодно (пауза, буферизация) — рисуем текущий кадр сразу.
+      paintRef.current();
     });
     ro.observe(canvas);
     return () => ro.disconnect();
@@ -476,20 +510,21 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
   // ─── Draw loop ───────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    let animId: number;
+    const video  = primaryVideoRef.current;
+    if (!canvas || !video) return;
 
-    const draw = () => {
-      animId = requestAnimationFrame(draw);
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+    // Контекст берём один раз: у элемента он не меняется, а getContext('2d')
+    // на каждом кадре — лишний вызов десятки раз в секунду ради одного и того
+    // же объекта.
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const paint = () => {
       const cw = canvas.width;
       const ch = canvas.height;
       if (cw === 0 || ch === 0) return;
+      if (video.readyState < 2 || !video.videoWidth) return;
       const mv = modeRef.current;
-
-      const video = primaryVideoRef.current;
-      if (!video || video.readyState < 2 || !video.videoWidth) return;
       const vw = video.videoWidth;
       const vh = video.videoHeight;
 
@@ -503,10 +538,81 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
         drawContain(ctx, video, 0, 0, vw, vh, 0, 0, cw, ch);
       }
     };
+    paintRef.current = paint;
 
-    animId = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(animId);
+    // Такты рисования даёт сам кадр видео: requestVideoFrameCallback зовут
+    // ровно на каждый показанный кадр — 30 раз в секунду при источнике 30 fps
+    // (лесенка в on-ready.sh фиксирует fps=30). requestAnimationFrame шёл по
+    // частоте экрана, 60–120 Гц, то есть половина и больше вызовов drawImage
+    // копировала на холст один и тот же кадр. Обратная сторона: пока новых
+    // кадров нет, колбэк молчит — поэтому перерисовку после ресайза и смены
+    // режима дёргают соседние эффекты через paintRef.
+    const frames      = video as unknown as VideoFrameCallbackHost;
+    const requestFrame = frames.requestVideoFrameCallback?.bind(frames) ?? null;
+    const cancelFrame  = frames.cancelVideoFrameCallback?.bind(frames) ?? null;
+
+    let disposed    = false;
+    let frameHandle = 0;
+    let rafId       = 0;
+
+    const onVideoFrame = () => {
+      if (disposed || !requestFrame) return;
+      paint();
+      frameHandle = requestFrame(onVideoFrame);
+    };
+
+    // Откат для браузеров без rVFC — прежний цикл по кадрам экрана;
+    // поведение там не меняется ни в чём, кроме кэша контекста.
+    const onAnimationFrame = () => {
+      if (disposed) return;
+      rafId = requestAnimationFrame(onAnimationFrame);
+      paint();
+    };
+
+    if (requestFrame) {
+      frameHandle = requestFrame(onVideoFrame);
+    } else {
+      rafId = requestAnimationFrame(onAnimationFrame);
+    }
+
+    /**
+     * Перевзвести цепочку и показать текущий кадр.
+     *
+     * Нужно там, где очередь колбэков могла осиротеть: возврат вкладки из
+     * фона (скрытая страница кадры не показывает, и цепочка встаёт) и
+     * перезагрузка медиа-элемента — hls.js делает её при смене источника и в
+     * recoverMediaError. Цена вызова — один лишний drawImage, цена ошибки —
+     * навсегда застывший холст, поэтому подстраховываемся.
+     */
+    const resync = () => {
+      if (disposed) return;
+      paint();
+      if (!requestFrame) return;
+      if (frameHandle && cancelFrame) cancelFrame(frameHandle);
+      frameHandle = requestFrame(onVideoFrame);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') resync();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    video.addEventListener('loadeddata', resync);
+
+    return () => {
+      disposed = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+      video.removeEventListener('loadeddata', resync);
+      if (rafId) cancelAnimationFrame(rafId);
+      if (frameHandle && cancelFrame) cancelFrame(frameHandle);
+      paintRef.current = () => {};
+    };
   }, []);
+
+  // ─── Мгновенная перерисовка при смене режима ─────────────────────────
+  // Переключение «весь кадр ↔ квадрант» должно быть видно сразу, даже если
+  // видео стоит на паузе и нового кадра — источника тактов — не будет.
+  useEffect(() => {
+    paintRef.current();
+  }, [viewMode]);
 
   return (
     <div className="relative w-full h-full bg-black">

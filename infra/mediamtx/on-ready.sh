@@ -3,8 +3,11 @@ set -e
 
 HLS_DIR="/hls/$MTX_PATH"
 
-# HLS_LQ_ENABLED=true (default) — пишем HD-copy + LQ-rendition (4K → 540p через libx264, ~7 cores).
-# HLS_LQ_ENABLED=false — только HD-copy (~1 core). Использовать на слабых стендах и в dev.
+# HLS_LQ_ENABLED=true (default) — пишем лесенку из четырёх ступеней: hd (видео
+#   -c:v copy, звук ремуксится в AAC, ~1 core) плюс три перекодированные через
+#   libx264 -preset veryfast: p720 (crf 25, maxrate 3000k), p480 (crf 26,
+#   maxrate 1400k), p240 (crf 28, maxrate 500k). Итого ~7 cores.
+# HLS_LQ_ENABLED=false — только hd-copy (~1 core). Использовать на слабых стендах и в dev.
 HLS_LQ_ENABLED="${HLS_LQ_ENABLED:-true}"
 
 # Send webhook to API (background, don't block FFmpeg)
