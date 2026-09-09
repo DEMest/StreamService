@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Database**: PostgreSQL (via Prisma, schema at repo root `/prisma/schema.prisma`)
 - **Media server**: MediaMTX (Docker) — SRT/RTMP in → FFmpeg-generated HLS on disk → served by the API
 - **Media tooling**: FFmpeg / ffprobe (HLS generation, recording post-processing, downloads), `sharp` (thumbnails)
+- **Object storage**: S3-compatible — archived recordings, org/stream images (`@aws-sdk/client-s3` + presigned URLs, see `storage/s3.service.ts`)
 - **Orchestration**: Docker Compose
 
 ## Common Commands
@@ -63,7 +64,9 @@ vMix / OBS ──SRT push (:8890) ─┐
             └─RTMP push (:1935)┤
                                ▼
                           MediaMTX (Docker)
-                          • record: yes  → fmp4 segments to /recordings/%path
+                          • record: no in pathDefaults → включается на
+                            конкретный путь через control API; пишет fmp4
+                            в /recordings/%path
                           • hls: false   → NO built-in HLS muxer
                           • authMethod: http → POST /v1/internal/mediamtx/auth
                           • runOnReady    → on-ready.sh
@@ -79,37 +82,37 @@ Browser ◄── Next.js (:3000) ◄──┤ /api/* proxy
                                ▼
                           NestJS API (:3001)
                           • serves live HLS from /hls/live/... (with previewKey gating)
-                          • serves archive HLS-VOD from /recordings/archive/...
-                          • REST + WebSocket (/chat, /studio)
+                          • redirects archive HLS-VOD to presigned S3 URLs
+                          • REST + WebSocket (/chat)
                                ↕
-                          PostgreSQL
+                   PostgreSQL          MinIO / S3
+                                       (архив записей, картинки)
 ```
 
-**Core principle**: zero server-side video transcoding of the *primary* feed. The streamer pushes either one composite frame (e.g. a 2×2 mosaic) or N independent camera feeds; the browser composes the final view on a `<canvas>` via `requestAnimationFrame` + `drawImage`. (The only transcode is an optional 540p **LQ** rendition for mobile, gated by `HLS_LQ_ENABLED`, and AAC audio remux — see `on-ready.sh`.)
+**Core principle**: the *primary* feed is never re-split or re-composed on the server. The streamer pushes **one** feed — either a composite frame (e.g. a 2×2 mosaic) or a single camera — and the browser paints it onto a `<canvas>` via `requestAnimationFrame` + `drawImage`, cropping a quadrant when the viewer asks for one.
+
+Transcoding exists only in the **delivery ladder**, and only for the copies: one FFmpeg process writes `hd/` as a stream copy (video `-c:v copy`, audio remuxed to AAC) plus `p720`/`p480`/`p240` via `libx264`. The whole ladder is gated by `HLS_LQ_ENABLED` — `false` leaves the `hd` copy alone (~1 core), `true` (default) adds the three x264 renditions (~7 cores on 4K input). Exact filters and flags: `infra/mediamtx/on-ready.sh`.
 
 ### The `Stream` is the central entity (not the Organization)
 
-The schema was refactored so that **`Stream`** — not `Organization` — owns the ingest key, mode, slots, layout, live state, and recordings. An org is now a tenant that contains one or more Streams.
+**`Stream`** — not `Organization` — owns the ingest key, live state, recording policy and recordings. An org is a tenant that contains Streams.
 
-- Every **Organization** gets a **default Stream** with `slug = ''` created atomically in `AdminService.createOrg` (and protected from deletion). Its MediaMTX path stays `live/<orgSlug>` for vMix backward-compat.
-- Orgs may have additional **named Streams** (`slug != ''`), created/deleted via `StreamController` (`/v1/org/streams`).
-- Each Stream has a `mode`:
-  - **`composite`** — one ingest feed, `slotCount = 1`. Path `live/<org>[/<streamSlug>]`. The browser crops quadrants (legacy 2×2) or shows it whole.
-  - **`multistream`** — N independent feeds (`slotCount` 1–4), one MediaMTX path **per slot**: `live/<org>[/<streamSlug>]/<n>`. The browser composes slots onto the canvas using a **layout preset**.
-- Per-Stream fields: `ingestKey` (SRT passphrase / RTMP key, rotatable), `slots` (Json), `slotOrder` (Json), `layoutPreset`, `fallbackLayouts` (Json), `isPublic` + `previewKey`, `previewMode`, `isLive`, `currentBroadcastId`, `recordingEnabled`, `recordingMode` (`auto`|`manual`), `autoStartMode` (`public`|`test`).
+- Streams are created and deleted by the org admin through `StreamController` (`/v1/org/streams`). `AdminService.createOrg` creates **only the Organization** — a fresh org has no Streams.
+- `slug` is required and non-empty. Legacy Streams with `slug = ''` still exist and keep the MediaMTX path `live/<orgSlug>` for vMix backward-compat; everything else maps to `live/<orgSlug>/<streamSlug>` (`mediamtxPathForStream` in `stream.service.ts`). **One ingest path per Stream** — there are no per-slot paths.
+- `feedMode` (`'single' | 'composite'`, default `composite`) says what the single ingested frame contains: one camera, or a 2×2 mosaic the browser can crop. It is handed to the client in the watch DTO; the server never splits or re-composes the frame.
+- Per-Stream fields: `ingestKey` (SRT passphrase / RTMP key, rotatable), `feedMode`, `previewMode` (default `multicam`), `isPublic` + `previewKey`, `previewImagePath`, `isLive`, `currentBroadcastId`, `recordingEnabled`, `recordingMode` (`auto`|`manual`).
 
-**Tenancy**: all `/v1/org/*` endpoints filter by `user.orgId`; cross-tenant access returns **404** (existence is not leaked). `StreamController`, `EventController`, etc. all follow this.
+**Tenancy**: all `/v1/org/*` endpoints filter by `user.orgId`; cross-tenant access returns **404** (existence is not leaked).
 
 ### Prisma schema (`/prisma/schema.prisma`, at repo root)
-- `User` — superadmin accounts (login/passwordHash/role).
+- `User` — superadmin and `ad_manager` accounts (login/passwordHash/role).
 - `Organization` — tenant; holds `passwordHash`, `isActive`, `chatTtlMinutes`, `chatEnabled` (chat settings are still **org-level**).
-- `Stream` — the core streaming unit (see above). `@@unique([orgId, slug])`, `ingestKey` unique.
-- `Event` — belongs to org; M:N to Streams via `EventStream`. Lifecycle is timestamp-driven: **active = `startedAt != null && endedAt == null`** (there is no `status` enum / `isLive` column on Event).
-- `EventStream` — join table (eventId + streamId).
-- `Broadcast` — one live session of a Stream; created on first publish, closed on last unpublish. Optionally linked to the Stream's active Event. Owns `Recording[]`.
-- `Recording` — per-slot recording of a Broadcast (`@@unique([broadcastId, slotIndex])`), with `status`, `manifestPath`, `expiresAt`.
-- `ChatMessage` — scoped by `streamId` and/or `eventId`. `orgId` is **deprecated/nullable** (kept during the chat→stream data migration; final DROP is a later migration).
-- `ContactRequest` — landing-page lead form submissions.
+- `Stream` — the core streaming unit (see above). `@@unique([orgId, slug])`, `ingestKey` unique. `autoStartMode` is still a column but nothing reads it — a later migration drops it.
+- `Broadcast` — one live session of a Stream; created on publish, closed on unpublish. `pausedAt` marks a gap a following publish can glue onto (manual recording mode); `previewImagePath` is the S3 key of the recording's poster. Owns `Recording[]`.
+- `Recording` — recording of a Broadcast (`@@unique([broadcastId, slotIndex])`; `slotIndex` is always `1` today and survives only as an archive/S3 path segment), with `status`, `manifestPath` (an S3 key), `fileSize` (BigInt — an hour at 6 Mbit/s overflows int4), `duration`, `expiresAt`.
+- `ChatMessage` — scoped by `streamId`. `orgId` is **deprecated/nullable** (kept during the chat→stream data migration; final DROP is a later migration).
+- `ContactRequest` — landing-page lead form submissions; `Feedback` — feedback-form submissions shown at `/admin/feedback`.
+- `CapacitySample` / `CapacityIncident` — server capacity samples and detected incidents behind `/admin/capacity`.
 - `Ad` / `AdEvent` — рекламные плейсхолдеры и обезличенные счётчики показов.
   `Ad.ownerId` → `User` (`onDelete: SetNull`) определяет, кто увидит
   объявление в `/admin/ads` (см. раздел про роли ниже). NULL — владелец
@@ -123,39 +126,37 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 
 1. **Auth** — MediaMTX calls `POST /v1/internal/mediamtx/auth` (`MediamtxWebhookController`). SRT publishes are accepted (passphrase is enforced by the SRT transport itself). **RTMP** publishes are validated against the Stream's `ingestKey` via `StreamService.verifyIngestKey`.
 2. **on-ready.sh** (runs per published path): fires the `publish` webhook, then spawns FFmpeg to pull `rtsp://localhost:8554/<path>` and write HLS into `/hls/<path>` on the shared `hls_data` volume.
-   - composite path → `master.m3u8` + `hd/` (+ optional `lq/` 540p `libx264` rendition when `HLS_LQ_ENABLED=true`).
-   - multistream slot path (numeric last segment) → a single rendition directly in the slot dir (client composes slots).
+   - `master.m3u8` + `hd/` — video `-c:v copy`, audio remuxed to AAC. No transcode of the primary feed.
+   - with `HLS_LQ_ENABLED=true` (the default) the **same** FFmpeg process also writes `p720/`, `p480/` and `p240/` via `libx264` (`-preset veryfast`, crf 25/26/28) — ~7 cores on a 4K input. `false` leaves only `hd/` (~1 core). Exact flags: `infra/mediamtx/on-ready.sh`.
 3. **on-not-ready.sh** fires the `unpublish` webhook and `rm -rf /hls/<path>`.
-4. **Webhook handler** — `POST /v1/internal/mediamtx/webhook` → `StreamService.handleWebhook(path, action)`. It resolves the path to `{stream, slotIndex}` (`resolvePathToStream`), updates in-memory `SlotState`, and on the **first** publishing slot creates a `Broadcast` (+ auto-enables recording if `recordingMode='auto'`); on the **last** unpublish it closes the Broadcast. Concurrent webhooks per Stream are serialized by an in-process **per-streamId mutex** to avoid double-Broadcast races.
+4. **Webhook handler** — `POST /v1/internal/mediamtx/webhook` → `StreamService.handleWebhook(path, action)`. It resolves the path to a Stream (`resolvePathToStream`), and on `publish` creates a `Broadcast` (+ auto-enables recording if `recordingMode='auto'`); on `unpublish` it closes or pauses it. Concurrent webhooks per Stream are serialized by an in-process **per-streamId mutex** to avoid double-Broadcast races. The same call fires the SEO ping on an actual live-state change.
 5. **Live HLS serving** — `RecordingController` serves `/v1/public/orgs/:orgSlug[/streams/:streamSlug]/live/hls/*` by streaming files from `/hls/live/...` on disk, enforcing `isPublic`/`previewKey` and path-traversal protection (`Cache-Control: no-store` because live segments rotate).
 
-> The Next.js `/hls/*` → `mediamtx:8888` rewrite still exists in `next.config.mjs` but is effectively legacy now that MediaMTX's HLS muxer is off; the watch UI fetches live HLS through `/api/v1/public/...`.
 
 ### Recording pipeline (`recording/`)
-- MediaMTX records natively (`record: yes`, `recordFormat: fmp4`, 3h segments) to `/recordings/%path/...`.
-- On Broadcast end, `RecordingService.onStreamEnded` runs **without any transcode**: it moves fmp4 segments into `/recordings/archive/<path>/<broadcastId>/slot-<n>/`, probes durations with **ffprobe**, and builds HLS-VOD playlists (`buildHlsVodPlaylist` / `buildMasterPlaylist` in `hls-vod.ts`). Composite → 1 slot; multistream → one slot dir per published slot, all referenced from a shared `master.m3u8`.
-- Archive HLS is served by `RecordingController` (`.../broadcasts/:broadcastId/recording/hls/*`). Download (`/v1/org/broadcasts/:id/recording/download`) concatenates slot-1 segments with FFmpeg `-c copy` into a streamed MP4.
-- Cron (`@nestjs/schedule`): `cleanupExpired` at 03:00 (7-day `expiresAt`), `retryFailed` at 03:30; orphan archive dirs are swept on boot.
+- Recording is **off** in MediaMTX's `pathDefaults`; the API turns it on for a specific path through the MediaMTX control API when the Stream has recording enabled. Segments are written as fmp4 to `/recordings/%path/...`.
+- On Broadcast end, `RecordingService.onStreamEnded` runs **without any video transcode**: it gathers the fmp4 segments into a scratch dir, probes durations with **ffprobe**, builds the HLS-VOD playlist (`buildHlsVodPlaylist` / `buildMasterPlaylist` in `hls-vod.ts`) and a single concatenated `download.mp4` (FFmpeg `-c copy`), then uploads the whole `archive/<basePath>/<broadcastId>/` prefix to **S3** (`S3Service.uploadDirectory`). Local scratch is deleted only *after* a successful upload — otherwise a Recording would be marked ready with no object behind it. `Recording.manifestPath` holds the S3 key.
+- Archive playback goes through `RecordingController` (`.../broadcasts/:broadcastId/recording/hls/*`): playlists are rewritten and served by the API, while the heavy bytes (segments, the MP4 download) are handed out as **302 redirects to presigned S3 URLs**, bypassing the API's own bandwidth.
+- Cron (`@nestjs/schedule`): `cleanupExpired` at 03:00 (7-day `expiresAt`, drops the S3 prefix), `retryFailed` at 03:30, and `finalizeStaleGlue` every 5 minutes — a manual-mode Broadcast whose stream never came back is closed at the moment it dropped, not at the moment the cron noticed.
 
 ### API modules (`apps/api/src/`)
 
 | Module | Route prefix | Auth |
 |--------|-------------|------|
 | `health` | `GET /health` | none |
-| `auth` | `/v1/auth/*` (login, refresh, logout, me, verify) | none / JWT |
+| `auth` | `/v1/auth/*` (login, refresh, logout, me) | none / JWT |
 | `admin` | `/v1/admin/*` (orgs, contact-requests) | superadmin JWT |
 | `org` | `/v1/org/*` (profile, ingest-config, broadcasts, chat, preview upload) | org_admin JWT |
 | `stream` | `/v1/org/streams/*` (CRUD, rotate-key, stop, recording) | org_admin JWT |
-| `event` | `/v1/org/events/*` (CRUD, start/end, attach/detach streams) | org_admin JWT |
-| `public` | `/v1/public/*` (catalog, watch, broadcasts, thumbnail, event landing, contact) | none |
+| `public` | `/v1/public/*` (catalog, watch, broadcasts, thumbnail, previews, contact, feedback) | none |
+| `search` | `/v1/public/search` | none |
 | `recording` | live + archive HLS serving, download | none (HLS) / org_admin JWT (download) |
-| `mediamtx` (webhook) | `/v1/internal/mediamtx/{auth,webhook}` | shared secret (`MEDIAMTX_WEBHOOK_SECRET`) |
+| webhook controller (`org/mediamtx-webhook.controller.ts`) | `/v1/internal/mediamtx/{auth,webhook}` | shared secret (`MEDIAMTX_WEBHOOK_SECRET`) |
 | `ads` | `/v1/admin/ads/*` (CRUD, баннеры, статистика), `/v1/public/ads/*` (активные объявления, картинки, события) | superadmin+ad_manager JWT / none |
 | `seo` | `/v1/public/seo/{sitemap,page-meta}` | none |
 | `capacity` | `/v1/admin/capacity` (ёмкость сервера), `/v1/public/qoe` (телеметрия плеера) | superadmin JWT / none |
 | `chat` | WebSocket `/chat` namespace | none |
-| `studio` | WebSocket `/studio` namespace | org_admin JWT cookie |
-| `thumbnail`, `contact`, `prisma` | (internal services) | — |
+| `storage`, `stats`, `thumbnail`, `contact`, `feedback`, `notify`, `mediamtx` (control-API client), `prisma` | (internal services, no routes of their own) | — |
 
 **Auth tokens & cookies** (`auth.controller.ts`):
 - JWT payload: `{ sub, role: 'superadmin'|'org_admin'|'ad_manager', orgId?, orgSlug? }`.
@@ -202,24 +203,22 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
   403 из API. Он же знает про топологию хостов: суперадмина с `/dashboard`
   уводит на `/`, а не в `/admin`, которого на этом имени нет.
 
-### Studio gateway + SlotState (`studio/`, `stream/slot-state.service.ts`)
-- `StudioGateway` (`/studio` namespace, org_admin only via JWT cookie) powers the streamer's live console. Client emits `join { streamId }`; server validates org ownership, joins room `studio:<streamId>`, sends a snapshot, then forwards live `slotState` events.
-- `SlotStateService` is an **in-memory** `EventEmitter` map of per-slot `{ isPublishing, bitrate, lastPublishAt, ... }`. It is written by the publish/unpublish webhook handler. On API boot it **reconciles** from MediaMTX (`listActivePublishers` checks `paths/list` + runtime `srtconns/list`/`rtspsessions/list`/`rtmpconns/list`) so a mid-broadcast restart doesn't blank the Studio UI. It has a circular dependency with `StreamService`, broken with `forwardRef`.
-
-### Chat (`chat/`) — scope-based rooms
-- `/chat` Socket.io namespace. Client emits `join { orgSlug, streamSlug? }`; `ChatService.resolveScope` returns either an **event scope** (`event:<eventId>` — all Streams of an *active* Event share one room) or a **stream scope** (`stream:<streamId>` — standalone Stream or Stream in an ended Event).
-- The scope is **re-resolved on every `message`** (not just at join) because an `Event.start`/`end` mid-session changes which room a Stream belongs to; the gateway migrates the socket between rooms accordingly.
+### Chat (`chat/`) — one room per Stream
+- `/chat` Socket.io namespace. Client emits `join { orgSlug, streamSlug? }`; `ChatService.resolveStreamId` maps that to a Stream and the socket joins `stream:<streamId>` (`chatRoomKey`). There is no cross-Stream room.
 - Server emits `history`, `chat_ttl`, `chat_enabled`, `viewers`. `chatEnabled`/`chatTtlMinutes` remain org-level. Nickname is stored client-side (`NicknameModal` / localStorage).
+- The gateway also owns the **viewer counter** per room, which `StreamService` reads for the dashboard's live stats — the socket count is the only viewer number the system has.
 
-### Layout presets (`stream/layout-presets.ts` + `apps/web/src/lib/layout-presets.ts`)
-The set of multistream layouts (`solo`, `side-by-side`, `stacked`, `pip-main`, `pyramid`, `left-main`, `row`, `grid-2x2`, `main-right-3`, `main-pip-3`) is defined on **both** backend and frontend. `pickLayout({ layoutPreset, fallbackLayouts, activeCount })` chooses a preset for the current number of *active* slots (streamer choice → configured fallback → system default by count). Backend uses it for validation; `MatPlayer` uses it to position slots on the canvas. **Keep the two copies in sync** when adding/changing presets.
+### Canvas layouts (`apps/web/src/lib/canvas-layout-presets.ts`) — frontend only
+Laying out N live Streams of one org side by side on the org-overview canvas ("смотреть все вместе"). The backend neither stores nor validates this — it is **pure viewer-side UI state**, so there is no second copy to keep in sync. Every tile is treated as 16:9 and the container adapts its height, so a layout never stretches video into foreign proportions.
 
 ### MatPlayer — canvas compositing (`apps/web/src/components/MatPlayer.tsx`)
-A hidden `<video>` (or several) decodes HLS via hls.js (native on iOS); a visible `<canvas>` is painted each frame via `requestAnimationFrame` + `drawContain` (letterboxed crop). Three prop shapes:
-- **legacy/composite** — single composite feed; `QUAD` map crops a quadrant (`cam1`–`cam4`) or draws the whole frame (`multicam`).
-- **multistream** — N feeds + `slots` + `layoutPreset`/`fallbackLayouts`; positions come from `pickLayout`. Only `activeSlotIndexes` are drawn, so the layout adapts to how many cameras are actually live.
+A hidden `<video>` decodes HLS via hls.js (native on iOS); a visible `<canvas>` is painted via `drawContain` (letterboxed crop). The `viewMode` prop picks what is drawn: `multicam` paints the whole ingested frame, `cam1`–`cam4` crop a quadrant of it through the `QUAD` map — which is what makes `feedMode: 'composite'` work without the server ever splitting the feed.
+
+The player also reports what the delivery ladder is doing: `onRendition` gives the directory name of the current level (`hd`, `p720`…), and `onStall` / `onFragLoad` / `onAlive` feed the capacity metrics.
 
 iOS fullscreen captures the canvas via `captureStream(30)` into a temporary `<video>` and calls `webkitEnterFullscreen`.
+
+The org-overview canvas is a **separate** component (`OrgCanvasPlayer.tsx`), which paints several independent Streams of one org using the canvas layouts above.
 
 ### Next.js frontend routes (`apps/web/src/app/`)
 
@@ -229,19 +228,18 @@ iOS fullscreen captures the canvas via `captureStream(30)` into a temporary `<vi
 | `/login` | Login (superadmin + org_admin + ad_manager). Куда вести после входа, решает общая таблица разделов `apps/web/src/lib/sections.ts` — та же, что питает middleware и шапку |
 | `/admin`, `/admin/requests`, `/admin/feedback`, `/admin/capacity` | Superadmin: orgs/users, contact requests, feedback, ёмкость сервера. **Отвечают только на `admin.<домен>`** — на основном домене nginx уводит 301-м (см. раздел про cookie выше) |
 | `/admin/ads` | Управление рекламой. Единственная страница, отвечающая на **двух** именах: `admin.<домен>` (суперадмину — его объявления) и `ads.<домен>` (рекламному менеджеру — вся реклама платформы) |
-| `/dashboard` | Org dashboard (streams, events, broadcasts) |
-| `/dashboard/streams/[id]/studio` | Streamer Studio console (uses `/studio` WS) |
-| `/streams`, `/organizations`, `/archive` | Public listings |
+| `/dashboard` | Org dashboard (streams, broadcasts, storage) |
+| `/dashboard/streams/[id]` | One Stream: ingest instructions, recordings, preview upload |
+| `/streams`, `/organizations`, `/archive`, `/search` | Public listings and search |
+| `/faq`, `/legal/terms`, `/legal/privacy`, `/legal/copyright` | Static public pages |
 | `/watch/[orgSlug]` | Watch default Stream |
 | `/watch/[orgSlug]/[streamSlug]` | Watch a named Stream |
 | `/watch/[orgSlug]/archive`, `/watch/[orgSlug]/[streamSlug]/archive` | Archive playback |
-| `/event/[orgSlug]/[eventSlug]` | Public Event landing |
 
-HTTP calls go through `apps/web/src/lib/api.ts` (relative URLs, proxied by Next.js; cookie auth + auto-refresh). Some `streamSlug` values are **reserved** (see `RESERVED_STREAM_SLUGS` in `stream.service.ts`) because they collide with frontend routes; purely numeric slugs are also rejected (they collide with slot path segments).
+HTTP calls go through `apps/web/src/lib/api.ts` (relative URLs, proxied by Next.js; cookie auth + auto-refresh). Some `streamSlug` values are **reserved** (see `RESERVED_STREAM_SLUGS` in `stream.service.ts`) because they collide with frontend routes; purely numeric slugs are rejected too.
 
 ### Next.js proxy rewrites (`apps/web/next.config.mjs`)
-- `/api/*` → `API_UPSTREAM` (default `http://api:3001`)
-- `/hls/*` → `HLS_UPSTREAM` (default `http://mediamtx:8888`) — legacy; live HLS now flows through `/api/v1/public/...`.
+- `/api/*` → `API_UPSTREAM` (default `http://api:3001`) — the only rewrite. Live HLS and archive playback both go through it (`/api/v1/public/...`); MediaMTX's own HLS port is never proxied, its muxer is off.
 
 ### SEO (`apps/api/src/seo/` + `apps/web/src/{lib/seo.ts,lib/json-ld.ts}`)
 
@@ -295,10 +293,10 @@ Copy `.env.example` to `.env`. One compose file serves both prod and a test stan
 - `DATABASE_URL` — PostgreSQL connection string (compose builds it from `POSTGRES_PASSWORD`).
 - `JWT_SECRET` — JWT signing secret.
 - `WEB_PORT`, `API_PORT`, `POSTGRES_PORT`, `MEDIAMTX_SRT_PORT`, `MEDIAMTX_RTMP_PORT`, `MEDIAMTX_HLS_PORT`, `MEDIAMTX_API_PORT` — host port mappings.
-- `HLS_UPSTREAM`, `API_UPSTREAM` — internal Docker URLs for the Next.js proxy.
+- `API_UPSTREAM` — internal Docker URL for the Next.js proxy.
 - `MEDIAMTX_API_URL`, `MEDIAMTX_API_USER`, `MEDIAMTX_API_PASS` — MediaMTX control API.
 - `MEDIAMTX_WEBHOOK_SECRET` — shared bearer secret for the publish/unpublish webhook.
-- `HLS_LQ_ENABLED` — `true` (default) adds a 540p LQ rendition via `libx264` (~7 cores on 4K input); set `false` on dev/weak stands for HD-copy only.
+- `HLS_LQ_ENABLED` — `true` (default) adds the `p720`/`p480`/`p240` ladder via `libx264` (~7 cores on 4K input); `false` leaves only the `hd` stream copy (~1 core) — use it on dev/weak stands.
 - `CORS_ORIGIN` — comma-separated allowed origins for the API (also used by the WS gateways).
 - `COOKIE_SECURE` — override Secure flag for auth cookies (`false` on HTTP test stands).
 - `NEXT_PUBLIC_*` (`SOCKET_URL`, `DEMO_VIDEO_URL`) — baked into the web bundle at build time.
@@ -391,12 +389,11 @@ Additional skills are available on request in `.claude/skills/`:
 
 ## Product Constraints
 
-- **Single ingest per Stream, client-side compositing only.** Either one composite feed (`composite` mode) or N per-camera feeds (`multistream` mode); never re-split or transcode the primary feed server-side. The browser canvas does the final composition.
-- The **default Stream** (`slug=''`) of every org is created with the org and cannot be deleted on its own (only via org deletion).
+- **Single ingest per Stream, client-side compositing only.** One feed per Stream — `feedMode` only says whether that frame is a single camera or a mosaic. Never re-split or re-compose the primary feed server-side; the browser canvas crops and lays out. The delivery ladder (`p720`/`p480`/`p240`) transcodes *copies*, never the primary feed.
 - A Stream that is currently live cannot be deleted — stop the broadcast first (`POST /v1/org/streams/:id/stop`).
 - Private Streams use `previewKey`; watchers/HLS access them via `?key=<previewKey>`.
 - Stream slugs are validated: lowercase alphanumeric + single dashes, ≤32 chars, not reserved, not purely numeric.
-- Keep `layout-presets.ts` in sync between `apps/api` and `apps/web`.
+- Canvas layouts live only in `apps/web` — do not add a backend copy to "validate" them.
 
 ## Git flow
 
