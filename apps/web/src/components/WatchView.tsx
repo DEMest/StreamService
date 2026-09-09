@@ -168,13 +168,22 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
     refetchInterval: 15_000,
   });
 
-  // Stream config + HLS URL. Polled every 3s while the org is live.
+  // Конфиг стрима + адрес HLS. Своего таймера здесь нет намеренно: ответ
+  // детерминирован — адрес плейлиста собирается из orgSlug/streamSlug, а
+  // feedMode меняется только правкой стрима в кабинете. Пока эфир идёт,
+  // перезапрашивать нечего, а зритель смотрит часами.
+  //
+  // Ответ становится другим ровно в одном случае — эфир погас и зажёгся снова
+  // (пока эфира нет, ручка отдаёт 404 «No live stream»). Этот переход ловит
+  // `enabled`: на время офлайна запрос выключен, а обратный переход false→true
+  // react-query отрабатывает новым запросом (staleTime по умолчанию 0).
+  // Сам факт начала/конца эфира приносит 15-секундный опрос `watch` выше —
+  // второй таймер на те же данные не нужен.
   const { data: stream } = useQuery({
     queryKey: ['stream', orgSlug, streamSlug, previewKey],
     queryFn: () => api.get<StreamInfo>(`${apiBasePath}/stream${previewKey ? `?key=${previewKey}` : ''}`),
     enabled: org?.isLive === true,
     retry: false,
-    refetchInterval: () => (org?.isLive ? 3000 : false),
   });
 
   // ── Derived state ───────────────────────────────────────────────────────
