@@ -2,6 +2,7 @@
   "name": "api",
   "version": "0.1.0",
   "private": true,
+  "license": "UNLICENSED",
   "scripts": {
     "dev": "dotenv -e ../../.env -- nest start --watch",
     "build": "nest build",
