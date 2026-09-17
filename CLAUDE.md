@@ -406,16 +406,17 @@ Additional skills are available on request in `.claude/skills/`:
 - **No `Co-Authored-By` or any Claude signature** in commits or PRs. This is
   already configured in `.claude/settings.json` (`attribution.commit` /
   `attribution.pr` set to `""`) — do not override it by hand.
-- **Merging is autonomous.** Once the self-check below passes and the PR is
-  open: wait for green CI (`gh pr checks <N> --watch`) and merge it yourself
-  (`gh pr merge <N> --squash --delete-branch`). Do not ask "shall I merge?" on
-  every task — this is the default for any session in this repository. It is
-  overridden by an explicit request in a given session ("don't merge, leave it
-  for review") and by the two hard stops below.
-- **Hard stop 1 — red CI.** Never merge something broken. Stop and report.
-- **Hard stop 2 — `live-safety-auditor` returned FAIL.** See Deployment below.
-- Merge PRs **one at a time**, waiting for each deploy to finish before merging
-  the next. Two merges in quick succession produce two overlapping deploys.
+- **Autonomous PR, privileged auto-merge.** Follow
+  `docs/agents/guarded-delivery.md` for every code change. Implement, review,
+  commit, push, and create a squash PR autonomously; then enable GitHub
+  auto-merge and stop. GitHub merges only after every required CI check and
+  required privileged review passes.
+- A red or unknown CI result, an applicable review `FAIL`, or a
+  `live-safety-auditor` `FAIL` is a hard stop: report it and leave the PR
+  without auto-merge.
+- Merge PRs **one at a time**. Before releasing another approved PR, wait for
+  the prior deploy to finish; overlapping deployments are unsafe for live
+  broadcasts.
 
 ## Mandatory self-check before considering a task done
 

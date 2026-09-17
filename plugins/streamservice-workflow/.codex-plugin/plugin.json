@@ -1,0 +1,21 @@
+{
+  "name": "streamservice-workflow",
+  "version": "0.1.0+codex.20260917102730",
+  "description": "Shared engineering skills with reviewed PR delivery and protected auto-merge for StreamService.",
+  "author": {
+    "name": "StreamService maintainers"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "StreamService Workflow",
+    "shortDescription": "Autonomous PR delivery with privileged auto-merge.",
+    "longDescription": "A team package of current Matt Pocock engineering skills and reviewed PR delivery that waits for privileged GitHub approval.",
+    "developerName": "StreamService maintainers",
+    "category": "Engineering",
+    "capabilities": [
+      "Write"
+    ],
+    "defaultPrompt": "Use $guarded-delivery to implement and review this StreamService change."
+  },
+  "mcpServers": "./.mcp.json"
+}

@@ -25,7 +25,7 @@ build/
 !.claude/skills/
 !.claude/settings.json
 .claude/settings.local.json
-AGENTS.md
+
 docs/superpowers/
 .superpowers/
 *.suo
@@ -52,7 +52,6 @@ yarn.lock
 # Демо-ролик лендинга (~97 МБ) живёт в публичном бакете S3/MinIO,
 # URL приходит через NEXT_PUBLIC_DEMO_VIDEO_URL (см. .env.example).
 *.mp4
-AGENTS.md
 # Состояние выкатки: какой SHA реально крутится в контейнерах.
 # Пишется deploy.sh на сервере, в репозитории ему делать нечего.
 infra/deploy/.deployed

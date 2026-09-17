@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "github-streamservice": {
+      "url": "https://api.githubcopilot.com/mcp/",
+      "auth": "oauth",
+      "http_headers": {
+        "X-MCP-Toolsets": "repos,issues,pull_requests"
+      },
+      "default_tools_approval_mode": "writes",
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 60
+    }
+  }
+}
