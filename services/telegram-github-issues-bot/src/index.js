@@ -6,6 +6,7 @@ const MAX_SOURCE_LENGTH = 8_000;
 
 const config = loadConfig();
 const drafts = new Map();
+const editRequests = new Map();
 let updateOffset = 0;
 
 function loadConfig() {
@@ -84,6 +85,20 @@ function randomId() {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function editRequestKey(chatId, userId) {
+  return `${chatId}:${userId}`;
+}
+
+function draftButtons(draftId) {
+  return {
+    inline_keyboard: [[
+      { text: 'Создать issue', callback_data: `create:${draftId}` },
+      { text: 'Изменить', callback_data: `edit:${draftId}` },
+      { text: 'Отмена', callback_data: `cancel:${draftId}` },
+    ]],
+  };
+}
+
 function extractIssueSource(message) {
   const command = message.text?.match(/^\/issue(?:@\w+)?(?:\s+([\s\S]*))?$/i);
   if (!command) return null;
@@ -134,6 +149,39 @@ async function draftIssue(source) {
   return parseModelJson(content);
 }
 
+async function reviseIssue(issue, instruction) {
+  const system = [
+    'You edit an existing GitHub issue according to the author instruction.',
+    'Return ONLY valid JSON with this exact schema:',
+    '{"title":"short imperative title","body":"Markdown description in Russian","labels":["optional-label"]}.',
+    'Keep useful information from the current issue, apply the instruction, and do not invent technical facts.',
+    'The body must include sections: Контекст, Что нужно сделать, Критерии готовности.',
+  ].join(' ');
+
+  const response = await requestJson(`${config.deepseekBaseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${config.deepseekApiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: config.deepseekModel,
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        {
+          role: 'user',
+          content: `Текущий черновик:\n${JSON.stringify(issue)}\n\nИнструкция автора:\n${instruction}`,
+        },
+      ],
+    }),
+  });
+  const content = response.choices?.[0]?.message?.content;
+  if (!content) throw new Error('DeepSeek returned no completion');
+  return parseModelJson(content);
+}
+
 function previewText(issue) {
   const body = issue.body.length > 2_800 ? `${issue.body.slice(0, 2_800)}\n\n…` : issue.body;
   return `<b>Черновик GitHub Issue</b>\n\n<b>${escapeHtml(issue.title)}</b>\n\n${escapeHtml(body)}`;
@@ -158,6 +206,12 @@ async function createGithubIssue(issue) {
 }
 
 async function handleMessage(message) {
+  const pendingEdit = editRequests.get(editRequestKey(message.chat.id, message.from?.id));
+  if (pendingEdit) {
+    await handleEditInstruction(message, pendingEdit);
+    return;
+  }
+
   const source = extractIssueSource(message);
   if (source === null) return;
 
@@ -200,10 +254,7 @@ async function handleMessage(message) {
       text: previewText(issue),
       parse_mode: 'HTML',
       reply_markup: {
-        inline_keyboard: [[
-          { text: 'Создать issue', callback_data: `create:${draftId}` },
-          { text: 'Отмена', callback_data: `cancel:${draftId}` },
-        ]],
+        ...draftButtons(draftId),
       },
     });
   } catch (error) {
@@ -212,6 +263,52 @@ async function handleMessage(message) {
       chat_id: message.chat.id,
       message_id: status.message_id,
       text: 'Не удалось подготовить черновик. Проверьте настройки DeepSeek и попробуйте ещё раз.',
+    });
+  }
+}
+
+async function handleEditInstruction(message, pendingEdit) {
+  const key = editRequestKey(message.chat.id, message.from?.id);
+  const draft = drafts.get(pendingEdit.draftId);
+  if (!draft || draft.expiresAt < Date.now()) {
+    editRequests.delete(key);
+    drafts.delete(pendingEdit.draftId);
+    await telegram('sendMessage', {
+      chat_id: message.chat.id,
+      text: 'Черновик устарел. Создайте новый через /issue.',
+      reply_to_message_id: message.message_id,
+    });
+    return;
+  }
+
+  const instruction = message.text?.trim();
+  if (!instruction) {
+    await telegram('sendMessage', {
+      chat_id: message.chat.id,
+      text: 'Нужна текстовая инструкция: например, «добавь критерий готовности и убери упоминание мобильной версии».',
+      reply_to_message_id: message.message_id,
+    });
+    return;
+  }
+
+  try {
+    const issue = await reviseIssue(draft.issue, instruction.slice(0, MAX_SOURCE_LENGTH));
+    draft.issue = issue;
+    draft.expiresAt = Date.now() + DRAFT_TTL_MS;
+    editRequests.delete(key);
+    await telegram('editMessageText', {
+      chat_id: draft.chatId,
+      message_id: pendingEdit.previewMessageId,
+      text: previewText(issue),
+      parse_mode: 'HTML',
+      reply_markup: draftButtons(pendingEdit.draftId),
+    });
+  } catch (error) {
+    console.error('Draft revision failed', error);
+    await telegram('sendMessage', {
+      chat_id: message.chat.id,
+      text: 'Не удалось применить правку. Попробуйте сформулировать её иначе.',
+      reply_to_message_id: message.message_id,
     });
   }
 }
@@ -231,8 +328,22 @@ async function handleCallback(callback) {
 
   if (action === 'cancel') {
     drafts.delete(draftId);
+    editRequests.delete(editRequestKey(draft.chatId, draft.ownerId));
     await telegram('answerCallbackQuery', { callback_query_id: callback.id, text: 'Черновик отменён.' });
     await telegram('editMessageReplyMarkup', { chat_id: draft.chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
+    return;
+  }
+  if (action === 'edit') {
+    editRequests.set(editRequestKey(draft.chatId, draft.ownerId), {
+      draftId,
+      previewMessageId: callback.message.message_id,
+    });
+    await telegram('answerCallbackQuery', { callback_query_id: callback.id, text: 'Жду инструкцию по правке.' });
+    await telegram('editMessageText', {
+      chat_id: draft.chatId,
+      message_id: callback.message.message_id,
+      text: 'Напишите следующим сообщением, что нужно изменить в черновике. Бот примет инструкцию только от автора запроса.',
+    });
     return;
   }
   if (action !== 'create') return;
@@ -277,6 +388,9 @@ async function run() {
         await handleUpdate(update);
       }
       for (const [id, draft] of drafts) if (draft.expiresAt < Date.now()) drafts.delete(id);
+      for (const [key, pendingEdit] of editRequests) {
+        if (!drafts.has(pendingEdit.draftId)) editRequests.delete(key);
+      }
     } catch (error) {
       console.error('Polling error; retrying in 5 seconds', error);
       await new Promise((resolve) => setTimeout(resolve, 5_000));
