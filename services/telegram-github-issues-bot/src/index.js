@@ -1,8 +1,15 @@
 'use strict';
 
+const { ProxyAgent } = require('undici');
+
 const TELEGRAM_API = 'https://api.telegram.org';
 const DRAFT_TTL_MS = 30 * 60 * 1000;
 const MAX_SOURCE_LENGTH = 8_000;
+
+// api.telegram.org is unreachable directly from this host; route only
+// Telegram calls through the outbound proxy already used elsewhere on the box.
+const telegramProxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '';
+const telegramDispatcher = telegramProxyUrl ? new ProxyAgent(telegramProxyUrl) : undefined;
 
 const config = loadConfig();
 const drafts = new Map();
@@ -68,6 +75,7 @@ async function telegram(method, payload) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
+    dispatcher: telegramDispatcher,
   });
   if (!data.ok) throw new Error(`Telegram ${method} failed: ${data.description || 'unknown error'}`);
   return data.result;

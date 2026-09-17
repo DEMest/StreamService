@@ -3,4 +3,8 @@ services:
     build: .
     env_file: .env
     restart: unless-stopped
+    environment:
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-}
 
