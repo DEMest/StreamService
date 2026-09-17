@@ -1,0 +1,57 @@
+name: Telegram GitHub Issues Bot
+
+# Этот workflow полностью отделён от CI StreamService. Он запускается только
+# при изменениях самого бота и обновляет только его Compose-проект.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/telegram-github-issues-bot/**'
+      - '.github/workflows/telegram-github-issues-bot.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'services/telegram-github-issues-bot/**'
+      - '.github/workflows/telegram-github-issues-bot.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: telegram-github-issues-bot-deploy
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Проверка бота
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v7
+      - name: Проверка синтаксиса
+        run: node --check services/telegram-github-issues-bot/src/index.js
+
+  deploy:
+    name: Выкатка бота
+    needs: validate
+    if: >-
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: self-hosted
+    environment: production
+    steps:
+      - name: Ключ и known_hosts
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Обновить только контейнер бота
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=10 \
+              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              "cd '${{ secrets.DEPLOY_PATH }}' && git fetch origin main --quiet && git checkout main --quiet && git merge --ff-only origin/main --quiet && test -f services/telegram-github-issues-bot/.env && docker compose --project-name telegram-github-issues-bot -f services/telegram-github-issues-bot/docker-compose.yml up -d --build"
+
+      - name: Убрать ключ
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
