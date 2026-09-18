@@ -8,11 +8,15 @@ on:
     paths:
       - 'services/telegram-github-issues-bot/**'
       - '.github/workflows/telegram-github-issues-bot.yml'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
   push:
     branches: [main]
     paths:
       - 'services/telegram-github-issues-bot/**'
       - '.github/workflows/telegram-github-issues-bot.yml'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
   workflow_dispatch:
 
 concurrency:
