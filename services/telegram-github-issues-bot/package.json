@@ -4,11 +4,13 @@
   "private": true,
   "description": "Telegram bot that drafts and creates GitHub issues with DeepSeek",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19"
   },
   "scripts": {
     "start": "node src/index.js",
     "check": "node --check src/index.js"
+  },
+  "dependencies": {
+    "mongodb": "7.6.0"
   }
 }
-

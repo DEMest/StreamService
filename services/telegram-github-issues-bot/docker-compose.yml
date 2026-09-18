@@ -1,6 +1,26 @@
 services:
-  telegram-github-issues-bot:
-    build: .
-    env_file: .env
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok' | grep 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
+  telegram-github-issues-bot:
+    build:
+      context: ../..
+      dockerfile: services/telegram-github-issues-bot/Dockerfile
+    env_file: .env
+    environment:
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/telegram-github-issues-bot}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
