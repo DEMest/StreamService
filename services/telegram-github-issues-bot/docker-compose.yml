@@ -16,8 +16,8 @@ services:
 
   telegram-github-issues-bot:
     build:
-      context: ../..
-      dockerfile: services/telegram-github-issues-bot/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     env_file: .env
     environment:
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/telegram-github-issues-bot}
