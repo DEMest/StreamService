@@ -1,7 +1,12 @@
 'use strict';
 
+const { ProxyAgent } = require('undici');
 const crypto = require('node:crypto');
 const { MongoClient } = require('mongodb');
+
+// Production host reaches Telegram only through its existing outbound proxy.
+const telegramProxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '';
+const telegramDispatcher = telegramProxyUrl ? new ProxyAgent(telegramProxyUrl) : undefined;
 
 const cfg = config();
 const mongo = new MongoClient(cfg.mongoUri);
@@ -43,7 +48,7 @@ async function json(url, options, name) {
   return data;
 }
 async function telegram(method, payload) {
-  const data = await json(`https://api.telegram.org/bot${cfg.telegramToken}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }, 'Telegram');
+  const data = await json(`https://api.telegram.org/bot${cfg.telegramToken}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload), dispatcher: telegramDispatcher }, 'Telegram');
   if (!data.ok) throw new Error(data.description || 'Telegram error');
   return data.result;
 }
