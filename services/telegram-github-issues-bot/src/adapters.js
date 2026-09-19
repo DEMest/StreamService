@@ -110,6 +110,26 @@ function createGitHubAdapter(config) {
     }));
   }
 
+  async function listUserInstallations(userToken) {
+    const installations = [];
+    let page = 1;
+    while (true) {
+      const data = await requestJson(
+        `https://api.github.com/user/installations?per_page=100&page=${page}`,
+        { headers: headers(`Bearer ${userToken}`) },
+        'GitHub',
+      );
+      installations.push(...(data.installations || []));
+      if (installations.length >= data.total_count || !data.installations?.length) break;
+      page += 1;
+    }
+    return installations.map((installation) => ({
+      id: String(installation.id),
+      account: installation.account?.login || '',
+      manageUrl: installation.html_url || '',
+    }));
+  }
+
   async function listLabels(installationId, owner, name) {
     const labels = [];
     let page = 1;
@@ -160,6 +180,7 @@ function createGitHubAdapter(config) {
     ),
     listLabels,
     listUserInstallationRepositories,
+    listUserInstallations,
   };
 }
 

@@ -127,14 +127,29 @@ function createWebModule({ config, github, store, telegram, logger = console }) 
     };
   }
 
+  function buildAuthorizeUrl(state, codeChallenge) {
+    const authorizeUrl = new URL('https://github.com/login/oauth/authorize');
+    authorizeUrl.searchParams.set('client_id', config.githubClientId);
+    authorizeUrl.searchParams.set('redirect_uri', `${config.publicBaseUrl}/github/callback`);
+    authorizeUrl.searchParams.set('state', state);
+    authorizeUrl.searchParams.set('code_challenge', codeChallenge);
+    authorizeUrl.searchParams.set('code_challenge_method', 'S256');
+    return authorizeUrl.toString();
+  }
+
+  function buildInstallUrl(state) {
+    const installUrl = new URL(config.githubInstallUrl);
+    installUrl.searchParams.set('state', state);
+    return installUrl.toString();
+  }
+
   async function connectGitHub(body) {
     const ctx = await context(body);
     if (!config.publicBaseUrl || !config.miniAppShortName || !config.githubInstallUrl || !config.githubClientId || !config.githubClientSecret) {
       throw new HttpError(503, 'GitHub connection is not configured on the server yet.');
     }
-    let installUrl;
     try {
-      installUrl = new URL(config.githubInstallUrl);
+      new URL(config.githubInstallUrl);
     } catch {
       throw new HttpError(503, 'The GitHub installation URL is invalid.');
     }
@@ -150,7 +165,7 @@ function createWebModule({ config, github, store, telegram, logger = console }) 
         codeVerifier: pkce.verifier,
         codeChallenge: pkce.challenge,
         returnToken,
-        status: 'awaiting_installation',
+        status: 'awaiting_authorization',
         createdAt: new Date(),
         expiresAt,
       }),
@@ -163,8 +178,7 @@ function createWebModule({ config, github, store, telegram, logger = console }) 
         expiresAt,
       }),
     ]);
-    installUrl.searchParams.set('state', state);
-    return { state, url: installUrl.toString() };
+    return { state, url: buildAuthorizeUrl(state, pkce.challenge) };
   }
 
   async function githubSetup(url, response) {
@@ -181,13 +195,7 @@ function createWebModule({ config, github, store, telegram, logger = console }) 
         installationAccount: installation.account?.login || '',
         status: 'awaiting_authorization',
       });
-      const authorizeUrl = new URL('https://github.com/login/oauth/authorize');
-      authorizeUrl.searchParams.set('client_id', config.githubClientId);
-      authorizeUrl.searchParams.set('redirect_uri', `${config.publicBaseUrl}/github/callback`);
-      authorizeUrl.searchParams.set('state', state);
-      authorizeUrl.searchParams.set('code_challenge', session.codeChallenge);
-      authorizeUrl.searchParams.set('code_challenge_method', 'S256');
-      response.writeHead(302, { location: authorizeUrl.toString(), 'cache-control': 'no-store' });
+      response.writeHead(302, { location: buildAuthorizeUrl(state, session.codeChallenge), 'cache-control': 'no-store' });
       response.end();
     } catch (error) {
       logger.error(error);
@@ -211,8 +219,23 @@ function createWebModule({ config, github, store, telegram, logger = console }) 
     try {
       const token = await github.exchangeOAuthCode(code, session.codeVerifier);
       if (!token.access_token) throw new Error(token.error_description || token.error || 'GitHub did not return an access token.');
-      const repositories = await github.listUserInstallationRepositories(token.access_token, session.installationId);
+      let installations = await github.listUserInstallations(token.access_token);
+      if (!installations.length && session.installationId) {
+        installations = [{ id: String(session.installationId), account: session.installationAccount || '', manageUrl: '' }];
+      }
+      if (!installations.length) {
+        await store.updateOAuthSession(state, { status: 'awaiting_installation' });
+        response.writeHead(302, { location: buildInstallUrl(state), 'cache-control': 'no-store' });
+        response.end();
+        return;
+      }
+      const repositories = [];
+      for (const installation of installations) {
+        const found = await github.listUserInstallationRepositories(token.access_token, installation.id);
+        repositories.push(...found.map((repo) => ({ ...repo, installationId: installation.id })));
+      }
       await store.updateOAuthSession(state, {
+        installations,
         availableRepositories: repositories,
         status: 'ready',
       });
@@ -238,14 +261,11 @@ function createWebModule({ config, github, store, telegram, logger = console }) 
       throw new HttpError(404, 'Connection session not found.');
     }
     const connected = await store.listRepositories(chatId);
-    const selectedIds = new Set(
-      connected
-        .filter((repo) => repo.installationId === session.installationId)
-        .map((repo) => repo.repositoryId),
-    );
+    const selectedIds = new Set(connected.map((repo) => repo.repositoryId));
     return {
       status: session.status,
       error: session.error || null,
+      installations: (session.installations || []).map(({ account, manageUrl }) => ({ account, manageUrl })),
       repositories: (session.availableRepositories || []).map((repo) => ({
         ...repo,
         selected: selectedIds.has(repo.id),
@@ -268,7 +288,7 @@ function createWebModule({ config, github, store, telegram, logger = console }) 
     const currentById = new Map(current.map((repo) => [repo.repositoryId, repo]));
     const prepared = await Promise.all(selected.map(async (repo) => ({
       ...repo,
-      labels: await github.listLabels(session.installationId, repo.owner, repo.name),
+      labels: await github.listLabels(repo.installationId || session.installationId, repo.owner, repo.name),
       allowedLabels: currentById.get(repo.id)?.allowedLabels || [],
     })));
     await store.updateOAuthSession(session.state, { preparedRepositories: prepared });
@@ -294,7 +314,15 @@ function createWebModule({ config, github, store, telegram, logger = console }) 
       if (allowedLabels.some((label) => !available.has(label))) throw new HttpError(400, `A label for ${repo.fullName} is not available.`);
       return { ...repo, allowedLabels };
     });
-    await store.saveInstallationRepositories(ctx.chatId, session.installationId, selected);
+    const installationIds = new Set((session.installations || []).map((installation) => installation.id));
+    if (session.installationId) installationIds.add(String(session.installationId));
+    for (const installationId of installationIds) {
+      await store.saveInstallationRepositories(
+        ctx.chatId,
+        installationId,
+        selected.filter((repo) => String(repo.installationId || session.installationId) === installationId),
+      );
+    }
     await store.consumeOAuthSession(session.state);
     return { repositories: await store.listRepositories(ctx.chatId) };
   }

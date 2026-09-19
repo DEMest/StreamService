@@ -10,8 +10,10 @@ StreamService.
 
 - администратор группы запускает `/settings` и открывает Mini App;
 - Mini App проверяет подпись Telegram и актуальную роль администратора;
-- `Connect GitHub` устанавливает общий GitHub App, затем проводит администратора
-  через OAuth и автоматически получает доступные репозитории;
+- `Connect GitHub` сначала проводит администратора через OAuth и находит уже
+  существующие установки GitHub App (`GET /user/installations`); если установки
+  нет, отправляет на страницу установки и после Setup URL повторяет OAuth.
+  Доступные репозитории всех установок пользователя показываются одним списком;
 - администратор может подключить к группе несколько репозиториев и выбрать для
   каждого разрешённые labels из существующих GitHub labels;
 - любой участник группы запускает `/issue <description>`;
@@ -78,7 +80,7 @@ Menu button `Settings` бот устанавливает сам при стар�
 - Callback URL: `https://bot.liga-live.ru/github/callback`;
 - Setup URL: `https://bot.liga-live.ru/github/setup`;
 - `Request user authorization (OAuth) during installation`: выключено — OAuth
-  запускается backend после Setup URL с собственным `state` и PKCE;
+  запускается backend с собственным `state` и PKCE;
 - Webhooks: выключены, события боту не нужны;
 - GitHub App visibility: **Public**, чтобы его могли устанавливать другие
   GitHub-пользователи и организации;
@@ -103,6 +105,8 @@ base64 -i private-key.pem | tr -d '\n'
 GitHub callback не доверяет входному `installation_id`: backend проверяет
 installation через App JWT, получает короткоживущий user token и убеждается,
 что авторизованный GitHub-пользователь действительно видит эту installation.
+Установки берутся из `GET /user/installations` с этим токеном, поэтому уже
+установленное приложение не требует повторной установки и перехода на Setup URL.
 User token после проверки не сохраняется. Issues создаются короткоживущим
 installation token от имени GitHub App.
 
