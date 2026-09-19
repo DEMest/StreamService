@@ -145,12 +145,36 @@ async function bootstrap(chatId = '') {
   }
 }
 
-function repositoryChoices(repositories) {
+function manageHint(installations) {
+  const hint = document.createElement('p');
+  hint.className = 'muted';
+  hint.append('Repository missing? Give the GitHub App access to it on GitHub, then press Connect GitHub again.');
+  for (const installation of installations || []) {
+    if (!installation.manageUrl) continue;
+    hint.append(' ');
+    const link = document.createElement('a');
+    link.href = installation.manageUrl;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = installation.account ? `Manage access for ${installation.account}` : 'Manage access';
+    link.addEventListener('click', (event) => {
+      if (!tg?.openLink) return;
+      event.preventDefault();
+      tg.openLink(installation.manageUrl);
+    });
+    hint.append(link);
+  }
+  return hint;
+}
+
+function repositoryChoices(repositories, installations = []) {
   dom.setupTitle.textContent = 'Choose repositories';
   dom.setupContent.replaceChildren();
   const help = document.createElement('p');
   help.className = 'muted';
-  help.textContent = 'Select every repository this Telegram group should be able to use.';
+  help.textContent = repositories.length
+    ? 'Select every repository this Telegram group should be able to use.'
+    : 'The GitHub App does not have access to any repositories yet.';
   const list = document.createElement('div');
   list.className = 'choice-list';
   for (const repo of repositories) {
@@ -181,7 +205,7 @@ function repositoryChoices(repositories) {
       }
     }),
   );
-  dom.setupContent.append(help, list, actions);
+  dom.setupContent.append(help, list, manageHint(installations), actions);
   dom.setupPanel.classList.remove('hidden');
   dom.setupPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -290,7 +314,7 @@ async function checkConnection(resumed = false) {
   try {
     const data = await api('/api/github/status', { state: state.connectState });
     if (data.status === 'ready') {
-      repositoryChoices(data.repositories);
+      repositoryChoices(data.repositories, data.installations);
       return true;
     }
     if (data.status === 'failed') throw new Error(data.error || 'GitHub connection failed.');
@@ -308,7 +332,7 @@ async function connectGitHub() {
   try {
     const data = await api('/api/github/connect');
     state.connectState = data.state;
-    showNotice('Complete installation and authorization on GitHub, then return here.', true);
+    showNotice('Authorize on GitHub (and install the app if asked), then return here.', true);
     tg?.openLink ? tg.openLink(data.url) : window.open(data.url, '_blank', 'noopener');
     const poll = window.setInterval(async () => {
       if (await checkConnection()) window.clearInterval(poll);
