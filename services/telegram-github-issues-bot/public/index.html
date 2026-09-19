@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
+    <title>GitHub Issues Bot Settings</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="https://telegram.org/js/telegram-web-app.js?63"></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">GitHub Issues Bot</p>
+        <h1>Group settings</h1>
+        <p class="muted">Connect repositories and choose which labels members may use.</p>
+      </header>
+
+      <div id="notice" class="notice hidden" role="status"></div>
+      <div id="loading" class="loading">Loading settings…</div>
+
+      <section id="app" class="hidden">
+        <label id="group-picker" class="field hidden">
+          <span>Telegram group</span>
+          <select id="group-select"></select>
+        </label>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Connected repositories</p>
+              <h2 id="group-title">Select a group</h2>
+            </div>
+            <button id="connect-button" class="primary" type="button">Connect GitHub</button>
+          </div>
+          <p id="empty-state" class="empty hidden">No repositories are connected to this group yet.</p>
+          <div id="repository-list" class="repository-list"></div>
+        </section>
+
+        <section id="setup-panel" class="panel hidden">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">GitHub connection</p>
+              <h2 id="setup-title">Choose repositories</h2>
+            </div>
+          </div>
+          <div id="setup-content"></div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

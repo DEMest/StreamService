@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js"
+    "check": "node --check src/index.js && node --check src/adapters.js && node --check src/bot.js && node --check src/config.js && node --check src/security.js && node --check src/store.js && node --check src/web.js && node --check public/app.js",
+    "test": "node --test"
   },
   "dependencies": {
     "mongodb": "7.6.0",

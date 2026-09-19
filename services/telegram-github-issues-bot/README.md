@@ -1,86 +1,170 @@
 # Telegram → GitHub Issues bot
 
-Независимый микросервис для рабочих Telegram-групп. Настройки каждого
-пользователя и чата хранятся в MongoDB: несколько репозиториев, псевдонимы и
-направления внутри репозитория (например, `mobile`, `backend`, `web`).
+Независимый микросервис для создания GitHub Issues из Telegram-групп. В одном
+контейнере работают Telegram long polling и HTTP backend для Mini App; MongoDB
+хранит общие настройки групп, подключённые репозитории и короткоживущие setup
+sessions. Сервис не использует API, PostgreSQL или сети основного
+StreamService.
 
-## Запуск
+## Пользовательский сценарий
+
+- администратор группы запускает `/settings` и открывает Mini App;
+- Mini App проверяет подпись Telegram и актуальную роль администратора;
+- `Connect GitHub` устанавливает общий GitHub App, затем проводит администратора
+  через OAuth и автоматически получает доступные репозитории;
+- администратор может подключить к группе несколько репозиториев и выбрать для
+  каждого разрешённые labels из существующих GitHub labels;
+- любой участник группы запускает `/issue <description>`;
+- при одном репозитории он выбирается автоматически, при нескольких бот
+  показывает выбор;
+- DeepSeek готовит черновик. Автор может добавить разрешённые labels,
+  отредактировать его через модель, создать issue или отменить;
+- issue создаётся от GitHub App, а внизу описания фиксируется Telegram-автор
+  запроса.
+
+Все команды, ответы бота и Mini App используют английский язык. Labels
+необязательны и по умолчанию не устанавливаются.
+
+## Локальный запуск
+
+Compose подключает бот к уже используемой production-сети `edge`, чтобы
+edge-nginx мог обращаться к нему по имени. Для локального запуска сеть можно
+создать один раз:
+
+```bash
+docker network create edge
+cd services/telegram-github-issues-bot
+cp .env.example .env
+# заполните Telegram, DeepSeek и GitHub App credentials
+docker compose up -d --build
+docker compose logs -f telegram-github-issues-bot
+```
+
+Проверки без Docker:
 
 ```bash
 cd services/telegram-github-issues-bot
-cp .env.example .env
-# заполните .env: Telegram, DeepSeek и GitHub App
-docker compose up -d --build
-docker compose logs -f
+pnpm check
+pnpm test
 ```
 
-Остановка: `docker compose down`.
+Остановка: `docker compose down`. Это затрагивает только бот и его MongoDB.
 
-Это отдельный Compose-проект и отдельный контейнер: он не подключается к
-PostgreSQL, API или сетям StreamService.
+## Telegram
+
+1. Создайте бота через [@BotFather](https://t.me/BotFather), сохраните token в
+   `TELEGRAM_BOT_TOKEN`.
+2. В BotFather создайте для него Mini App (`/newapp`):
+   - Web App URL: `https://bot.liga-live.ru`;
+   - short name: значение `TELEGRAM_MINI_APP_SHORT_NAME`.
+3. Добавьте бота в группу. Администратор запускает `/settings` именно в этой
+   группе; ссылка содержит случайную 30-минутную сессию, привязанную к группе и
+   Telegram user ID.
+4. Отключите Privacy Mode. Это нужно для сообщения, которое автор отправляет
+   после нажатия `Edit`.
+
+Menu button `Settings` бот устанавливает сам при старте. Telegram показывает
+его в личном чате с ботом; первый вход для новой группы всё равно выполняется
+командой `/settings` внутри группы.
+
+## GitHub App
+
+Используется один общий GitHub App. Пользовательские PAT не нужны и не
+хранятся.
+
+Настройки GitHub App:
+
+- Homepage URL: `https://bot.liga-live.ru`;
+- Callback URL: `https://bot.liga-live.ru/github/callback`;
+- Setup URL: `https://bot.liga-live.ru/github/setup`;
+- `Request user authorization (OAuth) during installation`: выключено — OAuth
+  запускается backend после Setup URL с собственным `state` и PKCE;
+- Webhooks: выключены, события боту не нужны;
+- GitHub App visibility: **Public**, чтобы его могли устанавливать другие
+  GitHub-пользователи и организации;
+- Repository permission `Issues`: **Read and write**. Metadata read GitHub
+  добавляет автоматически.
+
+Сохраните в `.env`:
+
+- App ID → `GITHUB_APP_ID`;
+- private key в base64 → `GITHUB_APP_PRIVATE_KEY_BASE64`;
+- Client ID → `GITHUB_CLIENT_ID`;
+- сгенерированный Client secret → `GITHUB_CLIENT_SECRET`;
+- install URL вида `https://github.com/apps/<app-slug>/installations/new` →
+  `GITHUB_APP_INSTALL_URL`.
+
+Кодирование private key:
+
+```bash
+base64 -i private-key.pem | tr -d '\n'
+```
+
+GitHub callback не доверяет входному `installation_id`: backend проверяет
+installation через App JWT, получает короткоживущий user token и убеждается,
+что авторизованный GitHub-пользователь действительно видит эту installation.
+User token после проверки не сохраняется. Issues создаются короткоживущим
+installation token от имени GitHub App.
+
+## Публичный HTTPS
+
+Новый домен покупать не нужно: используется бесплатный поддомен существующего
+`liga-live.ru`.
+
+Перед включением Mini App на production:
+
+1. Добавьте DNS A record `bot.liga-live.ru` на IP production-сервера.
+2. Добавьте `bot.liga-live.ru` в общий Let's Encrypt сертификат полным
+   `certonly --expand` списком и в `~/edge/renew-certs.sh`.
+3. Перенесите блоки из [`nginx-bot.conf.example`](nginx-bot.conf.example) в
+   живой `~/edge/nginx/conf.d/streamservice.conf`.
+4. Выполните `docker exec edge-nginx nginx -t`, затем только `reload`, не
+   `restart`: этот nginx обслуживает текущие трансляции.
+5. Проверьте `https://bot.liga-live.ru/health`.
+
+Репозиторный nginx-конфиг не применяется автодеплоем, поэтому этот шаг делается
+на сервере отдельно.
+
+## Обновление существующей установки
+
+Старый `.env` остаётся пригодным, но для Mini App нужно дописать:
+
+```dotenv
+PUBLIC_BASE_URL=https://bot.liga-live.ru
+TELEGRAM_MINI_APP_SHORT_NAME=issues-settings
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+```
+
+`ALLOWED_TELEGRAM_USER_IDS` больше не используется: создавать issue может любой
+участник настроенной группы, а менять настройки — только текущий Telegram admin.
+
+Прежняя коллекция `repositoryConfigs`, где настройки принадлежали отдельному
+пользователю, не удаляется. Пока у группы нет новой общей конфигурации, `/issue`
+использует старые репозитории автора в read-only режиме, поэтому текущий bot
+flow не обрывается сразу после деплоя. Старые `/repo` и `/area` больше не
+редактируют настройки. Администратор один раз подключает репозитории через
+`/settings`; после сохранения общей конфигурации legacy fallback для этой
+группы перестаёт использоваться.
 
 ## Автовыкладка
 
 Workflow `.github/workflows/telegram-github-issues-bot.yml` запускается только
-когда меняется эта папка. В PR он проверяет синтаксис, а после merge в `main`
-подключается к тому же серверу через уже существующие `DEPLOY_*` GitHub secrets
-и выполняет `docker compose up -d --build` **только для бота**. Контейнеры
-основного StreamService не перезапускаются.
+для этой папки и своего workflow. В PR он проверяет синтаксис и тесты, а после
+merge в `main` пересобирает только Compose-проект
+`telegram-github-issues-bot`. Контейнеры основного StreamService не
+перезапускаются.
 
-Перед первым merge на сервере нужно один раз создать конфигурацию рядом с
-compose-файлом:
+На сервере `.env` остаётся рядом с compose-файлом и не коммитится:
 
 ```bash
 cd /путь/к/StreamService/services/telegram-github-issues-bot
 cp .env.example .env
 chmod 600 .env
-# заполните реальные Telegram, DeepSeek и GitHub ключи
 ```
 
-Файл `.env` игнорируется git, поэтому `git merge` во время выкладки не заменит
-ключи. Если его нет, workflow завершится ошибкой до запуска Docker.
-
-## Настройка Telegram
-
-1. Создайте бота через [@BotFather](https://t.me/BotFather) и задайте
-   `TELEGRAM_BOT_TOKEN`.
-2. Добавьте бота в нужную группу.
-3. Отключите Privacy Mode в BotFather: после нажатия «Изменить» бот должен
-   получить обычное текстовое сообщение автора с инструкцией по правке.
-4. Настройте GitHub App с разрешением **Issues: Read and write**, сохраните её
-   App ID и base64 приватного ключа в `.env`. Пользователь устанавливает App
-   только на нужные ему репозитории; в MongoDB остаётся только installation ID,
-   а не его GitHub token.
-
-## Поведение
-
-- `/start` или `/help` — встроенная инструкция;
-- `/connect` — ссылка на установку GitHub App;
-- `/repo add app org/repo installation_id` — подключить репозиторий;
-- `/repo list`, `/repo use app` — посмотреть и выбрать репозиторий;
-- `/area add app mobile --labels=mobile,ios --prefix="[Mobile]"` — добавить
-  направление и labels;
-- `/area list app`, `/area use app mobile` — посмотреть и выбрать направление;
-- `/issue app mobile Исправить экран оплаты` — подготовить задачу. `app` и
-  `mobile` необязательны: бот использует последние выбранные настройки;
-- кнопка «Изменить» ждёт следующее текстовое сообщение автора и обновляет
-  черновик через DeepSeek;
-- кнопки «Создать issue», «Изменить» и «Отмена» доступны только тому, кто запросил
-  черновик.
-
-Черновики хранятся только в памяти контейнера и живут 30 минут. После
-перезапуска их нужно подготовить заново; уже созданные GitHub issues не
-затрагиваются.
-
-## Права GitHub
-
-GitHub App выпускает короткоживущий installation token только во время запроса.
-Бот не получает и не хранит персональные GitHub PAT пользователей.
-
-## Переход на webhook
-
-Сервис сейчас использует long polling: это проще для отдельного Docker
-контейнера и не требует публичного HTTPS-адреса. В Docker может работать лишь
-одна его копия. При переносе в Kubernetes стоит заменить polling на webhook и
-добавить постоянное хранилище черновиков (Redis/PostgreSQL), чтобы безопасно
-масштабировать реплики.
+Черновики issue хранятся в памяти и живут 30 минут. GitHub/Mini App setup
+sessions хранятся в MongoDB с TTL, поэтому переживают перезапуск контейнера.
+Long polling допускает только одну реплику бота; перед горизонтальным
+масштабированием его нужно заменить webhook-доставкой, а черновики перенести в
+общее хранилище.

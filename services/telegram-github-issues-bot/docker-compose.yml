@@ -24,7 +24,16 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+    networks:
+      default: {}
+      edge:
+        aliases:
+          - telegram-github-issues-bot
     restart: unless-stopped
 
 volumes:
   mongo_data:
+
+networks:
+  edge:
+    external: true

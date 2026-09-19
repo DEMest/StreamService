@@ -1,0 +1,42 @@
+# Copy these blocks into the live edge-nginx configuration only after
+# bot.liga-live.ru resolves to the server and the shared certificate includes it.
+server {
+    listen 80;
+    server_name bot.liga-live.ru;
+
+    location /.well-known/acme-challenge/ {
+        resolver 127.0.0.11 valid=30s ipv6=off;
+        set $acme_upstream http://acme-responder:80;
+        proxy_pass $acme_upstream;
+        proxy_set_header Host $host;
+    }
+
+    location / {
+        return 301 https://bot.liga-live.ru$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name bot.liga-live.ru;
+
+    ssl_certificate     /etc/ssl/regru/cert.pem;
+    ssl_certificate_key /etc/ssl/regru/key.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    resolver 127.0.0.11 valid=30s ipv6=off;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    location / {
+        set $bot_upstream telegram-github-issues-bot:3000;
+        proxy_pass http://$bot_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
