@@ -344,6 +344,7 @@ function createWebModule({ config, github, store, telegram, logger = console }) 
       '/': ['index.html', 'text/html; charset=utf-8'],
       '/app.js': ['app.js', 'application/javascript; charset=utf-8'],
       '/styles.css': ['styles.css', 'text/css; charset=utf-8'],
+      '/telegram-web-app.js': ['telegram-web-app.js', 'application/javascript; charset=utf-8'],
     };
     const entry = files[url.pathname];
     if (!entry) return false;
