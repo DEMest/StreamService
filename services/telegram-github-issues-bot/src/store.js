@@ -50,6 +50,13 @@ function createStore(db) {
       .project({ _id: 0, chatId: 1, title: 1 })
       .toArray(),
     getGroup: (chatId) => groups.findOne({ chatId: String(chatId) }, { projection: { _id: 0 } }),
+    async updateGroupAiSettings(chatId, { aiContext, issueLanguage }) {
+      const result = await groups.updateOne(
+        { chatId: String(chatId) },
+        { $set: { aiContext, issueLanguage, updatedAt: new Date() } },
+      );
+      return result.matchedCount === 1;
+    },
     listRepositories: (chatId) => repositories
       .find({ chatId: String(chatId) })
       .sort({ fullName: 1 })

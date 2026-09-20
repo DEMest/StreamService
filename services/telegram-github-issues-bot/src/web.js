@@ -6,6 +6,8 @@ const path = require('node:path');
 const { createPkce, isTelegramAdmin, randomToken, validateTelegramInitData } = require('./security');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+const MAX_AI_CONTEXT_LENGTH = 8000;
+const ISSUE_LANGUAGES = new Set(['auto', 'en', 'ru']);
 
 class HttpError extends Error {
   constructor(statusCode, message) {
@@ -356,6 +358,20 @@ function createWebModule({ config, github, store, telegram, logger = console }) 
     return { repositories: await store.listRepositories(ctx.chatId) };
   }
 
+  async function saveGroupAiSettings(body) {
+    const ctx = await context(body);
+    if (typeof body.aiContext !== 'string') throw new HttpError(400, 'AI context must be text.');
+    const aiContext = body.aiContext.trim();
+    if (aiContext.length > MAX_AI_CONTEXT_LENGTH) {
+      throw new HttpError(400, `AI context must be ${MAX_AI_CONTEXT_LENGTH} characters or fewer.`);
+    }
+    const issueLanguage = String(body.issueLanguage || 'auto');
+    if (!ISSUE_LANGUAGES.has(issueLanguage)) throw new HttpError(400, 'Issue language is not supported.');
+    const updated = await store.updateGroupAiSettings(ctx.chatId, { aiContext, issueLanguage });
+    if (!updated) throw new HttpError(404, 'Telegram group not found.');
+    return { group: await store.getGroup(ctx.chatId) };
+  }
+
   const apiRoutes = new Map([
     ['/api/bootstrap', bootstrap],
     ['/api/github/connect', connectGitHub],
@@ -365,6 +381,7 @@ function createWebModule({ config, github, store, telegram, logger = console }) 
     ['/api/repository/labels', repositoryLabels],
     ['/api/repository/labels/save', saveRepositoryLabels],
     ['/api/repository/remove', removeRepository],
+    ['/api/group/ai-settings/save', saveGroupAiSettings],
   ]);
 
   async function serveStatic(url, response) {

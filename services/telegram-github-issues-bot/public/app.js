@@ -2,18 +2,22 @@
 
 const tg = window.Telegram?.WebApp;
 const dom = {
+  aiContext: document.querySelector('#ai-context'),
   app: document.querySelector('#app'),
   connect: document.querySelector('#connect-button'),
   empty: document.querySelector('#empty-state'),
   groupPicker: document.querySelector('#group-picker'),
   groupSelect: document.querySelector('#group-select'),
   groupTitle: document.querySelector('#group-title'),
+  issueLanguage: document.querySelector('#issue-language'),
   loading: document.querySelector('#loading'),
   notice: document.querySelector('#notice'),
   repositoryList: document.querySelector('#repository-list'),
+  saveAiSettings: document.querySelector('#save-ai-settings'),
   setupContent: document.querySelector('#setup-content'),
   setupPanel: document.querySelector('#setup-panel'),
   setupTitle: document.querySelector('#setup-title'),
+  contextCounter: document.querySelector('#context-counter'),
 };
 
 const state = {
@@ -129,6 +133,10 @@ async function bootstrap(chatId = '') {
   if (!data.selectedChatId && state.chatId) return bootstrap(state.chatId);
   renderGroupPicker(data.groups, state.chatId);
   dom.groupTitle.textContent = data.group?.title || 'Select a group';
+  dom.aiContext.value = data.group?.aiContext || '';
+  dom.issueLanguage.value = data.group?.issueLanguage || 'auto';
+  dom.saveAiSettings.disabled = !state.chatId;
+  updateContextCounter();
   dom.connect.disabled = !state.chatId || !data.githubConnectionReady;
   dom.connect.title = data.githubConnectionReady ? '' : 'GitHub connection is not configured on the server yet.';
   renderRepositories(data.repositories || []);
@@ -345,7 +353,33 @@ async function connectGitHub() {
   }
 }
 
+function updateContextCounter() {
+  dom.contextCounter.textContent = `${dom.aiContext.value.length} / 8000`;
+}
+
+async function saveAiSettings() {
+  clearNotice();
+  dom.saveAiSettings.disabled = true;
+  try {
+    const data = await api('/api/group/ai-settings/save', {
+      aiContext: dom.aiContext.value,
+      issueLanguage: dom.issueLanguage.value,
+    });
+    dom.aiContext.value = data.group.aiContext || '';
+    dom.issueLanguage.value = data.group.issueLanguage || 'auto';
+    updateContextCounter();
+    showNotice('AI context saved.', true);
+    tg?.HapticFeedback?.notificationOccurred('success');
+  } catch (error) {
+    showNotice(error.message);
+  } finally {
+    dom.saveAiSettings.disabled = !state.chatId;
+  }
+}
+
 dom.connect.addEventListener('click', connectGitHub);
+dom.aiContext.addEventListener('input', updateContextCounter);
+dom.saveAiSettings.addEventListener('click', saveAiSettings);
 dom.groupSelect.addEventListener('change', () => {
   closeSetup();
   bootstrap(dom.groupSelect.value).catch((error) => showNotice(error.message));

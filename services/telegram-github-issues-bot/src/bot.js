@@ -168,7 +168,7 @@ function createBot({ config, github, model, store, telegram, logger = console })
         'If the group has several repositories, the bot asks you to choose one.',
         'You can optionally add administrator-approved labels, edit the draft, create it, or cancel.',
         '',
-        'Group administrators configure repositories with <code>/settings</code>.',
+        'Group administrators configure repositories, labels, AI context, and issue language with <code>/settings</code>.',
       ].join('\n'),
       reply_markup: rows.length ? { inline_keyboard: rows } : undefined,
     });
@@ -181,7 +181,12 @@ function createBot({ config, github, model, store, telegram, logger = console })
       text: 'Preparing the issue draft…',
     });
     try {
-      const issue = await model.generate({ source, repository: repo });
+      const group = store.getGroup ? await store.getGroup(message.chat.id) : null;
+      const generationSettings = {
+        aiContext: group?.aiContext || '',
+        issueLanguage: group?.issueLanguage || 'auto',
+      };
+      const issue = await model.generate({ source, repository: repo, ...generationSettings });
       if (titlePrefix && !issue.title.startsWith(titlePrefix)) {
         issue.title = `${titlePrefix} ${issue.title}`.slice(0, 240);
       }
@@ -194,6 +199,7 @@ function createBot({ config, github, model, store, telegram, logger = console })
         issue,
         selectedLabels,
         titlePrefix,
+        generationSettings,
         previewId: status.message_id,
         expiresAt: Date.now() + DRAFT_TTL_MS,
       };
@@ -265,6 +271,7 @@ function createBot({ config, github, model, store, telegram, logger = console })
         currentIssue: draft.issue,
         instruction,
         repository: draft.repo,
+        ...draft.generationSettings,
       });
       if (draft.titlePrefix && !issue.title.startsWith(draft.titlePrefix)) {
         issue.title = `${draft.titlePrefix} ${issue.title}`.slice(0, 240);

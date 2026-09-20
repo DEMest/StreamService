@@ -1,7 +1,6 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { ProxyAgent } = require('undici');
 
 async function requestJson(url, options, name) {
   const response = await fetch(url, options);
@@ -20,7 +19,9 @@ async function requestJson(url, options, name) {
 }
 
 function createTelegramAdapter(config) {
-  const dispatcher = config.proxyUrl ? new ProxyAgent(config.proxyUrl) : undefined;
+  const dispatcher = config.proxyUrl
+    ? new (require('undici').ProxyAgent)(config.proxyUrl)
+    : undefined;
 
   async function call(method, payload = {}) {
     const data = await requestJson(
@@ -185,18 +186,39 @@ function createGitHubAdapter(config) {
 }
 
 function createDeepSeekAdapter(config) {
-  async function generate({ source, currentIssue, instruction, repository }) {
+  async function generate({ source, currentIssue, instruction, repository, aiContext = '', issueLanguage = 'auto' }) {
     const editing = Boolean(currentIssue);
+    const language = {
+      en: 'Write the title and body in English.',
+      ru: 'Write the title and body in Russian.',
+      auto: 'Use the requester language. If the language is ambiguous or the message is language-neutral, use English.',
+    }[issueLanguage] || 'Use the requester language. If the language is ambiguous or the message is language-neutral, use English.';
     const system = [
       editing ? 'Revise an existing GitHub issue using the requester instruction.' : 'Write a precise GitHub issue from the requester message.',
       'Return only JSON in the form {"title":"...","body":"..."}.',
-      editing ? 'Keep the current issue language unless the requester explicitly asks to change it.' : 'Use the same language as the requester.',
+      editing ? 'Keep the current issue language unless the requester explicitly asks to change it.' : language,
+      'Never switch to Chinese or another unrelated language unless the requester explicitly asks for it.',
       'The body must contain clear Context, Work required, and Acceptance criteria sections translated to that language.',
       'Do not invent facts, implementation details, or acceptance criteria not supported by the request.',
     ].join(' ');
+    const messages = [{ role: 'system', content: system }];
+    const normalizedContext = String(aiContext || '').trim().slice(0, 8000);
+    if (normalizedContext) {
+      messages.push({
+        role: 'system',
+        content: [
+          'Persistent context configured by this Telegram group administrator follows.',
+          'Use it as project knowledge and writing guidance when relevant, but do not quote it automatically.',
+          '<group-context>',
+          normalizedContext,
+          '</group-context>',
+        ].join('\n'),
+      });
+    }
     const user = editing
       ? `Repository: ${repository.fullName}\nCurrent issue: ${JSON.stringify(currentIssue)}\nRevision instruction: ${instruction.slice(0, 8000)}`
       : `Repository: ${repository.fullName}\nRequester message: ${source.slice(0, 8000)}`;
+    messages.push({ role: 'user', content: user });
     const data = await requestJson(
       `${config.deepseekUrl}/chat/completions`,
       {
@@ -206,7 +228,7 @@ function createDeepSeekAdapter(config) {
           model: config.deepseekModel,
           temperature: 0.2,
           response_format: { type: 'json_object' },
-          messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+          messages,
         }),
       },
       'DeepSeek',
