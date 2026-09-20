@@ -14,7 +14,7 @@
       <header class="hero">
         <p class="eyebrow">GitHub Issues Bot</p>
         <h1>Group settings</h1>
-        <p class="muted">Connect repositories and choose which labels members may use.</p>
+        <p class="muted">Connect repositories, choose labels, and teach the bot about your project.</p>
       </header>
 
       <div id="notice" class="notice hidden" role="status"></div>
@@ -25,6 +25,32 @@
           <span>Telegram group</span>
           <select id="group-select"></select>
         </label>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Issue generation</p>
+              <h2>AI context</h2>
+            </div>
+          </div>
+          <p class="muted">Persistent project context for this Telegram group. Do not include credentials or secrets.</p>
+          <label class="field">
+            <span>Default issue language</span>
+            <select id="issue-language">
+              <option value="auto">Match request (English if unclear)</option>
+              <option value="en">English</option>
+              <option value="ru">Russian</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Project instructions</span>
+            <textarea id="ai-context" maxlength="8000" rows="8" placeholder="Example: We build a sports streaming platform. Backend uses NestJS and PostgreSQL. Issues must describe user impact and avoid inventing implementation details."></textarea>
+          </label>
+          <div class="settings-actions">
+            <span id="context-counter" class="repo-meta">0 / 8000</span>
+            <button id="save-ai-settings" class="primary" type="button">Save AI context</button>
+          </div>
+        </section>
 
         <section class="panel">
           <div class="panel-heading">

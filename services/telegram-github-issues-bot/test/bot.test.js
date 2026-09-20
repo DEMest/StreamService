@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { appendRequester, createBot, labelsButtons } = require('../src/bot');
 
-function fixture(repositories) {
+function fixture(repositories, group = { chatId: '-1001', title: 'Team', type: 'supergroup' }) {
   const calls = [];
   const issues = [];
   const modelRequests = [];
@@ -34,6 +34,7 @@ function fixture(repositories) {
       },
     },
     store: {
+      async getGroup() { return group; },
       async listRepositories() { return repositories; },
       async listRepositoriesForIssue() { return repositories; },
       async rememberGroup() {},
@@ -65,6 +66,40 @@ test('uses the only group repository without asking the user to choose', async (
   assert.equal(calls[1].method, 'editMessageText');
   assert.match(calls[1].payload.text, /acme\/app/);
   assert.doesNotMatch(calls[0].payload.text, /Choose/);
+});
+
+test('uses the Telegram group AI context for drafting and editing', async () => {
+  const repo = {
+    repositoryId: '1', installationId: '9', owner: 'acme', name: 'app', fullName: 'acme/app', allowedLabels: [],
+  };
+  const group = {
+    chatId: '-1001',
+    title: 'Team',
+    type: 'supergroup',
+    aiContext: 'This is a mobile banking app. Never invent API endpoints.',
+    issueLanguage: 'ru',
+  };
+  const { bot, calls, modelRequests } = fixture([repo], group);
+
+  await bot.processUpdate({ message });
+  const draftMessage = calls.find((call) => call.method === 'editMessageText');
+  const editButton = draftMessage.payload.reply_markup.inline_keyboard.flat().find((item) => item.text === 'Edit');
+  await bot.processUpdate({
+    callback_query: {
+      id: 'edit-callback',
+      data: editButton.callback_data,
+      from: message.from,
+      message: { message_id: draftMessage.payload.message_id, chat: message.chat },
+    },
+  });
+  await bot.processUpdate({
+    message: { ...message, message_id: 2, text: 'Add a regression scenario' },
+  });
+
+  assert.equal(modelRequests[0].aiContext, group.aiContext);
+  assert.equal(modelRequests[0].issueLanguage, 'ru');
+  assert.equal(modelRequests[1].aiContext, group.aiContext);
+  assert.equal(modelRequests[1].issueLanguage, 'ru');
 });
 
 test('creates the issue from a draft and adds the Telegram requester', async () => {

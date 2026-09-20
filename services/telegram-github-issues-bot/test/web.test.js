@@ -30,6 +30,11 @@ async function withServer(status, callback) {
   };
   const store = {
     async getGroup() { return group; },
+    async updateGroupAiSettings(chatId, settings) {
+      if (String(chatId) !== group.chatId) return false;
+      Object.assign(group, settings);
+      return true;
+    },
     async rememberGroup() {},
     async listAdminGroups() { return [{ chatId: group.chatId, title: group.title }]; },
     async listRepositories() { return []; },
@@ -91,6 +96,45 @@ test('rejects Mini App settings for a non-admin group member', async () => {
 
     assert.equal(response.status, 403);
     assert.match(body.error, /Only group administrators/);
+  });
+});
+
+test('stores AI context and issue language for the selected group', async () => {
+  await withServer('administrator', async (port) => {
+    const response = await fetch(`http://127.0.0.1:${port}/api/group/ai-settings/save`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chatId: '-1001',
+        initData: signedInitData('bot-token', { id: 42, first_name: 'Ada' }),
+        aiContext: '  Mobile app using React Native.  ',
+        issueLanguage: 'ru',
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.group.aiContext, 'Mobile app using React Native.');
+    assert.equal(body.group.issueLanguage, 'ru');
+  });
+});
+
+test('rejects unsupported issue language', async () => {
+  await withServer('administrator', async (port) => {
+    const response = await fetch(`http://127.0.0.1:${port}/api/group/ai-settings/save`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chatId: '-1001',
+        initData: signedInitData('bot-token', { id: 42, first_name: 'Ada' }),
+        aiContext: '',
+        issueLanguage: 'zh',
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.match(body.error, /not supported/);
   });
 });
 

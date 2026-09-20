@@ -8,7 +8,7 @@
 * { box-sizing: border-box; }
 
 body { margin: 0; min-height: 100vh; background: var(--tg-theme-bg-color, #f6f7fb); }
-button, select { font: inherit; }
+button, select, textarea { font: inherit; }
 button { cursor: pointer; }
 
 .shell { width: min(100%, 760px); margin: 0 auto; padding: 24px 16px 48px; }
@@ -22,7 +22,8 @@ button { cursor: pointer; }
 .notice.success { background: #dcfce7; color: #166534; }
 
 .field { display: grid; gap: 6px; margin-bottom: 14px; font-size: 13px; font-weight: 700; }
-.field select { width: 100%; padding: 12px; border: 1px solid var(--tg-theme-section-separator-color, #d9deea); border-radius: 12px; background: var(--tg-theme-secondary-bg-color, #fff); color: inherit; }
+.field select, .field textarea { width: 100%; padding: 12px; border: 1px solid var(--tg-theme-section-separator-color, #d9deea); border-radius: 12px; background: var(--tg-theme-secondary-bg-color, #fff); color: inherit; }
+.field textarea { min-height: 150px; resize: vertical; line-height: 1.45; }
 
 .panel { margin-top: 14px; padding: 18px; border: 1px solid var(--tg-theme-section-separator-color, #e1e5ed); border-radius: 18px; background: var(--tg-theme-secondary-bg-color, #fff); box-shadow: 0 10px 30px rgb(23 32 51 / 6%); }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -49,6 +50,7 @@ button { cursor: pointer; }
 .choice span { overflow-wrap: anywhere; }
 .label-grid { max-height: 320px; overflow: auto; padding-right: 4px; }
 .setup-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 
 @media (max-width: 520px) {
   .panel-heading, .repo-row { align-items: stretch; flex-direction: column; }
