@@ -1,7 +1,6 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { ProxyAgent } = require('undici');
 
 async function requestJson(url, options, name) {
   const response = await fetch(url, options);
@@ -20,7 +19,9 @@ async function requestJson(url, options, name) {
 }
 
 function createTelegramAdapter(config) {
-  const dispatcher = config.proxyUrl ? new ProxyAgent(config.proxyUrl) : undefined;
+  const dispatcher = config.proxyUrl
+    ? new (require('undici').ProxyAgent)(config.proxyUrl)
+    : undefined;
 
   async function call(method, payload = {}) {
     const data = await requestJson(
