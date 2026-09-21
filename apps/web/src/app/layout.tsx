@@ -23,6 +23,10 @@ const site = siteUrlFromEnv();
 export const metadata: Metadata = {
   ...(site ? { metadataBase: new URL(site) } : {}),
   manifest: '/manifest.json',
+  icons: {
+    icon: [{ url: '/favicon.ico', type: 'image/x-icon', sizes: 'any' }],
+    apple: [{ url: '/apple-icon.png', type: 'image/png', sizes: '180x180' }],
+  },
   title: {
     default: 'Liga Live — прямые трансляции матчей и мероприятий',
     // Через «|», а не тире: заголовки страниц сами содержат тире
