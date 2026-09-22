@@ -24,7 +24,9 @@ export const metadata: Metadata = {
   ...(site ? { metadataBase: new URL(site) } : {}),
   manifest: '/manifest.json',
   icons: {
-    icon: [{ url: '/favicon.ico', type: 'image/x-icon', sizes: 'any' }],
+    // Google Search рекомендует favicon не меньше 48×48. URL стабилен, чтобы
+    // робот мог переобходить один и тот же ресурс, а не новый cache-buster.
+    icon: [{ url: '/icon-192.png', type: 'image/png', sizes: '192x192' }],
     apple: [{ url: '/apple-icon.png', type: 'image/png', sizes: '180x180' }],
   },
   title: {
