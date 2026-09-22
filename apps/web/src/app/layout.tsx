@@ -24,12 +24,7 @@ export const metadata: Metadata = {
   ...(site ? { metadataBase: new URL(site) } : {}),
   manifest: '/manifest.json',
   icons: {
-    // Google Search рекомендует favicon не меньше 48×48. ICO остаётся
-    // универсальным fallback, а PNG — вариантом высокого разрешения.
-    icon: [
-      { url: '/favicon.ico', type: 'image/x-icon', sizes: '64x64' },
-      { url: '/icon-192.png', type: 'image/png', sizes: '192x192' },
-    ],
+    icon: [{ url: '/favicon.ico', type: 'image/x-icon', sizes: 'any' }],
     apple: [{ url: '/apple-icon.png', type: 'image/png', sizes: '180x180' }],
   },
   title: {
