@@ -24,7 +24,10 @@ export const metadata: Metadata = {
   ...(site ? { metadataBase: new URL(site) } : {}),
   manifest: '/manifest.json',
   icons: {
-    icon: [{ url: '/favicon.ico', type: 'image/x-icon', sizes: 'any' }],
+    icon: [
+      { url: '/favicon-64.png', type: 'image/png', sizes: '64x64' },
+      { url: '/favicon.ico', type: 'image/x-icon', sizes: '32x32' },
+    ],
     apple: [{ url: '/apple-icon.png', type: 'image/png', sizes: '180x180' }],
   },
   title: {
