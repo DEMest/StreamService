@@ -1,7 +1,6 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { Header } from '@/components/Header';
@@ -18,12 +17,6 @@ export default function StreamsPage() {
     queryFn: () => api.get<CatalogItem[]>('/v1/public/orgs'),
     refetchInterval: 30_000,
   });
-
-  const [thumbKey, setThumbKey] = useState(() => Date.now());
-  useEffect(() => {
-    const interval = setInterval(() => setThumbKey(Date.now()), 30_000);
-    return () => clearInterval(interval);
-  }, []);
 
   // На странице «Трансляции» показываем только live Stream-карточки.
   const live = (items ?? []).filter((it) => it.liveCount > 0);
@@ -61,7 +54,7 @@ export default function StreamsPage() {
             <motion.div variants={staggerContainer} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
               {live.map((item) => (
                 <motion.div key={item.orgSlug} variants={cardFadeUp}>
-                  <OrgCard org={item} thumbKey={thumbKey} />
+                  <OrgCard org={item} />
                 </motion.div>
               ))}
             </motion.div>

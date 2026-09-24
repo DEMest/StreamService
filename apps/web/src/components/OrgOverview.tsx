@@ -44,11 +44,18 @@ export function OrgOverview({ orgSlug, archiveMode = false }: { orgSlug: string;
 
   // Fetch hlsUrl for each live stream only when canvas mode is on.
   //
+  // Своего таймера у батча нет намеренно: адреса плейлистов детерминированы, и
+  // пока состав живых стримов не изменился, повтор вернул бы ровно то же самое.
+  // Обновляется он от данных — список слагов входит в queryKey, поэтому
+  // 15-секундный опрос `org-overview` выше, заметив новый или погасший стрим,
+  // сам меняет ключ и react-query тянет плитки заново.
+  //
   // Promise.allSettled (не Promise.all) — намеренно: если ОДИН стрим успел
-  // уйти в офлайн между опросом каталога (liveStreams выше) и этим запросом
-  // (гонка, интервалы poll'ов разные — 15s vs 10s), его getStreamUrl() кинет
-  // 404. Promise.all уронил бы ВЕСЬ батч и скрыл холст целиком у зрителя,
-  // хотя остальные камеры живы — просто отфильтровываем неудачный стрим.
+  // уйти в офлайн между опросом каталога (liveStreams выше) и этим запросом,
+  // его getStreamUrl() кинет 404. Promise.all уронил бы ВЕСЬ батч и скрыл холст
+  // целиком у зрителя, хотя остальные камеры живы — просто отфильтровываем
+  // неудачный стрим. Ушедший в офлайн стрим следующий опрос `org-overview`
+  // уберёт из liveStreams, ключ сменится, и батч пересоберётся уже без него.
   const { data: canvasTiles } = useQuery({
     queryKey: ['org-canvas-tiles', orgSlug, liveStreams.map((s) => s.streamSlug).join(',')],
     queryFn: async () => {
@@ -63,7 +70,6 @@ export function OrgOverview({ orgSlug, archiveMode = false }: { orgSlug: string;
         .map((r) => r.value);
     },
     enabled: !archiveMode && canvasMode && liveStreams.length >= 2,
-    refetchInterval: 10_000,
   });
 
   return (

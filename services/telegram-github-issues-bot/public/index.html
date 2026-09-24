@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
+    <title>GitHub Issues Bot Settings</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/telegram-web-app.js"></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">GitHub Issues Bot</p>
+        <h1>Group settings</h1>
+        <p class="muted">Connect repositories, choose labels, and teach the bot about your project.</p>
+      </header>
+
+      <div id="notice" class="notice hidden" role="status"></div>
+      <div id="loading" class="loading">Loading settings…</div>
+
+      <section id="app" class="hidden">
+        <label id="group-picker" class="field hidden">
+          <span>Telegram group</span>
+          <select id="group-select"></select>
+        </label>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Issue generation</p>
+              <h2>AI context</h2>
+            </div>
+          </div>
+          <p class="muted">Persistent project context for this Telegram group. Do not include credentials or secrets.</p>
+          <label class="field">
+            <span>Default issue language</span>
+            <select id="issue-language">
+              <option value="auto">Match request (English if unclear)</option>
+              <option value="en">English</option>
+              <option value="ru">Russian</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Project instructions</span>
+            <textarea id="ai-context" maxlength="8000" rows="8" placeholder="Example: We build a sports streaming platform. Backend uses NestJS and PostgreSQL. Issues must describe user impact and avoid inventing implementation details."></textarea>
+          </label>
+          <div class="settings-actions">
+            <span id="context-counter" class="repo-meta">0 / 8000</span>
+            <button id="save-ai-settings" class="primary" type="button">Save AI context</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p id="group-title" class="eyebrow">Select a group</p>
+              <h2>Connected repositories</h2>
+            </div>
+            <button id="connect-button" class="primary" type="button">Connect GitHub</button>
+          </div>
+          <p id="empty-state" class="empty hidden">No repositories are connected to this group yet.</p>
+          <div id="repository-list" class="repository-list"></div>
+        </section>
+
+        <section id="setup-panel" class="panel hidden">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">GitHub connection</p>
+              <h2 id="setup-title">Choose repositories</h2>
+            </div>
+          </div>
+          <div id="setup-content"></div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

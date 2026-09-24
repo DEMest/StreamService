@@ -186,6 +186,13 @@ export default function StreamDetailPage() {
   // На дашборде скрываем пустые сессии (эфиры без записи) — показываем только записи.
   const visibleBroadcasts = broadcasts?.filter((b) => b.recording) ?? [];
 
+  /**
+   * Версия загруженных превью (стрима и записей) в URL картинок. Считается от
+   * данных — сдвигается только успешной загрузкой нового файла, — а не от
+   * `Date.now()` прямо в JSX: страница опрашивает стрим раз в 10 секунд, и
+   * «живой» таймер в src давал бы новый URL на каждом рендере — превью
+   * перекачивалось бы с сервера каждые 10 секунд мимо его `max-age=300`.
+   */
   const [previewBump, setPreviewBump] = useState(() => Date.now());
   /**
    * Выбранный файл ждёт кропа. Обе точки загрузки (превью стрима и превью
@@ -228,7 +235,13 @@ export default function StreamDetailPage() {
       if (!res.ok) throw new Error('Upload failed');
       return res.json();
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream-detail', id] }),
+    onSuccess: () => {
+      // Версия превью сдвигается фактом загрузки, а не часами: только так
+      // новый кадр виден сразу, а до следующей загрузки URL остаётся
+      // постоянным и картинка берётся из кеша браузера.
+      setPreviewBump(Date.now());
+      qc.invalidateQueries({ queryKey: ['org-stream-detail', id] });
+    },
   });
 
   const deletePreview = useMutation({
@@ -708,7 +721,7 @@ export default function StreamDetailPage() {
             {stream.previewImagePath ? (
               <div className="flex items-center gap-4">
                 <img
-                  src={`${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/public/orgs/${orgSlug}/streams/${streamSlug}/thumbnail?t=${Date.now()}`}
+                  src={`${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/public/orgs/${orgSlug}/streams/${streamSlug}/thumbnail?t=${previewBump}`}
                   alt="Текущее превью"
                   className="w-40 aspect-video object-cover rounded-lg border border-zinc-700"
                 />

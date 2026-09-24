@@ -6,8 +6,19 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # Бот — самостоятельный контейнер из services/; его изменения не могут
+    # повлиять на сборку или выкладку StreamService. Не занимаем self-hosted
+    # раннер проверками основного приложения для bot-only PR.
+    paths-ignore:
+      - 'services/telegram-github-issues-bot/**'
+      - '.github/workflows/telegram-github-issues-bot.yml'
   push:
     branches: [main]
+    # Тот же фильтр для merge в main: иначе deploy ниже перезапустил бы
+    # основной видеосервис при обновлении только независимого бота.
+    paths-ignore:
+      - 'services/telegram-github-issues-bot/**'
+      - '.github/workflows/telegram-github-issues-bot.yml'
   # Ручной запуск. Нужен не для удобства: push и pull_request зависят от
   # доставки событий, а workflow_dispatch дёргается прямым вызовом API — это
   # запасной путь, когда доставка событий у GitHub деградирует (проверено на

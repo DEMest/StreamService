@@ -1,22 +1,124 @@
+Liga Live (StreamService)
+Проприетарная лицензия / Proprietary License
 
-MIT License
+Copyright (c) 2026 Смолин Даниил Леонидович (thetaDEM)
+Все права защищены. All rights reserved.
 
-Copyright (c) 2026 thetaDEM
+Этот репозиторий НЕ является программным обеспечением с открытым исходным
+кодом. Открытость исходного кода не означает разрешения им пользоваться.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This repository is NOT open-source software. Public visibility of the source
+code does not grant permission to use it.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+===========================================================================
+РУССКИЙ
+===========================================================================
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. Правообладатель
+
+   Исключительное право на программу для ЭВМ «Liga Live» (далее — Программа),
+   включая исходный код, документацию, конфигурационные файлы и оформление,
+   принадлежит Смолину Даниилу Леонидовичу (далее — Правообладатель).
+
+2. Что разрешено без отдельного согласия
+
+   2.1. Просматривать и изучать исходный код в этом репозитории.
+   2.2. Создавать форк средствами GitHub — исключительно для просмотра кода и
+        подготовки изменений, предлагаемых Правообладателю (см.
+        CONTRIBUTING.md). Это следует из условий использования GitHub и не
+        расширяет перечень разрешений: форк не даёт права запускать,
+        распространять или перерабатывать Программу.
+
+3. Что запрещено без предварительного письменного разрешения Правообладателя
+
+   3.1. Любое использование Программы или любой её части, включая запуск в
+        производственной среде и оказание услуг на её основе.
+   3.2. Воспроизведение, копирование и распространение в любой форме.
+   3.3. Переработка, включение фрагментов кода в другие произведения,
+        создание производных произведений.
+   3.4. Передача прав третьим лицам, сублицензирование, продажа, сдача в
+        аренду, внесение в качестве вклада в имущество.
+   3.5. Использование Программы или её частей для обучения моделей машинного
+        обучения и для формирования наборов данных.
+   3.6. Удаление или изменение указаний об авторстве и текста настоящей
+        лицензии.
+
+4. Вклад в разработку
+
+   Условия, на которых принимаются изменения от третьих лиц, описаны в
+   CONTRIBUTING.md. Отправка изменений не порождает у отправителя каких-либо
+   прав на Программу.
+
+5. Отсутствие гарантий
+
+   Программа предоставляется «как есть». Правообладатель не даёт гарантий
+   пригодности для каких-либо целей и не несёт ответственности за убытки,
+   возникшие в связи с использованием или невозможностью использования
+   Программы.
+
+6. Разрешения и контакты
+
+   Запросы на использование Программы направляются на info@liga-live.ru.
+   Отсутствие ответа разрешением не является.
+
+===========================================================================
+ENGLISH
+===========================================================================
+
+1. Ownership
+
+   All rights in the "Liga Live" software (the "Software"), including its
+   source code, documentation, configuration files and design, are owned by
+   Daniil Leonidovich Smolin (the "Owner").
+
+2. Permitted without a separate agreement
+
+   2.1. Viewing and studying the source code in this repository.
+   2.2. Forking through GitHub, solely to read the code and to prepare
+        changes offered to the Owner (see CONTRIBUTING.md). This follows from
+        the GitHub Terms of Service and does not extend the permissions
+        below: a fork carries no right to run, distribute or modify the
+        Software.
+
+3. Prohibited without the Owner's prior written permission
+
+   3.1. Any use of the Software or any part of it, including running it in
+        production or providing services based on it.
+   3.2. Reproduction, copying or distribution in any form.
+   3.3. Modification, incorporation of any fragment into other works, or
+        creation of derivative works.
+   3.4. Transfer of rights, sublicensing, sale or rental.
+   3.5. Use of the Software or any part of it to train machine-learning
+        models or to build datasets.
+   3.6. Removal or alteration of authorship notices or of this license.
+
+4. Contributions
+
+   The terms on which third-party changes are accepted are set out in
+   CONTRIBUTING.md. Submitting a change grants the submitter no rights in
+   the Software.
+
+5. No warranty
+
+   The Software is provided "AS IS", without warranty of any kind. The Owner
+   shall not be liable for any damages arising out of the use of, or
+   inability to use, the Software.
+
+6. Licensing requests
+
+   Requests to use the Software should be sent to info@liga-live.ru. Silence
+   is not permission.
+
+===========================================================================
+Сторонние компоненты / Third-party components
+===========================================================================
+
+Зависимости, перечисленные в package.json и pnpm-lock.yaml, используемые
+Docker-образы (PostgreSQL, MediaMTX, MinIO, FFmpeg, nginx и другие) и прочее
+стороннее программное обеспечение распространяются на условиях собственных
+лицензий. Настоящая лицензия на них не распространяется и их не изменяет.
+
+Dependencies listed in package.json and pnpm-lock.yaml, the Docker images
+used (PostgreSQL, MediaMTX, MinIO, FFmpeg, nginx and others) and any other
+third-party software remain subject to their own licenses. This license does
+not apply to them and does not alter them.
