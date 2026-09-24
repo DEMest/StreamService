@@ -103,7 +103,6 @@ export interface UpdateStreamConfigInput {
   isPublic?: boolean;
   previewMode?: string;
   feedMode?: 'single' | 'composite';
-  autoStartMode?: 'public' | 'test';
 }
 
 /**
@@ -120,7 +119,6 @@ const STREAM_DTO_FIELDS = {
   feedMode: true,
   previewImagePath: true,
   isLive: true,
-  autoStartMode: true,
   ingestKeyCreatedAt: true,
   currentBroadcastId: true,
   createdAt: true,
@@ -305,7 +303,6 @@ export class StreamService {
       name?: string;
       description?: string;
       isPublic?: boolean;
-      autoStartMode?: 'public' | 'test';
       previewMode?: string;
     },
   ) {
@@ -328,7 +325,7 @@ export class StreamService {
       data: updateData,
       select: {
         id: true, name: true, description: true, isPublic: true, previewKey: true,
-        autoStartMode: true, isLive: true, previewMode: true,
+        isLive: true, previewMode: true,
       },
     });
   }
@@ -769,7 +766,6 @@ export class StreamService {
           ingestKey,
           isPublic: true,
           previewMode: 'multicam',
-          autoStartMode: 'public',
         },
         select: { ...STREAM_DTO_FIELDS, ingestKey: true },
       });
@@ -848,7 +844,7 @@ export class StreamService {
   /**
    * PATCH /v1/org/streams/:id — обновление конфигурации Stream'а.
    *
-   * Поддерживает: name, description, previewMode, autoStartMode, isPublic.
+   * Поддерживает: name, description, previewMode, feedMode, isPublic.
    * При isPublic=false генерирует previewKey если его ещё нет.
    * При isPublic=true обнуляет previewKey.
    */
@@ -863,16 +859,12 @@ export class StreamService {
     if (body.feedMode !== undefined && body.feedMode !== 'single' && body.feedMode !== 'composite') {
       throw new BadRequestException('feedMode must be "single" or "composite"');
     }
-    if (body.autoStartMode !== undefined && body.autoStartMode !== 'public' && body.autoStartMode !== 'test') {
-      throw new BadRequestException('autoStartMode must be "public" or "test"');
-    }
 
     const updateData: Record<string, any> = {};
     if (body.name !== undefined) updateData.name = body.name;
     if (body.description !== undefined) updateData.description = body.description;
     if (body.previewMode !== undefined) updateData.previewMode = body.previewMode;
     if (body.feedMode !== undefined) updateData.feedMode = body.feedMode;
-    if (body.autoStartMode !== undefined) updateData.autoStartMode = body.autoStartMode;
 
     if (body.isPublic === false) {
       if (!current.previewKey) {
@@ -944,7 +936,6 @@ export class StreamService {
       isLive: row.isLive,
       recordingEnabled: row.recordingEnabled,
       recordingMode: row.recordingMode,
-      autoStartMode: row.autoStartMode,
       ingestKeyCreatedAt: row.ingestKeyCreatedAt,
       currentBroadcastId: row.currentBroadcastId ?? null,
       createdAt: row.createdAt,

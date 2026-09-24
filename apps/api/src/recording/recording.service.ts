@@ -112,13 +112,15 @@ export class RecordingService {
       const slotPlaylist = buildHlsVodPlaylist(segments);
       fs.writeFileSync(path.join(slotDir, 'index.m3u8'), slotPlaylist);
 
-      // Step 3: написать master.m3u8 в broadcast-dir (одна variant — composite, slot 1).
+      // Step 3: написать master.m3u8 в broadcast-dir (variant ровно один).
+      // slotIndex — тот же, что у slotDir выше: master обязан ссылаться на
+      // каталог, в который реально легли сегменты.
       const resolution = firstWidth && firstHeight ? `${firstWidth}x${firstHeight}` : '1920x1080';
-      const masterPlaylist = buildMasterPlaylist([{
-        slotIndex: 1,
+      const masterPlaylist = buildMasterPlaylist({
+        slotIndex,
         bandwidth: 5_000_000,  // approximation; real value не критичен для variant-выбора плеера
         resolution,
-      }]);
+      });
       const masterPath = path.join(broadcastDir, 'master.m3u8');
       fs.writeFileSync(masterPath, masterPlaylist);
 

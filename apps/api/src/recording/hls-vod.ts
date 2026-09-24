@@ -34,17 +34,30 @@ export function buildHlsVodPlaylist(segments: FmpSegment[]): string {
 }
 
 /**
- * Строит master.m3u8 — корневой playlist, ссылающийся на per-slot variants.
- * Для Step 2 (single slot) — одна запись slot-1/index.m3u8.
+ * Строит master.m3u8 — корневой playlist записи.
+ *
+ * Variant ровно один: `RecordingService.onStreamEnded` создаёт на трансляцию
+ * ровно один `Recording`. Раньше функция принимала СПИСОК слотов под
+ * многокамерный режим, которого в коде больше нет, и цикл по списку из одного
+ * элемента обещал читателю гибкость, которой нет ни у вызывающего кода, ни у
+ * плеера.
+ *
+ * А `slotIndex` остаётся параметром, а не зашитой единицей: это имя каталога
+ * в архиве и в ключах S3 (`archive/<path>/<broadcastId>/slot-<n>/`), его же
+ * хранит `Recording.slotIndex`. Зашив здесь `slot-1`, мы бы отдали плееру
+ * плейлист, указывающий не в тот каталог, куда `convertRecording` реально
+ * положил сегменты.
+ *
+ * Формат байт-в-байт совпадает с master.m3u8 уже залитых архивов — они
+ * не перегенерируются и должны продолжать играть.
  */
-export function buildMasterPlaylist(slots: Array<{ slotIndex: number; bandwidth: number; resolution: string }>): string {
-  const lines = ['#EXTM3U', '#EXT-X-VERSION:7', ''];
-
-  for (const slot of slots) {
-    lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${slot.bandwidth},RESOLUTION=${slot.resolution},NAME="slot-${slot.slotIndex}"`);
-    lines.push(`slot-${slot.slotIndex}/index.m3u8`);
-    lines.push('');
-  }
-
-  return lines.join('\n');
+export function buildMasterPlaylist(variant: { slotIndex: number; bandwidth: number; resolution: string }): string {
+  return [
+    '#EXTM3U',
+    '#EXT-X-VERSION:7',
+    '',
+    `#EXT-X-STREAM-INF:BANDWIDTH=${variant.bandwidth},RESOLUTION=${variant.resolution},NAME="slot-${variant.slotIndex}"`,
+    `slot-${variant.slotIndex}/index.m3u8`,
+    '',
+  ].join('\n');
 }

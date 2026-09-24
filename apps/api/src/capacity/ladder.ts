@@ -20,11 +20,3 @@ export const LADDER: Array<Omit<RenditionShare, 'viewers' | 'share'>> = [
   { key: 'p480', label: '480p', bitrateMbps: 1.4 },
   { key: 'p240', label: '240p', bitrateMbps: 0.5 },
 ];
-
-/** Ступень, к которой относим зрителя по высоте кадра. */
-export const LADDER_BY_HEIGHT: Array<{ minHeight: number; key: string }> = [
-  { minHeight: 900, key: 'hd' },
-  { minHeight: 620, key: 'p720' },
-  { minHeight: 380, key: 'p480' },
-  { minHeight: 1, key: 'p240' },
-];
