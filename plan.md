@@ -1,5 +1,9 @@
 # StreamService - Product Expansion Plan
 
+> **Исторический документ.** План расширения до мультиарендной платформы
+> (весна 2026) — выполнен: см. `docs/specs/`. Текущее состояние и планы —
+> [`docs/vision.md`](docs/vision.md).
+
 ## Why this file exists
 This document captures the next product direction so another agent (for example, Claude) can continue planning and execution with full context.
 
