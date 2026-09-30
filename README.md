@@ -47,6 +47,10 @@
 
 ## Архитектура
 
+Диаграмма текущей архитектуры — [`docs/architecture-current.png`](docs/architecture-current.png);
+описание решения и планы развития (нагрузка, сервисы, AI-комментатор, мобильные
+клиенты, инструменты разработки) — [`docs/vision.md`](docs/vision.md).
+
 **Ключевой принцип: сервер не транскодирует и не пересобирает исходный поток.**
 Организация шлёт один SRT- или RTMP-поток (одна композитная картинка — например,
 раскладка 2×2 с четырёх камер, собранная в vMix, — либо один ракурс). Всё
@@ -456,6 +460,10 @@ infra/
   mediamtx/               конфиг MediaMTX, on-ready/on-not-ready хуки, FFmpeg
   deploy/                 скрипт деплоя, nginx-конфиг, инструкция по серверу
 docs/
+  vision.md                   текущее решение и куда развивается продукт
+  architecture-current.png    диаграмма текущей архитектуры (as-is)
+  architecture-target.png     диаграмма целевой архитектуры (to-be)
+  diagrams/                   исходники диаграмм и сборка (node docs/diagrams/build.cjs)
   capacity-metrics-setup.md   разовая настройка тома с логом nginx
   contact-requests-setup.md   миграция и проверка формы заявок
 docker-compose.yml

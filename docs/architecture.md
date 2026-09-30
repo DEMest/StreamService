@@ -1,5 +1,10 @@
 # Architecture
 
+> **Исторический документ.** Описывает MVP весны 2026 (один поток, один
+> плеер, mock-API). Текущая архитектура и планы — в [`vision.md`](vision.md)
+> и на диаграммах [`architecture-current.png`](architecture-current.png) /
+> [`architecture-target.png`](architecture-target.png).
+
 ## Target architecture
 
 ```

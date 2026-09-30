@@ -1,5 +1,9 @@
 # Roadmap
 
+> **Исторический документ.** Вехи MVP; milestone 1–3 давно пройдены, часть
+> «Deferred» (чат, запись, архив) реализована. Актуальная дорожная карта —
+> раздел 4 в [`vision.md`](vision.md).
+
 ## Milestone 1 — Local dev foundation ✅
 
 **Goal:** Developer can clone the repo, run all services locally, and see the stream player UI.
