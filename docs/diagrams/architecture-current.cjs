@@ -308,7 +308,7 @@ function build(L) {
     L.arrow({ points: [[1810, 220], [1690, 220]], label: ['HTTPS: страницы,', 'API, HLS .m3u8/.ts'], labelAt: [1750, 196] }),
     L.arrow({ points: [[1810, 300], [1690, 300]], label: ['WS: чат', 'QoE-телеметрия'], labelAt: [1750, 276] }),
     L.arrow({ points: [[1810, 375], [1690, 375]], label: ['архив: 302 →', 'presigned :9443'], labelAt: [1750, 351] }),
-    L.arrow({ points: [[1810, 515], [1690, 515]], label: ['дашборд, студия,', 'admin. / ads.'], labelAt: [1750, 491] }),
+    L.arrow({ points: [[1810, 515], [1690, 515]], label: ['дашборд,', "экран Stream'а,", 'admin. / ads.'], labelAt: [1750, 477] }),
     // разработка и выкатка
     L.arrow({ points: [[280, 810], [380, 810]], label: 'джобы CI', labelAt: [330, 800] }),
     L.arrow({ points: [[155, 890], [155, 860]], label: 'PR → merge', labelAt: [165, 880], anchor: 'start' }),
