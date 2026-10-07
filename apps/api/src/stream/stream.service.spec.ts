@@ -91,6 +91,8 @@ describe('StreamService', () => {
 
       await expect(service.deleteForOrg('o1', 's1')).rejects.toThrow('S3 down');
       expect(mockPrisma.stream.delete).not.toHaveBeenCalled();
+      // Пути приёма не тронуты — Stream остаётся рабочим.
+      expect(mockMediamtx.deleteStreamPaths).not.toHaveBeenCalled();
     });
   });
 
