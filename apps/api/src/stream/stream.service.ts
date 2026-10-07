@@ -808,7 +808,9 @@ export class StreamService {
    *      Если упал — log warn, но продолжаем. Оставлять Prisma row при удалённых
    *      MediaMTX-путях гораздо хуже: vMix не сможет паблишить, а Studio будет
    *      показывать «живой» Stream.
-   *   2. Prisma delete (каскад на Broadcast → Recording через onDelete:Cascade).
+   *   2. S3-архив записей Stream'а — до каскада, пока Recording'и можно найти.
+   *      Ошибка хранилища прерывает удаление: его можно повторить.
+   *   3. Prisma delete (каскад на Broadcast → Recording через onDelete:Cascade).
    *
    * Возвращает `{ ok: true }`.
    */
