@@ -466,26 +466,33 @@ describe('RecordingService', () => {
   });
 
   describe('onModuleInit', () => {
-    it('does not delete broadcast directory when a recording row exists in processing status', async () => {
-      // ARCHIVE_ROOT exists, contains one org dir with one broadcast dir
-      spyExistsSync.mockReturnValue(true);
-      let call = 0;
-      spyReaddirSync.mockImplementation((_p: any, _opts?: any) => {
-        call++;
-        if (call === 1) {
-          // ARCHIVE_ROOT readdir — return org dirent
-          return [{ name: 'org1', isDirectory: () => true } as any];
-        }
-        // org dir readdir — return broadcast dirent
-        return [{ name: 'bcast-processing', isDirectory: () => true } as any];
-      });
+    const archive = (...parts: string[]) => path.join('/recordings/archive', ...parts);
 
-      // Recording exists in processing status (no ready filter required)
-      mockPrisma.recording.findFirst.mockResolvedValue({
-        id: 'r1',
-        broadcastId: 'bcast-processing',
-        status: 'processing',
+    // Фейковое дерево scratch: путь каталога → его содержимое, подкаталоги — с '/' на конце.
+    const mockArchiveTree = (tree: Record<string, string[]>) => {
+      spyExistsSync.mockImplementation((p: any) => String(p) in tree);
+      spyReaddirSync.mockImplementation((p: any) =>
+        (tree[String(p)] ?? []).map((name) => ({
+          name: name.replace(/\/$/, ''),
+          isDirectory: () => name.endsWith('/'),
+        })) as any);
+    };
+
+    // Recording есть только у перечисленных broadcastId — как в БД.
+    const mockRecordingsFor = (...broadcastIds: string[]) => {
+      mockPrisma.recording.findFirst.mockImplementation(({ where }: any) =>
+        Promise.resolve(broadcastIds.includes(where.broadcastId)
+          ? { id: `rec-${where.broadcastId}`, broadcastId: where.broadcastId }
+          : null));
+    };
+
+    it('legacy default Stream: keeps a broadcast dir whose recording is still processing', async () => {
+      mockArchiveTree({
+        [archive()]: ['org1/'],
+        [archive('org1')]: ['bcast-processing/'],
+        [archive('org1', 'bcast-processing')]: ['slot-1/'],
       });
+      mockRecordingsFor('bcast-processing');
 
       await service.onModuleInit();
 
@@ -493,29 +500,91 @@ describe('RecordingService', () => {
       expect(mockPrisma.recording.findFirst).toHaveBeenCalledWith({
         where: { broadcastId: 'bcast-processing' },
       });
-      // No directory removal must happen
       expect(spyRmSync).not.toHaveBeenCalled();
     });
 
-    it('removes orphan broadcast directory when no recording row exists in DB', async () => {
-      spyExistsSync.mockReturnValue(true);
-      let call = 0;
-      spyReaddirSync.mockImplementation((_p: any, _opts?: any) => {
-        call++;
-        if (call === 1) {
-          return [{ name: 'org1', isDirectory: () => true } as any];
-        }
-        return [{ name: 'bcast-orphan', isDirectory: () => true } as any];
+    it('legacy default Stream: removes an orphan broadcast dir', async () => {
+      mockArchiveTree({
+        [archive()]: ['org1/'],
+        [archive('org1')]: ['bcast-orphan/'],
+        [archive('org1', 'bcast-orphan')]: ['slot-1/', 'master.m3u8'],
       });
-
-      mockPrisma.recording.findFirst.mockResolvedValue(null);
+      mockRecordingsFor();
 
       await service.onModuleInit();
 
-      expect(spyRmSync).toHaveBeenCalledWith(
-        expect.stringContaining('bcast-orphan'),
-        { recursive: true, force: true },
-      );
+      expect(spyRmSync).toHaveBeenCalledTimes(1);
+      expect(spyRmSync).toHaveBeenCalledWith(archive('org1', 'bcast-orphan'), { recursive: true, force: true });
+    });
+
+    it('named Stream: keeps the stream dir with an in-flight conversion (stream slug is not a broadcastId)', async () => {
+      // Регрессия: depth=2 здесь — каталог стрима `h`. Раньше его искали как
+      // broadcastId='h', не находили Recording и сносили весь стрим.
+      mockArchiveTree({
+        [archive()]: ['vegasport/'],
+        [archive('vegasport')]: ['h/'],
+        [archive('vegasport', 'h')]: ['bcast-live/'],
+        [archive('vegasport', 'h', 'bcast-live')]: ['slot-1/'],
+      });
+      mockRecordingsFor('bcast-live');
+
+      await service.onModuleInit();
+
+      expect(mockPrisma.recording.findFirst).toHaveBeenCalledWith({ where: { broadcastId: 'bcast-live' } });
+      expect(mockPrisma.recording.findFirst).not.toHaveBeenCalledWith({ where: { broadcastId: 'h' } });
+      expect(spyRmSync).not.toHaveBeenCalled();
+    });
+
+    it('named Stream: removes only the orphan broadcast dir, keeps the stream dir and failed scratch for retryFailed', async () => {
+      mockArchiveTree({
+        [archive()]: ['vegasport/'],
+        [archive('vegasport')]: ['h/'],
+        [archive('vegasport', 'h')]: ['bcast-failed/', 'bcast-orphan/'],
+        [archive('vegasport', 'h', 'bcast-failed')]: ['slot-1/', 'master.m3u8', 'download.mp4'],
+        [archive('vegasport', 'h', 'bcast-orphan')]: ['slot-1/'],
+      });
+      mockRecordingsFor('bcast-failed');
+
+      await service.onModuleInit();
+
+      expect(spyRmSync).toHaveBeenCalledTimes(1);
+      expect(spyRmSync).toHaveBeenCalledWith(archive('vegasport', 'h', 'bcast-orphan'), { recursive: true, force: true });
+    });
+
+    it('one org with both legacy and named Streams: each orphan is found at its own depth, slot dirs are never candidates', async () => {
+      mockArchiveTree({
+        [archive()]: ['club/'],
+        [archive('club')]: ['bcast-legacy-orphan/', 'bcast-legacy-ok/', 'court-a/'],
+        [archive('club', 'bcast-legacy-orphan')]: ['slot-1/'],
+        [archive('club', 'bcast-legacy-ok')]: ['slot-1/', 'master.m3u8'],
+        [archive('club', 'bcast-legacy-ok', 'slot-1')]: ['seg-0001.mp4', 'index.m3u8'],
+        [archive('club', 'court-a')]: ['bcast-named-orphan/', 'bcast-named-ok/'],
+        [archive('club', 'court-a', 'bcast-named-orphan')]: ['slot-1/', 'download.mp4'],
+        [archive('club', 'court-a', 'bcast-named-ok')]: ['slot-1/'],
+      });
+      mockRecordingsFor('bcast-legacy-ok', 'bcast-named-ok');
+
+      await service.onModuleInit();
+
+      const removed = spyRmSync.mock.calls.map(([p]) => String(p)).sort();
+      expect(removed).toEqual([
+        archive('club', 'bcast-legacy-orphan'),
+        archive('club', 'court-a', 'bcast-named-orphan'),
+      ].sort());
+      const looked = mockPrisma.recording.findFirst.mock.calls.map(([arg]: any) => arg.where.broadcastId);
+      expect(looked).not.toContain('court-a');
+      expect(looked).not.toContain('slot-1');
+    });
+
+    it('an unreadable directory does not fail API boot', async () => {
+      mockArchiveTree({ [archive()]: ['org1/'] });
+      spyReaddirSync.mockImplementation((p: any) => {
+        if (String(p) === archive()) return [{ name: 'org1', isDirectory: () => true }] as any;
+        throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+      });
+
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
+      expect(spyRmSync).not.toHaveBeenCalled();
     });
   });
 

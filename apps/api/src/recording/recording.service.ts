@@ -13,6 +13,7 @@ import { buildHlsVodPlaylist, buildMasterPlaylist, FmpSegment } from './hls-vod'
 const execFileAsync = promisify(execFile);
 export const RECORDINGS_ROOT = '/recordings';
 const ARCHIVE_ROOT = '/recordings/archive';
+const BROADCAST_DIR_FILES = new Set(['master.m3u8', 'download.mp4']);
 /**
  * Срок жизни записи (`Recording.expiresAt`), после которого cleanupExpired
  * (крон 03:00) сносит её префикс из S3. Экспортируется, потому что метрика
@@ -445,18 +446,31 @@ export class RecordingService {
     }
   }
 
+  /**
+   * Чистка осиротевшего archive-scratch на старте API. broadcastDir лежит в
+   * ARCHIVE_ROOT/<mediamtxPath>/<broadcastId>, а mediamtxPath бывает разной
+   * глубины: `<orgSlug>` у legacy default Stream (slug='') и
+   * `<orgSlug>/<streamSlug>` у именованного. Поэтому broadcastDir узнаётся по
+   * содержимому, а не по глубине: каталог стрима, принятый за broadcastDir без
+   * Recording, сносился целиком на каждом деплое — вместе с идущей конверсией
+   * и со scratch failed-записей, из которого их пересобирает retryFailed.
+   * Удаляется только broadcastDir без строки Recording; каталоги org и
+   * стримов не удаляются никогда.
+   */
   async onModuleInit(): Promise<void> {
     if (!fs.existsSync(ARCHIVE_ROOT)) return;
 
-    // Структура для default Stream: ARCHIVE_ROOT/<orgSlug>/<broadcastId>/(master.m3u8 + slot-N/).
-    // Broadcast-папки лежат на depth=2 от ARCHIVE_ROOT (orgSlug — depth 1).
-    // Multi-stream (Step 3+) сменит структуру на depth=3; до этого момента сюда не лезем.
     const broadcastDirs: string[] = [];
-    for (const orgEntry of fs.readdirSync(ARCHIVE_ROOT, { withFileTypes: true })) {
-      if (!orgEntry.isDirectory()) continue;
-      const orgDir = path.join(ARCHIVE_ROOT, orgEntry.name);
-      for (const bEntry of fs.readdirSync(orgDir, { withFileTypes: true })) {
-        if (bEntry.isDirectory()) broadcastDirs.push(path.join(orgDir, bEntry.name));
+    for (const orgDir of this.listSubdirs(ARCHIVE_ROOT)) {
+      for (const dir of this.listSubdirs(orgDir)) {
+        if (this.isBroadcastDir(dir)) {
+          broadcastDirs.push(dir);
+          continue;
+        }
+        // Не broadcastDir — значит каталог именованного стрима, broadcastDir'ы на уровень ниже.
+        for (const streamChild of this.listSubdirs(dir)) {
+          if (this.isBroadcastDir(streamChild)) broadcastDirs.push(streamChild);
+        }
       }
     }
 
@@ -470,6 +484,31 @@ export class RecordingService {
         fs.rmSync(dir, { recursive: true, force: true });
         this.logger.log(`Removed orphaned directory: ${dir}`);
       } catch { /* ignore */ }
+    }
+  }
+
+  /** Подкаталоги dir. Ошибка чтения — пустой список: чистка best-effort и не должна ронять старт API. */
+  private listSubdirs(dir: string): string[] {
+    try {
+      return fs.readdirSync(dir, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => path.join(dir, e.name));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Признаки broadcastDir: convertRecording первым же шагом создаёт slot-N/,
+   * позже кладёт master.m3u8 и download.mp4. У каталога стрима внутри только
+   * broadcastDir'ы, а slug стрима не может совпасть с именем файла (в нём нет точки).
+   */
+  private isBroadcastDir(dir: string): boolean {
+    try {
+      return fs.readdirSync(dir, { withFileTypes: true }).some((e) =>
+        e.isDirectory() ? e.name.startsWith('slot-') : BROADCAST_DIR_FILES.has(e.name));
+    } catch {
+      return false;
     }
   }
 }
