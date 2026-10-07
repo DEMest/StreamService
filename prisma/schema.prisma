@@ -213,7 +213,7 @@ model CapacitySample {
 /// API — иначе о ночном инциденте никто бы не узнал.
 model CapacityIncident {
   id        String    @id @default(cuid())
-  /// 'uplink' | 'encode' | 'errors' | 'stalls' | 'offline'
+  /// 'uplink' | 'encode' | 'errors' | 'stalls' | 'offline' | 'disk'
   kind      String
   /// 'warn' | 'crit'
   severity  String

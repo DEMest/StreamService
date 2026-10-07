@@ -21,7 +21,7 @@ interface RenditionShare {
 
 interface Incident {
   id: string;
-  kind: 'uplink' | 'encode' | 'errors' | 'stalls' | 'offline';
+  kind: 'uplink' | 'encode' | 'errors' | 'stalls' | 'offline' | 'disk';
   severity: 'warn' | 'crit';
   title: string;
   startedAt: number;
