@@ -21,6 +21,8 @@ const mockPrisma = {
   recording: {
     create: jest.fn(),
     update: jest.fn(),
+    // Захват записи на повтор (failed → processing): по умолчанию удаётся.
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     findUnique: jest.fn(),
     findFirst: jest.fn(),
     findMany: jest.fn(),
@@ -28,6 +30,8 @@ const mockPrisma = {
   },
   broadcast: {
     findMany: jest.fn(),
+    // Более поздней трансляции у стрима по умолчанию нет.
+    findFirst: jest.fn().mockResolvedValue(null),
     // Дефолтный resolved-результат: часть НЕ-preview тестов (spyExistsSync
     // мокается true для ВСЕХ путей, в т.ч. случайно для preview.jpg) иначе
     // получила бы undefined и упала бы на `.catch()` в uploadAndFinalize.
@@ -56,6 +60,11 @@ function withSources(spyExists: jest.SpyInstance, spyReaddir: jest.SpyInstance, 
     if (opts && (opts as any).withFileTypes) return [];
     return files as any;
   });
+}
+
+/** Дать отработать фоновым цепочкам промисов. */
+async function flush() {
+  for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
 }
 
 describe('RecordingService', () => {
@@ -415,7 +424,11 @@ describe('RecordingService', () => {
       broadcastId: 'bcast-resume',
       slotIndex: 1,
       status: 'failed',
-      broadcast: { stream: { slug: 'court-a', org: { slug: 'org1' } } },
+      broadcast: {
+        streamId: 'stream-a',
+        startedAt: new Date('2026-10-01T10:00:00Z'),
+        stream: { slug: 'court-a', org: { slug: 'org1' } },
+      },
     };
 
     it('skips recordings where broadcast.stream is null', async () => {
@@ -518,6 +531,211 @@ describe('RecordingService', () => {
       expect(mockPrisma.recording.update).toHaveBeenCalledWith({
         where: { id: 'rec-resume' },
         data: { status: 'failed' },
+      });
+    });
+
+    it('запись, которую уже взял другой прогон, не пересобирается второй раз', async () => {
+      // Крон и resumeInterrupted выбрали одну failed-запись: захват (failed →
+      // processing) удаётся только одному, второй её пропускает.
+      mockPrisma.recording.findMany.mockResolvedValue([failedRow]);
+      mockPrisma.recording.updateMany.mockResolvedValueOnce({ count: 0 });
+      withSources(spyExistsSync, spyReaddirSync);
+      const build = jest.spyOn(service as any, 'buildAndUpload');
+
+      await service.retryFailed();
+
+      expect(mockPrisma.recording.updateMany).toHaveBeenCalledWith({
+        where: { id: 'rec-resume', status: 'failed' },
+        data: { status: 'processing' },
+      });
+      expect(build).not.toHaveBeenCalled();
+      expect(mockS3.uploadFiles).not.toHaveBeenCalled();
+    });
+
+    it('пересобирает записи по одной: следующая склейка ждёт конца предыдущей', async () => {
+      // Склейка — copy десятков ГБ по диску, общему с эфиром.
+      mockPrisma.recording.findMany.mockResolvedValue([
+        { ...failedRow, id: 'rec-1', broadcastId: 'bcast-1' },
+        { ...failedRow, id: 'rec-2', broadcastId: 'bcast-2' },
+      ]);
+      withSources(spyExistsSync, spyReaddirSync);
+      let finishFirst!: () => void;
+      const build = jest.spyOn(service as any, 'buildAndUpload')
+        .mockImplementationOnce(() => new Promise<void>((resolve) => { finishFirst = resolve; }))
+        .mockResolvedValueOnce(undefined);
+
+      const run = service.retryFailed();
+      await flush();
+      expect(build).toHaveBeenCalledTimes(1);
+
+      finishFirst();
+      await run;
+      expect(build).toHaveBeenCalledTimes(2);
+      expect(build.mock.calls[1][0]).toBe('rec-2');
+    });
+
+    describe('без scratch — полный пайплайн из live/', () => {
+      const liveDir = path.join('/recordings', 'live', 'org1/court-a');
+      const slotDir = path.join('/recordings', 'archive', 'org1/court-a', 'bcast-resume', 'slot-1');
+      const liveSegment = '2026-10-01_10-00-00-000000.mp4';
+
+      beforeEach(() => {
+        mockPrisma.recording.findMany.mockResolvedValue([failedRow]);
+        mockPrisma.recording.update.mockResolvedValue({});
+        spyExistsSync.mockReturnValue(true);
+        // scratch пуст, в live/ лежит сегмент.
+        spyReaddirSync.mockImplementation((p: any) => (String(p) === liveDir ? [liveSegment] : []) as any);
+      });
+
+      it('забирает сегменты из live/, если стрим после этой трансляции в эфир не выходил', async () => {
+        await service.retryFailed();
+
+        expect(mockPrisma.broadcast.findFirst).toHaveBeenCalledWith({
+          where: { streamId: 'stream-a', startedAt: { gt: failedRow.broadcast.startedAt } },
+          select: { id: true },
+        });
+        expect(mockPrisma.recording.updateMany).toHaveBeenCalledWith({
+          where: { id: 'rec-resume', status: 'failed' },
+          data: { status: 'processing' },
+        });
+        expect(spyRenameSync).toHaveBeenCalledWith(
+          path.join(liveDir, liveSegment),
+          path.join(slotDir, 'seg-0001.mp4'),
+        );
+      });
+
+      it('не трогает live/, если у стрима есть более поздняя трансляция — сегменты там её', async () => {
+        // Иначе пишущийся сейчас сегмент следующего эфира (или его
+        // завершённая запись) уехал бы в архив чужой трансляции.
+        mockPrisma.broadcast.findFirst.mockResolvedValueOnce({ id: 'bcast-next' });
+
+        await service.retryFailed();
+
+        expect(spyRenameSync).not.toHaveBeenCalled();
+        expect(spyMkdirSync).not.toHaveBeenCalled();
+        expect(mockPrisma.recording.updateMany).not.toHaveBeenCalled();
+        expect(mockS3.uploadFiles).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('рестарт API посреди конверсии', () => {
+    // Конверсия идёт в процессе API; деплой (каждый мерж в main) его
+    // перезапускает, и запись оставалась в processing навсегда: retryFailed
+    // выбирает только failed.
+    const processingIds = (ids: string[]) => {
+      mockPrisma.recording.findMany.mockImplementation(({ where }: any) =>
+        Promise.resolve(where.status === 'processing' ? ids.map((id) => ({ id })) : []));
+    };
+
+    it('старт переводит processing прошлого процесса в failed — до того, как API откроет порт', async () => {
+      processingIds(['rec-a', 'rec-b']);
+
+      // Nest открывает порт после onApplicationBootstrap: сброс обязан
+      // завершиться внутри хука, а не фоном.
+      await service.onApplicationBootstrap();
+
+      expect(mockPrisma.recording.findMany).toHaveBeenCalledWith({
+        where: { status: 'processing' },
+        select: { id: true },
+      });
+      expect(mockPrisma.recording.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['rec-a', 'rec-b'] }, status: 'processing' },
+        data: { status: 'failed' },
+      });
+    });
+
+    it('нет processing-записей — ничего не обновляет', async () => {
+      processingIds([]);
+
+      await service.onApplicationBootstrap();
+
+      expect(mockPrisma.recording.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('ошибка БД при сбросе не роняет старт API', async () => {
+      mockPrisma.recording.findMany.mockRejectedValueOnce(new Error('connection refused'));
+
+      await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+      expect(mockPrisma.recording.updateMany).not.toHaveBeenCalled();
+    });
+
+    describe('resumeInterrupted', () => {
+      const interrupted = {
+        id: 'rec-cut',
+        broadcastId: 'bcast-cut',
+        slotIndex: 1,
+        status: 'failed',
+        broadcast: {
+          streamId: 'stream-a',
+          startedAt: new Date('2026-10-01T10:00:00Z'),
+          stream: { slug: 'court-a', org: { slug: 'org1' } },
+        },
+      };
+      const liveDir = path.join('/recordings', 'live', 'org1/court-a');
+      const slotDir = path.join('/recordings', 'archive', 'org1/court-a', 'bcast-cut', 'slot-1');
+
+      /** Старт сбросил rec-cut; дальше findMany отдаёт её как failed. */
+      async function bootWithInterrupted() {
+        processingIds(['rec-cut']);
+        await service.onApplicationBootstrap();
+        await flush();
+        jest.clearAllMocks();
+        mockPrisma.recording.findMany.mockImplementation(({ where }: any) =>
+          Promise.resolve(where.status === 'failed' ? [interrupted] : []));
+        mockPrisma.recording.update.mockResolvedValue({});
+      }
+
+      it('пересобирает из scratch только записи, прерванные рестартом', async () => {
+        await bootWithInterrupted();
+        spyExistsSync.mockReturnValue(true);
+        spyReaddirSync.mockImplementation((p: any) =>
+          (String(p) === slotDir ? ['seg-0001.mp4'] : []) as any);
+
+        await service.resumeInterrupted();
+
+        expect(mockPrisma.recording.findMany).toHaveBeenCalledWith(expect.objectContaining({
+          where: { status: 'failed', id: { in: ['rec-cut'] } },
+        }));
+        expect(mockS3.uploadFiles).toHaveBeenCalledWith(
+          expect.stringContaining(path.join('archive', 'org1/court-a', 'bcast-cut')),
+          expect.arrayContaining(['download.mp4', 'vod.m3u8', 'master.m3u8']),
+          'archive/org1/court-a/bcast-cut',
+        );
+        expect(mockPrisma.recording.update).toHaveBeenCalledWith(expect.objectContaining({
+          where: { id: 'rec-cut' },
+          data: expect.objectContaining({ status: 'ready' }),
+        }));
+      });
+
+      it('без scratch в live/ не заглядывает: после деплоя там пишется идущий эфир', async () => {
+        await bootWithInterrupted();
+        const listed: string[] = [];
+        spyExistsSync.mockReturnValue(true);
+        spyReaddirSync.mockImplementation((p: any) => {
+          listed.push(String(p));
+          return (String(p) === liveDir ? ['2026-10-07_12-00-00-000000.mp4'] : []) as any;
+        });
+
+        await service.resumeInterrupted();
+
+        expect(listed).not.toContain(liveDir);
+        expect(spyRenameSync).not.toHaveBeenCalled();
+        expect(mockPrisma.recording.updateMany).not.toHaveBeenCalled();
+        expect(mockS3.uploadFiles).not.toHaveBeenCalled();
+      });
+
+      it('срабатывает один раз; без прерванных записей не делает ничего', async () => {
+        await bootWithInterrupted();
+        spyExistsSync.mockReturnValue(true);
+        spyReaddirSync.mockImplementation((p: any) =>
+          (String(p) === slotDir ? ['seg-0001.mp4'] : []) as any);
+
+        await service.resumeInterrupted();
+        mockPrisma.recording.findMany.mockClear();
+        await service.resumeInterrupted();
+
+        expect(mockPrisma.recording.findMany).not.toHaveBeenCalled();
       });
     });
   });
