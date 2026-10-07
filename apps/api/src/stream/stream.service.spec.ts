@@ -16,6 +16,7 @@ const mockPrisma = {
     findFirst: jest.fn(),
     update: jest.fn(),
     create: jest.fn(),
+    delete: jest.fn(),
   },
   broadcast: {
     create: jest.fn(),
@@ -36,7 +37,10 @@ const mockMediamtx = {
   setStreamRecording: jest.fn(),
 };
 // onStreamEnded должен возвращать Promise — StreamService.endBroadcast вешает на него .catch.
-const mockRecording = { onStreamEnded: jest.fn().mockResolvedValue(undefined) };
+const mockRecording = {
+  onStreamEnded: jest.fn().mockResolvedValue(undefined),
+  deleteRecordingsForStreams: jest.fn().mockResolvedValue(undefined),
+};
 const mockChatService = { clearMessagesByStream: jest.fn() };
 const mockImages = { upload: jest.fn(), delete: jest.fn(), serve: jest.fn() };
 const mockStats = { getSnapshot: jest.fn() };
@@ -49,6 +53,7 @@ describe('StreamService', () => {
   beforeEach(async () => {
     jest.resetAllMocks();
     mockRecording.onStreamEnded.mockResolvedValue(undefined);
+    mockRecording.deleteRecordingsForStreams.mockResolvedValue(undefined);
     const module = await Test.createTestingModule({
       providers: [
         StreamService,
@@ -63,6 +68,32 @@ describe('StreamService', () => {
       ],
     }).compile();
     service = module.get(StreamService);
+  });
+
+  describe('deleteForOrg', () => {
+    const idle = { id: 's1', slug: 'court-a', isLive: false, currentBroadcastId: null, org: { slug: 'club' } };
+
+    it('удаляет архив записей Stream\'а из S3 ДО каскадного удаления строк', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(idle);
+      const order: string[] = [];
+      mockRecording.deleteRecordingsForStreams.mockImplementation(async () => { order.push('s3'); });
+      mockPrisma.stream.delete.mockImplementation(async () => { order.push('db'); });
+
+      await service.deleteForOrg('o1', 's1');
+
+      expect(mockRecording.deleteRecordingsForStreams).toHaveBeenCalledWith(['s1']);
+      expect(order).toEqual(['s3', 'db']);
+    });
+
+    it('ошибка хранилища прерывает удаление — строки остаются, удаление можно повторить', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(idle);
+      mockRecording.deleteRecordingsForStreams.mockRejectedValue(new Error('S3 down'));
+
+      await expect(service.deleteForOrg('o1', 's1')).rejects.toThrow('S3 down');
+      expect(mockPrisma.stream.delete).not.toHaveBeenCalled();
+      // Пути приёма не тронуты — Stream остаётся рабочим.
+      expect(mockMediamtx.deleteStreamPaths).not.toHaveBeenCalled();
+    });
   });
 
   describe('rotateKey', () => {

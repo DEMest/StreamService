@@ -804,11 +804,14 @@ export class StreamService {
    *   - cross-tenant → 404 ({@link loadForOrg}).
    *
    * Атомарность:
-   *   1. MediaMTX deleteStreamPaths (best-effort, идемпотентно).
+   *   1. S3-архив записей Stream'а — до каскада, пока Recording'и можно найти.
+   *      Ошибка хранилища прерывает удаление ДО того, как тронуты пути
+   *      MediaMTX: Stream остаётся рабочим, удаление можно повторить.
+   *   2. MediaMTX deleteStreamPaths (best-effort, идемпотентно).
    *      Если упал — log warn, но продолжаем. Оставлять Prisma row при удалённых
    *      MediaMTX-путях гораздо хуже: vMix не сможет паблишить, а Studio будет
    *      показывать «живой» Stream.
-   *   2. Prisma delete (каскад на Broadcast → Recording через onDelete:Cascade).
+   *   3. Prisma delete (каскад на Broadcast → Recording через onDelete:Cascade).
    *
    * Возвращает `{ ok: true }`.
    */
@@ -826,7 +829,13 @@ export class StreamService {
       );
     }
 
-    // 1) MediaMTX delete — best-effort.
+    // 1) Архив записей в S3 — до каскада, пока Recording'и ещё можно найти.
+    //    Ошибка хранилища прерывает удаление: лучше повторить его, чем оставить
+    //    видео, которое уже никто не увидит и не удалит. Первым — чтобы сбой
+    //    S3 не оставил Stream без путей приёма.
+    await this.recording.deleteRecordingsForStreams([streamId]);
+
+    // 2) MediaMTX delete — best-effort.
     try {
       await this.mediamtx.deleteStreamPaths(stream.org.slug, stream.slug);
     } catch (err: any) {
@@ -835,7 +844,7 @@ export class StreamService {
       );
     }
 
-    // 2) Prisma delete. Broadcast'ы Stream'а удалятся через onDelete:Cascade,
+    // 3) Prisma delete. Broadcast'ы Stream'а удалятся через onDelete:Cascade,
     //    Recording'и — через каскад от Broadcast.
     await this.prisma.stream.delete({ where: { id: streamId } });
     return { ok: true };

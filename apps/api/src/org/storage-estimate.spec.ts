@@ -1,5 +1,4 @@
 import {
-  ARCHIVE_OVERHEAD,
   DEFAULT_BITRATE_MBPS,
   DISK_RESERVE_BYTES,
   FINALIZE_PEAK_FACTOR,
@@ -13,9 +12,9 @@ const GiB = 1024 ** 3;
 
 describe('storage-estimate', () => {
   describe('bytesPerHourAt', () => {
-    it('переводит Мбит/с в байты архива за час с учётом overhead', () => {
-      // 4 Мбит/с = 500 000 байт/с * 3600 = 1.8 ГБ видео, ×2 из-за download.mp4
-      expect(bytesPerHourAt(4)).toBe(3_600_000_000);
+    it('переводит Мбит/с в байты архива за час — видео в архиве ровно одной копией', () => {
+      // 4 Мбит/с = 500 000 байт/с * 3600 = 1.8 ГБ
+      expect(bytesPerHourAt(4)).toBe(1_800_000_000);
     });
 
     it('обратима через bitrateFromBytesPerHour', () => {
@@ -39,7 +38,7 @@ describe('storage-estimate', () => {
     });
 
     it('считает по собственной истории орги, когда её достаточно', () => {
-      // 2 часа эфира на 8 Мбит/с (уже с overhead) → ровно 8 Мбит/с обратно
+      // 2 часа эфира на 8 Мбит/с → ровно 8 Мбит/с обратно
       const twoHours = 7200;
       const used = bytesPerHourAt(8) * 2;
       const r = hourlyRate(used, twoHours);
@@ -58,16 +57,17 @@ describe('storage-estimate', () => {
   describe('hoursLeft', () => {
     it('вычитает резерв диска и делит по ПИКОВОМУ расходу, а не установившемуся', () => {
       const free = DISK_RESERVE_BYTES + bytesPerHourAt(4) * 10;
-      // 10 часов установившегося следа = 5 часов с учётом удвоения на заливке.
-      expect(hoursLeft(free, bytesPerHourAt(4))).toBe(10 / FINALIZE_PEAK_FACTOR);
+      // 10 часов установившегося следа → 10/3 часа: на заливке запись лежит на
+      // томе трижды (исходники, склейка, её копия в S3); floor до десятых.
+      expect(hoursLeft(free, bytesPerHourAt(4))).toBe(3.3);
     });
 
     it('обещанные часы реально доживают до конца заливки', () => {
       const free = 600 * GiB;
       const bph = bytesPerHourAt(6);
       const promised = hoursLeft(free, bph);
-      // Пик = запись лежит на томе дважды. Он обязан уместиться в свободное
-      // место за вычетом резерва — иначе ENOSPC внутри uploadDirectory.
+      // Пик = запись лежит на томе трижды. Он обязан уместиться в свободное
+      // место за вычетом резерва — иначе ENOSPC посреди заливки.
       const peakBytes = promised * bph * FINALIZE_PEAK_FACTOR;
       expect(peakBytes).toBeLessThanOrEqual(free - DISK_RESERVE_BYTES);
     });
@@ -82,7 +82,7 @@ describe('storage-estimate', () => {
     });
   });
 
-  it('ARCHIVE_OVERHEAD = 2 — сегменты slot-1/ плюс склеенный download.mp4', () => {
-    expect(ARCHIVE_OVERHEAD).toBe(2);
+  it('FINALIZE_PEAK_FACTOR = 3 — исходники, склейка и её копия в S3 одновременно', () => {
+    expect(FINALIZE_PEAK_FACTOR).toBe(3);
   });
 });

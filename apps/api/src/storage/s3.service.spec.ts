@@ -6,6 +6,7 @@ import {
   ListObjectsV2Command,
   DeleteObjectsCommand,
   DeleteObjectCommand,
+  HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { S3Service } from './s3.service';
 import * as fs from 'fs';
@@ -42,42 +43,25 @@ describe('S3Service', () => {
     service = new S3Service();
   });
 
-  describe('uploadDirectory', () => {
-    it('uploads every file in a nested directory under the given key prefix', async () => {
-      jest.spyOn(fs, 'readdirSync').mockImplementation((dirPath: any, opts?: any) => {
-        if (String(dirPath) === '/scratch/broadcast1') {
-          return [
-            { name: 'master.m3u8', isDirectory: () => false },
-            { name: 'slot-1', isDirectory: () => true },
-          ] as any;
-        }
-        if (String(dirPath) === '/scratch/broadcast1/slot-1') {
-          return [{ name: 'seg-0001.mp4', isDirectory: () => false }] as any;
-        }
-        return [] as any;
-      });
+  describe('uploadFiles', () => {
+    it('uploads exactly the listed files under the given key prefix', async () => {
       mockReadStream();
 
-      await service.uploadDirectory('/scratch/broadcast1', 'archive/org/stream/broadcast1');
+      await service.uploadFiles('/scratch/broadcast1', ['master.m3u8', 'download.mp4'], 'archive/org/stream/broadcast1');
 
-      const calls = s3Mock.commandCalls(PutObjectCommand);
-      expect(calls.length).toBe(2);
-      const keys = calls.map((c) => c.args[0].input.Key).sort();
+      const keys = s3Mock.commandCalls(PutObjectCommand).map((c) => c.args[0].input.Key).sort();
       expect(keys).toEqual([
+        'archive/org/stream/broadcast1/download.mp4',
         'archive/org/stream/broadcast1/master.m3u8',
-        'archive/org/stream/broadcast1/slot-1/seg-0001.mp4',
       ]);
 
       jest.restoreAllMocks();
     });
 
     it('sets application/vnd.apple.mpegurl content-type for .m3u8 and no-cache', async () => {
-      jest.spyOn(fs, 'readdirSync').mockReturnValue([
-        { name: 'master.m3u8', isDirectory: () => false },
-      ] as any);
       mockReadStream();
 
-      await service.uploadDirectory('/scratch/b1', 'archive/b1');
+      await service.uploadFiles('/scratch/b1', ['vod.m3u8'], 'archive/b1');
 
       const call = s3Mock.commandCalls(PutObjectCommand)[0];
       expect(call.args[0].input.ContentType).toBe('application/vnd.apple.mpegurl');
@@ -87,12 +71,9 @@ describe('S3Service', () => {
     });
 
     it('sets video/mp4 content-type and long-lived immutable cache for .mp4', async () => {
-      jest.spyOn(fs, 'readdirSync').mockReturnValue([
-        { name: 'download.mp4', isDirectory: () => false },
-      ] as any);
       mockReadStream();
 
-      await service.uploadDirectory('/scratch/b1', 'archive/b1');
+      await service.uploadFiles('/scratch/b1', ['download.mp4'], 'archive/b1');
 
       const call = s3Mock.commandCalls(PutObjectCommand)[0];
       expect(call.args[0].input.ContentType).toBe('video/mp4');
@@ -102,20 +83,36 @@ describe('S3Service', () => {
     });
 
     it('streams file bodies (createReadStream), never buffers whole files via readFileSync', async () => {
-      // Сегменты MediaMTX (3h) могут превышать 2 GiB Buffer-лимит Node —
+      // Склейка многочасовой записи легко превышает 2 GiB Buffer-лимит Node —
       // readFileSync здесь был бы бомбой замедленного действия.
-      jest.spyOn(fs, 'readdirSync').mockReturnValue([
-        { name: 'download.mp4', isDirectory: () => false },
-      ] as any);
       const streamSpy = mockReadStream();
       const readFileSpy = jest.spyOn(fs, 'readFileSync');
 
-      await service.uploadDirectory('/scratch/b1', 'archive/b1');
+      await service.uploadFiles('/scratch/b1', ['download.mp4'], 'archive/b1');
 
       expect(streamSpy).toHaveBeenCalled();
       expect(readFileSpy).not.toHaveBeenCalled();
 
       jest.restoreAllMocks();
+    });
+  });
+
+  describe('getObjectSize / getObjectRange', () => {
+    it('getObjectSize returns ContentLength from HeadObject', async () => {
+      s3Mock.on(HeadObjectCommand).resolves({ ContentLength: 14_856_700_292 });
+      await expect(service.getObjectSize('archive/b1/download.mp4')).resolves.toBe(14_856_700_292);
+    });
+
+    it('getObjectRange asks for an inclusive byte range and returns a Buffer', async () => {
+      s3Mock.on(GetObjectCommand).resolves({
+        Body: { transformToByteArray: async () => new Uint8Array([9, 8, 7]) } as any,
+      });
+      const buf = await service.getObjectRange('archive/b1/download.mp4', 100, 3);
+      expect([...buf]).toEqual([9, 8, 7]);
+      expect(s3Mock.commandCalls(GetObjectCommand)[0].args[0].input).toMatchObject({
+        Key: 'archive/b1/download.mp4',
+        Range: 'bytes=100-102',
+      });
     });
   });
 

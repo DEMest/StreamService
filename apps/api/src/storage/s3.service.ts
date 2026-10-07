@@ -6,6 +6,7 @@ import {
   DeleteObjectsCommand,
   PutObjectCommand,
   DeleteObjectCommand,
+  HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -73,49 +74,46 @@ export class S3Service {
   }
 
   /**
-   * Рекурсивно заливает все файлы localDir под keyPrefix, сохраняя относительную
-   * структуру. Потоковая multipart-заливка (`@aws-sdk/lib-storage`) — сегменты
-   * MediaMTX режутся по 3 часа и на высоком битрейте превышают и лимит Buffer
-   * (2 GiB), и потолок одиночного PutObject (5 GB); readFileSync здесь нельзя.
+   * Заливает перечисленные файлы localDir под keyPrefix (имя файла = хвост
+   * ключа). Потоковая multipart-заливка (`@aws-sdk/lib-storage`) — склейка
+   * записи на высоком битрейте превышает и лимит Buffer (2 GiB), и потолок
+   * одиночного PutObject (5 GB); readFileSync здесь нельзя.
    */
-  async uploadDirectory(localDir: string, keyPrefix: string): Promise<void> {
-    const relFiles = this.listFilesRecursive(localDir, localDir);
-    for (const relPath of relFiles) {
-      const fullPath = path.join(localDir, relPath);
-      const key = `${keyPrefix}/${relPath.split(path.sep).join('/')}`;
-      const meta = metaFor(relPath);
+  async uploadFiles(localDir: string, fileNames: string[], keyPrefix: string): Promise<void> {
+    for (const name of fileNames) {
+      const meta = metaFor(name);
       const upload = new Upload({
         client: this.client,
         params: {
           Bucket: this.bucket,
-          Key: key,
-          Body: fs.createReadStream(fullPath),
+          Key: `${keyPrefix}/${name}`,
+          Body: fs.createReadStream(path.join(localDir, name)),
           ContentType: meta.contentType,
           CacheControl: meta.cacheControl,
         },
       });
       await upload.done();
     }
-    this.logger.log(`Uploaded ${relFiles.length} file(s) to s3://${this.bucket}/${keyPrefix}`);
+    this.logger.log(`Uploaded ${fileNames.length} file(s) to s3://${this.bucket}/${keyPrefix}`);
   }
 
-  private listFilesRecursive(dir: string, base: string): string[] {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    const results: string[] = [];
-    for (const entry of entries) {
-      // path.posix (not the native path module) — recordings/archive dirs are
-      // always POSIX-style (RECORDINGS_ROOT is a hardcoded '/recordings' path
-      // used exclusively inside the Linux API container). Using the native
-      // path.join here would emit backslash-joined paths on a Windows dev
-      // host, which then fail to round-trip through fs.readdirSync/readFileSync.
-      const full = path.posix.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        results.push(...this.listFilesRecursive(full, base));
-      } else {
-        results.push(path.posix.relative(base, full));
-      }
-    }
-    return results;
+  /** Размер объекта в байтах. */
+  async getObjectSize(key: string): Promise<number> {
+    const res = await this.client.send(new HeadObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+    }));
+    return res.ContentLength ?? 0;
+  }
+
+  /** Байты [offset, offset+length) объекта — range-GET, без скачивания целиком. */
+  async getObjectRange(key: string, offset: number, length: number): Promise<Buffer> {
+    const res = await this.client.send(new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Range: `bytes=${offset}-${offset + length - 1}`,
+    }));
+    return Buffer.from(await res.Body!.transformToByteArray());
   }
 
   /**
@@ -131,8 +129,8 @@ export class S3Service {
   }
 
   /**
-   * Одиночный маленький объект (картинки-превью). Для больших файлов —
-   * uploadDirectory (потоковый multipart).
+   * Одиночный маленький объект (картинки-превью, плейлисты). Для больших
+   * файлов — uploadFiles (потоковый multipart).
    */
   async putObject(key: string, body: Buffer, contentType: string): Promise<void> {
     await this.client.send(new PutObjectCommand({
