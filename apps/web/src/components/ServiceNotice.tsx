@@ -11,7 +11,7 @@ import { CheckCircle, X } from '@phosphor-icons/react';
  * следующего захода на страницу.
  *
  * До SHOW_UNTIL её видят все зрители на каждом заходе; только закрытие
- * крестиком запоминается в localStorage. После SHOW_UNTIL не показывается
+ * крестиком (или переход по ссылке из неё) запоминается в localStorage. После SHOW_UNTIL не показывается
  * никому — убирать её отдельной выкаткой не нужно, а сам компонент можно
  * удалить при случае.
  *
@@ -92,7 +92,13 @@ export function ServiceNotice({ showArchiveLink = false }: { showArchiveLink?: b
                 {showArchiveLink && (
                   <>
                     {' '}
-                    <Link href="/archive" className="text-brand no-underline hover:text-brand-hover transition-colors whitespace-nowrap">
+                    {/* Переход по ссылке — тоже «прочитано»: иначе на /archive та же
+                        плашка встретила бы зрителя ещё раз. */}
+                    <Link
+                      href="/archive"
+                      onClick={rememberClosed}
+                      className="text-brand no-underline hover:text-brand-hover transition-colors whitespace-nowrap"
+                    >
                       Перейти в архив →
                     </Link>
                   </>
