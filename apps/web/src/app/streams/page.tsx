@@ -7,6 +7,7 @@ import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { OrgCard, SkeletonCard } from '@/components/OrgCard';
 import { AdCatalogBanner } from '@/components/AdCatalogBanner';
+import { ServiceNotice } from '@/components/ServiceNotice';
 import { fadeUp, staggerContainer, cardFadeUp } from '@/lib/motion';
 import type { CatalogItem } from '@/lib/types';
 import { Broadcast, TelevisionSimple } from '@phosphor-icons/react';
@@ -26,6 +27,7 @@ export default function StreamsPage() {
       <Header />
 
       <main className="flex-1 max-w-[1400px] mx-auto px-4 sm:px-6 py-8 w-full">
+        <ServiceNotice showArchiveLink />
         <motion.section initial="hidden" animate="visible" variants={staggerContainer}>
           <motion.h2 variants={fadeUp} className="flex items-center gap-2 text-lg font-semibold text-zinc-50 tracking-tight mb-5">
             <Broadcast size={18} weight="fill" className="text-brand animate-pulse" />

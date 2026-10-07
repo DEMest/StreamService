@@ -8,6 +8,7 @@ import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { OrgAvatar } from '@/components/OrgAvatar';
 import { AdCatalogBanner } from '@/components/AdCatalogBanner';
+import { ServiceNotice } from '@/components/ServiceNotice';
 import { fadeUp, staggerContainer, cardFadeUp } from '@/lib/motion';
 import { API_BASE, type ArchiveFeedItem } from '@/lib/types';
 import { Monitor, Play, VideoCamera } from '@phosphor-icons/react';
@@ -46,6 +47,7 @@ export default function ArchivePage() {
       <Header />
 
       <main className="flex-1 max-w-[1400px] mx-auto px-4 sm:px-6 py-8 w-full">
+        <ServiceNotice />
         <motion.section initial="hidden" animate="visible" variants={staggerContainer}>
           <motion.h2 variants={fadeUp} className="text-lg font-semibold text-zinc-50 tracking-tight mb-2">
             Архив трансляций
