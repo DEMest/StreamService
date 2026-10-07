@@ -112,10 +112,10 @@ function build(L) {
           y: 520,
           title: 'Архив (recording/)',
           lines: [
-            'ffprobe + ffmpeg -c copy →',
-            'HLS-VOD + MP4 → S3 → чистка scratch',
+            'ffmpeg -c copy → download.mp4,',
+            'VOD = байт-диапазоны → S3',
             '302 → presigned URL зрителю',
-            'cron: чистка 03:00 (TTL 7 дней),',
+            'хранение без срока;',
             'retry 03:30, glue каждые 5 мин',
           ],
         },
@@ -146,7 +146,7 @@ function build(L) {
     L.store({
       x: 1290, y: 565, w: 180, h: 95,
       title: 'MinIO / S3-хранилище',
-      lines: ['архив: HLS-VOD, MP4,', 'превью; картинки орг.', 'presigned, /static/, 7 дн'],
+      lines: ['архив: MP4 + плейлисты,', 'превью; картинки орг.', 'presigned, /static/'],
     }),
   );
 

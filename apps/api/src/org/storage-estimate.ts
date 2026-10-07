@@ -80,7 +80,7 @@ export function hourlyRate(usedBytes: number, durationSeconds: number): HourlyRa
  *
  * Считаем по пику (FINALIZE_PEAK_FACTOR), а не по установившемуся следу:
  * число должно отвечать на вопрос орги «моя трансляция доедет до архива?»,
- * а самый узкий момент — это заливка, когда запись лежит на томе дважды.
+ * а самый узкий момент — это заливка, когда запись лежит на томе трижды.
  * Занижать здесь безопасно, завышать — нет.
  */
 export function hoursLeft(freeBytes: number, bytesPerHour: number): number {

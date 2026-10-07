@@ -365,6 +365,27 @@ describe('RecordingService', () => {
     });
   });
 
+  describe('deleteRecordingsForStreams', () => {
+    it('удаляет S3-префиксы всех записей переданных Stream\'ов', async () => {
+      mockPrisma.recording.findMany.mockResolvedValue([
+        { manifestPath: 'archive/org/s/b1/master.m3u8' },
+        { manifestPath: null },
+        { manifestPath: 'archive/org/s/b2/master.m3u8' },
+      ]);
+      await service.deleteRecordingsForStreams(['s1']);
+      expect(mockPrisma.recording.findMany).toHaveBeenCalledWith({
+        where: { broadcast: { streamId: { in: ['s1'] } } },
+        select: { manifestPath: true },
+      });
+      expect(mockS3.deleteByPrefix.mock.calls.map((c) => c[0])).toEqual(['archive/org/s/b1', 'archive/org/s/b2']);
+    });
+
+    it('пустой список — ни запроса', async () => {
+      await service.deleteRecordingsForStreams([]);
+      expect(mockPrisma.recording.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('deleteRecordingByBroadcastId', () => {
     it('uses findMany since broadcastId is no longer unique', async () => {
       mockPrisma.recording.findMany.mockResolvedValue([]);
@@ -446,6 +467,39 @@ describe('RecordingService', () => {
       );
       // Исходники уже на месте — повторный перенос из live/ не запускался.
       expect(spyRenameSync).not.toHaveBeenCalled();
+    });
+
+    it('повтор берёт уже готовую склейку, если она проходит сверку, — без новой склейки', async () => {
+      mockPrisma.recording.findMany.mockResolvedValue([failedRow]);
+      mockPrisma.recording.update.mockResolvedValue({});
+      withSources(spyExistsSync, spyReaddirSync); // download.mp4 тоже «существует»
+      const concat = jest.spyOn(service as any, 'buildDownloadMp4');
+
+      await service.retryFailed();
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setImmediate(r));
+      }
+
+      expect(concat).not.toHaveBeenCalled();
+      expect(mockS3.uploadFiles).toHaveBeenCalled();
+    });
+
+    it('повтор склеивает заново, если готовая склейка сверку не проходит', async () => {
+      mockPrisma.recording.findMany.mockResolvedValue([failedRow]);
+      mockPrisma.recording.update.mockResolvedValue({});
+      withSources(spyExistsSync, spyReaddirSync);
+      (service as any).vodFromFile
+        .mockRejectedValueOnce(new Error('truncated mdat'))
+        .mockResolvedValueOnce({ playlist: '#EXTM3U\n', duration: 10.5 });
+      const concat = jest.spyOn(service as any, 'buildDownloadMp4');
+
+      await service.retryFailed();
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setImmediate(r));
+      }
+
+      expect(concat).toHaveBeenCalledTimes(1);
+      expect(mockS3.uploadFiles).toHaveBeenCalled();
     });
 
     it('marks the recording failed again when the rebuild also fails', async () => {
@@ -653,37 +707,45 @@ describe('RecordingService', () => {
       const order: string[] = [];
       mockS3.putObject.mockImplementation(async (key: string) => { order.push(`put ${key}`); });
       mockS3.deleteByPrefix.mockImplementation(async (prefix: string) => { order.push(`delete ${prefix}`); });
+      mockPrisma.recording.update.mockImplementation(async () => { order.push('db'); });
 
       await service.migrateLegacyArchives();
 
       expect(mockS3.getObjectRange.mock.calls[0][0]).toBe('archive/org/s/b1/download.mp4');
-      // Сначала новый плейлист, затем master, дубль — последним.
+      // Сначала новый плейлист, затем master, дубль — после, отметка в БД — последней.
       expect(order).toEqual([
         'put archive/org/s/b1/vod.m3u8',
         'put archive/org/s/b1/master.m3u8',
-        'delete archive/org/s/b1/slot-1/',
+        'delete archive/org/s/b1/slot-',
+        'db',
       ]);
       const vod = String(mockS3.putObject.mock.calls[0][1]);
       expect(vod).toContain('#EXT-X-MAP:URI="download.mp4",BYTERANGE=');
       expect(vod.match(/#EXT-X-BYTERANGE:/g)).toHaveLength(1 + 1); // 5×2 с → куски 6 с + 4 с
       expect(String(mockS3.putObject.mock.calls[1][1])).toBe(NEW_MASTER);
+      // expiresAt: null — запись на политике «без срока» и больше не выбирается.
       expect(mockPrisma.recording.update).toHaveBeenCalledWith({
         where: { id: 'r-old' },
-        data: { fileSize: file.length },
+        data: { fileSize: file.length, expiresAt: null },
       });
     });
 
-    it('уже переведённую запись не трогает', async () => {
+    it('master уже новый (прошлый старт прервался) — без повторной сверки дочищает дубль и отмечает запись', async () => {
       mockPrisma.recording.findMany.mockResolvedValue([
-        { id: 'r-new', manifestPath: 'archive/org/s/b2/master.m3u8', duration: 10 },
+        { id: 'r-half', manifestPath: 'archive/org/s/b2/master.m3u8', duration: 10 },
       ]);
+      mockPrisma.recording.update.mockResolvedValue({});
       mockS3.getObjectText.mockResolvedValue(NEW_MASTER);
+      s3WithDownload();
 
       await service.migrateLegacyArchives();
 
-      expect(mockS3.getObjectSize).not.toHaveBeenCalled();
+      expect(mockS3.getObjectRange).not.toHaveBeenCalled();
       expect(mockS3.putObject).not.toHaveBeenCalled();
-      expect(mockS3.deleteByPrefix).not.toHaveBeenCalled();
+      expect(mockS3.deleteByPrefix).toHaveBeenCalledWith('archive/org/s/b2/slot-');
+      expect(mockPrisma.recording.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ expiresAt: null }) }),
+      );
     });
 
     it('download.mp4 короче записи — ничего не переключает и дубль НЕ удаляет', async () => {
@@ -727,17 +789,18 @@ describe('RecordingService', () => {
 
       await service.migrateLegacyArchives();
 
-      expect(mockS3.deleteByPrefix).toHaveBeenCalledWith('archive/org/s/ok/slot-1/');
+      expect(mockS3.deleteByPrefix).toHaveBeenCalledWith('archive/org/s/ok/slot-');
       expect(mockS3.deleteByPrefix).toHaveBeenCalledTimes(1);
     });
 
-    it('выбирает только готовые записи с манифестом', async () => {
+    it('выбирает только готовые записи старой политики (с expiresAt) — переведённые не стоят ни запроса', async () => {
       mockPrisma.recording.findMany.mockResolvedValue([]);
       await service.migrateLegacyArchives();
       expect(mockPrisma.recording.findMany).toHaveBeenCalledWith({
-        where: { status: 'ready', manifestPath: { not: null } },
+        where: { status: 'ready', manifestPath: { not: null }, expiresAt: { not: null } },
         select: { id: true, manifestPath: true, duration: true },
       });
+      expect(mockS3.getObjectText).not.toHaveBeenCalled();
     });
   });
 });

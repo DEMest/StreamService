@@ -1,5 +1,11 @@
 import type { Fmp4Fragment } from './fmp4-index';
 
+/**
+ * Склейка всех сегментов записи — единственная копия видео в архиве: и файл
+ * для скачивания, и (байтовыми диапазонами через vod.m3u8) поток для плеера.
+ */
+export const DOWNLOAD_FILE = 'download.mp4';
+
 /** Медиаплейлист записи — рядом с master.m3u8 и download.mp4. */
 export const VOD_PLAYLIST = 'vod.m3u8';
 

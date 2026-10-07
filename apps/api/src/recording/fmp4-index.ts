@@ -40,11 +40,12 @@ export interface Fmp4Index {
 }
 
 /**
- * Окно одного чтения. `moof` с двумя дорожками на GOP весит единицы КБ, так
- * что `moof` целиком и заголовок следующего за ним `mdat` приходят одним
- * запросом — по S3 это ровно один range-GET на фрагмент.
+ * Окно одного чтения. `moof` с двумя дорожками на GOP весит единицы КБ (до
+ * ~15 КБ при 60 к/с и длинном GOP), так что `moof` целиком и заголовок
+ * следующего за ним `mdat` приходят одним запросом — по S3 это ровно один
+ * range-GET на фрагмент.
  */
-const READ_WINDOW = 16 * 1024;
+const READ_WINDOW = 64 * 1024;
 /** `moov` и `moof` — метаданные; больше этого — битый файл, а не большой. */
 const MAX_META_BOX = 16 * 1024 * 1024;
 
@@ -64,7 +65,8 @@ interface TrackInfo {
 }
 
 interface MoovInfo {
-  videoTrackId: number;
+  /** Дорожка, по которой меряется время: видео, а без него — первая. */
+  timeTrackId: number;
   tracks: Map<number, TrackInfo>;
 }
 
@@ -137,8 +139,9 @@ function findChild(buf: Buffer, parent: Box, type: string): Box | undefined {
   return undefined;
 }
 
-function parseMoov(buf: Buffer): MoovInfo {
-  const moov: Box = { type: 'moov', start: 0, body: 8, end: buf.length };
+/** `buf` — бокс целиком, `headerLen` — длина его заголовка (8 или 16 при largesize). */
+function parseMoov(buf: Buffer, headerLen: number): MoovInfo {
+  const moov: Box = { type: 'moov', start: 0, body: headerLen, end: buf.length };
   const tracks = new Map<number, TrackInfo>();
   let videoTrackId = 0;
   let firstTrackId = 0;
@@ -173,22 +176,22 @@ function parseMoov(buf: Buffer): MoovInfo {
   // Без видео (чистый звук) шкалой времени служит первая дорожка.
   const timeTrack = videoTrackId || firstTrackId;
   if (!timeTrack || !tracks.get(timeTrack)?.timescale) throw new Error('moov has no usable track');
-  return { videoTrackId: timeTrack, tracks };
+  return { timeTrackId: timeTrack, tracks };
 }
 
 /**
  * Время начала (`tfdt`) и суммарная длительность сэмплов (`trun`) фрагмента
  * по дорожке-шкале — в её тиках. `start` = null, если `tfdt` не записан.
  */
-function parseMoof(buf: Buffer, moov: MoovInfo): { start: number | null; ticks: number } | null {
-  const moof: Box = { type: 'moof', start: 0, body: 8, end: buf.length };
+function parseMoof(buf: Buffer, headerLen: number, moov: MoovInfo): { start: number | null; ticks: number } | null {
+  const moof: Box = { type: 'moof', start: 0, body: headerLen, end: buf.length };
   for (const traf of children(buf, moof.body, moof.end)) {
     if (traf.type !== 'traf') continue;
     const tfhd = findChild(buf, traf, 'tfhd');
     if (!tfhd) continue;
     const tfhdFlags = buf.readUIntBE(tfhd.body + 1, 3);
     const trackId = buf.readUInt32BE(tfhd.body + 4);
-    if (trackId !== moov.videoTrackId) continue;
+    if (trackId !== moov.timeTrackId) continue;
 
     // Необязательные поля tfhd идут строго в порядке флагов (ISO/IEC 14496-12, 8.8.7).
     let p = tfhd.body + 8;
@@ -236,13 +239,13 @@ export async function indexFmp4(source: ByteSource): Promise<Fmp4Index> {
     const box = await readBoxHeader(src, offset);
     if (box.type === 'moov') {
       if (box.end - box.start > MAX_META_BOX) throw new Error('moov is too large');
-      moov = parseMoov(await src.read(box.start, box.end - box.start));
+      moov = parseMoov(await src.read(box.start, box.end - box.start), box.body - box.start);
     } else if (box.type === 'moof') {
       if (!moov) throw new Error('moof before moov');
       if (pendingMoof) throw new Error(`moof at ${pendingMoof.offset} has no mdat`);
       if (box.end - box.start > MAX_META_BOX) throw new Error(`moof at ${box.start} is too large`);
       if (initLength < 0) initLength = box.start;
-      const timing = parseMoof(await src.read(box.start, box.end - box.start), moov);
+      const timing = parseMoof(await src.read(box.start, box.end - box.start), box.body - box.start, moov);
       pendingMoof = { offset: box.start, start: timing?.start ?? null, ticks: timing?.ticks ?? 0 };
     } else if (box.type === 'mdat' && pendingMoof) {
       raw.push({ ...pendingMoof, end: box.end });
@@ -255,7 +258,7 @@ export async function indexFmp4(source: ByteSource): Promise<Fmp4Index> {
   if (pendingMoof) throw new Error(`moof at ${pendingMoof.offset} has no mdat`);
   if (raw.length === 0) throw new Error('no fragments');
 
-  const timescale = moov.tracks.get(moov.videoTrackId)!.timescale;
+  const timescale = moov.tracks.get(moov.timeTrackId)!.timescale;
   const fragments = raw.map((f, i) => {
     // Длительность — по разнице tfdt соседних фрагментов: она учитывает и
     // возможные дыры в таймлайне. Для последнего (и при отсутствии tfdt) —

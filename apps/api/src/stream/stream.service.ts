@@ -835,7 +835,12 @@ export class StreamService {
       );
     }
 
-    // 2) Prisma delete. Broadcast'ы Stream'а удалятся через onDelete:Cascade,
+    // 2) Архив записей в S3 — до каскада, пока Recording'и ещё можно найти.
+    //    Ошибка хранилища прерывает удаление: лучше повторить его, чем оставить
+    //    видео, которое уже никто не увидит и не удалит.
+    await this.recording.deleteRecordingsForStreams([streamId]);
+
+    // 3) Prisma delete. Broadcast'ы Stream'а удалятся через onDelete:Cascade,
     //    Recording'и — через каскад от Broadcast.
     await this.prisma.stream.delete({ where: { id: streamId } });
     return { ok: true };

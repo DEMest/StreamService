@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
+import { RecordingService } from '../recording/recording.service';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -8,6 +9,7 @@ export class AdminService implements OnModuleInit {
   constructor(
     private prisma: PrismaService,
     private mediamtx: MediamtxService,
+    private recording: RecordingService,
   ) {}
 
   async onModuleInit() {
@@ -101,9 +103,12 @@ export class AdminService implements OnModuleInit {
     const org = await this.prisma.organization.findUnique({
       where: { slug },
       select: {
-        streams: { select: { slug: true } },
+        streams: { select: { id: true, slug: true } },
       },
     });
+
+    // Архив записей в S3 — тоже до каскада, по той же причине.
+    if (org) await this.recording.deleteRecordingsForStreams(org.streams.map((s) => s.id));
 
     try {
       await this.prisma.organization.delete({ where: { slug } });

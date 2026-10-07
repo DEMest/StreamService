@@ -11,6 +11,7 @@ import { randomBytes } from 'crypto';
 import {
   buildByteRangeVodPlaylist,
   buildMasterPlaylist,
+  DOWNLOAD_FILE,
   groupFragments,
   legacySlotDir,
   VOD_PLAYLIST,
@@ -29,15 +30,12 @@ const FFPROBE_TIMEOUT_MS = 30_000;
 const FFMPEG_CONCAT_TIMEOUT_MS = 60 * 60_000;
 const FFMPEG_FRAME_TIMEOUT_MS = 30_000;
 const GLUE_TIMEOUT_MINUTES = parseInt(process.env.RECORDING_GLUE_TIMEOUT_MINUTES ?? '60', 10);
-/**
- * Склейка всех сегментов записи — единственная копия видео в архиве: и файл
- * для скачивания, и (байтовыми диапазонами через vod.m3u8) поток для плеера.
- */
-const DOWNLOAD_FILE = 'download.mp4';
 const MASTER_PLAYLIST = 'master.m3u8';
 const PREVIEW_FILE = 'preview.jpg';
 /** Приближение; плееру с единственным variant'ом выбирать не из чего. */
 const MASTER_BANDWIDTH = 5_000_000;
+/** Если ffprobe не отдал размер кадра (или в старом master его нет). */
+const DEFAULT_RESOLUTION = '1920x1080';
 /**
  * Допуск сверки длительности склейки с исходниками: доли секунды на стыках
  * сегментов и разница длин аудио/видео — норма, минуты — недописанный файл.
@@ -145,15 +143,21 @@ export class RecordingService {
       if (i === 0) first = probe;
     }
 
-    // Step 3: склейка — единственная копия видео в архиве.
-    await this.buildDownloadMp4(slotDir, broadcastDir);
+    // Step 3: склейка — единственная копия видео в архиве. Повтор после
+    // упавшей заливки берёт уже готовую, если она проходит сверку: склеивать
+    // заново десятки ГБ на диске, общем с эфиром, незачем.
+    // Step 4: vod.m3u8 — байтовые диапазоны download.mp4 по ключевым кадрам.
     const downloadPath = path.join(broadcastDir, DOWNLOAD_FILE);
-
-    // Step 4: vod.m3u8 — байтовые диапазоны download.mp4 по ключевым кадрам;
-    // master.m3u8 — единственный variant, указывающий на него.
-    const vod = await this.vodFromFile(downloadPath, expectedDuration);
+    let vod = fs.existsSync(downloadPath)
+      ? await this.vodFromFile(downloadPath, expectedDuration).catch(() => null)
+      : null;
+    if (!vod) {
+      await this.buildDownloadMp4(slotDir, broadcastDir);
+      vod = await this.vodFromFile(downloadPath, expectedDuration);
+    }
+    // master.m3u8 — единственный variant, указывающий на vod.m3u8.
     fs.writeFileSync(path.join(broadcastDir, VOD_PLAYLIST), vod.playlist);
-    const resolution = first.width && first.height ? `${first.width}x${first.height}` : '1920x1080';
+    const resolution = first.width && first.height ? `${first.width}x${first.height}` : DEFAULT_RESOLUTION;
     fs.writeFileSync(
       path.join(broadcastDir, MASTER_PLAYLIST),
       buildMasterPlaylist({ uri: VOD_PLAYLIST, bandwidth: MASTER_BANDWIDTH, resolution }),
@@ -240,6 +244,9 @@ export class RecordingService {
         manifestPath: `${keyPrefix}/${MASTER_PLAYLIST}`,
         fileSize,
         duration,
+        // Запись, созданная до отключения автоудаления и пересобранная
+        // retryFailed, тоже переходит на «без срока».
+        expiresAt: null,
       },
     });
     if (hasPreview) {
@@ -339,6 +346,23 @@ export class RecordingService {
     return path.posix.dirname(recording.manifestPath);
   }
 
+  /**
+   * Архивы всех записей Stream'ов — ДО каскадного удаления строк: после него
+   * S3-префиксы не найти, и видео осталось бы в хранилище навсегда, хотя
+   * орге обещано, что записи удалены. Автоудаления нет, так что подобрать
+   * такой хвост больше некому.
+   */
+  async deleteRecordingsForStreams(streamIds: string[]): Promise<void> {
+    if (streamIds.length === 0) return;
+    const recordings = await this.prisma.recording.findMany({
+      where: { broadcast: { streamId: { in: streamIds } } },
+      select: { manifestPath: true },
+    });
+    for (const rec of recordings) {
+      if (rec.manifestPath) await this.s3.deleteByPrefix(path.posix.dirname(rec.manifestPath));
+    }
+  }
+
   async deleteRecordingByBroadcastId(broadcastId: string): Promise<void> {
     const recordings = await this.prisma.recording.findMany({ where: { broadcastId } });
     for (const rec of recordings) {
@@ -409,8 +433,14 @@ export class RecordingService {
    * нему строится vod.m3u8, master переключается на него, а slot-N/ (полный
    * дубль тех же байт) удаляется.
    *
+   * Признак «ещё не переведена» — заполненный expiresAt: до этой версии он
+   * был обязательным, теперь не ставится. Перевод его обнуляет — запись
+   * переходит на новую политику «без срока», и следующий старт её уже не
+   * выбирает. Когда в Recording не останется строк с expiresAt, эту миграцию
+   * и legacySlotDir можно удалить.
+   *
    * Фоном при старте: API не ждёт, ошибка одной записи не останавливает
-   * остальные. Идемпотентно — переведённая запись стоит одного GET master.m3u8.
+   * остальные и повторится на следующем старте.
    */
   onApplicationBootstrap(): void {
     this.migrateLegacyArchives().catch((err: any) =>
@@ -418,11 +448,11 @@ export class RecordingService {
   }
 
   async migrateLegacyArchives(): Promise<void> {
-    const ready = await this.prisma.recording.findMany({
-      where: { status: 'ready', manifestPath: { not: null } },
+    const legacy = await this.prisma.recording.findMany({
+      where: { status: 'ready', manifestPath: { not: null }, expiresAt: { not: null } },
       select: { id: true, manifestPath: true, duration: true },
     });
-    for (const rec of ready) {
+    for (const rec of legacy) {
       try {
         await this.migrateLegacyArchive(rec.id, rec.manifestPath!, rec.duration ?? 0);
       } catch (err: any) {
@@ -432,38 +462,45 @@ export class RecordingService {
   }
 
   private async migrateLegacyArchive(recordingId: string, manifestPath: string, expectedDuration: number): Promise<void> {
-    const master = await this.s3.getObjectText(manifestPath);
-    const slotDir = legacySlotDir(master);
-    if (!slotDir) return;
-    // Без эталона сверить download.mp4 не с чем — а дубль удаляется только
-    // после сверки.
-    if (!expectedDuration) throw new Error('recording has no duration to verify download.mp4 against');
-
     const keyPrefix = path.posix.dirname(manifestPath);
     const downloadKey = `${keyPrefix}/${DOWNLOAD_FILE}`;
+    const master = await this.s3.getObjectText(manifestPath);
     const size = await this.s3.getObjectSize(downloadKey);
-    // Сверка с длительностью записи: дубль удаляется ниже, и недописанный
-    // download.mp4 остался бы единственной копией.
-    const vod = await this.vodFromSource(
-      { size, read: (offset, length) => this.s3.getObjectRange(downloadKey, offset, length) },
-      expectedDuration,
-    );
-    const resolution = master.match(/RESOLUTION=(\d+x\d+)/)?.[1] ?? '1920x1080';
 
-    // Порядок: vod.m3u8 → master → удаление дубля. Плеер ни в какой момент не
-    // видит master, указывающий в пустоту, а дубль уходит, только когда
-    // новый master уже на месте.
-    const m3u8 = 'application/vnd.apple.mpegurl';
-    await this.s3.putObject(`${keyPrefix}/${VOD_PLAYLIST}`, Buffer.from(vod.playlist), m3u8);
-    await this.s3.putObject(
-      manifestPath,
-      Buffer.from(buildMasterPlaylist({ uri: VOD_PLAYLIST, bandwidth: MASTER_BANDWIDTH, resolution })),
-      m3u8,
-    );
-    await this.s3.deleteByPrefix(`${keyPrefix}/${slotDir}/`);
+    // master ещё старый — сверить download.mp4 и переключить master. Если он
+    // уже новый, это сделал прошлый старт, не дойдя до удаления дубля и
+    // обнуления expiresAt, — тогда доделываем только их.
+    if (legacySlotDir(master)) {
+      // Без эталона сверить download.mp4 не с чем — а дубль удаляется только
+      // после сверки.
+      if (!expectedDuration) throw new Error('recording has no duration to verify download.mp4 against');
+      // Сверка с длительностью записи: дубль удаляется ниже, и недописанный
+      // download.mp4 остался бы единственной копией.
+      const vod = await this.vodFromSource(
+        { size, read: (offset, length) => this.s3.getObjectRange(downloadKey, offset, length) },
+        expectedDuration,
+      );
+      const resolution = master.match(/RESOLUTION=(\d+x\d+)/)?.[1] ?? DEFAULT_RESOLUTION;
+
+      // Порядок: vod.m3u8 → master → удаление дубля. Плеер ни в какой момент
+      // не видит master, указывающий в пустоту, а дубль уходит, только когда
+      // новый master уже на месте.
+      const m3u8 = 'application/vnd.apple.mpegurl';
+      await this.s3.putObject(`${keyPrefix}/${VOD_PLAYLIST}`, Buffer.from(vod.playlist), m3u8);
+      await this.s3.putObject(
+        manifestPath,
+        Buffer.from(buildMasterPlaylist({ uri: VOD_PLAYLIST, bandwidth: MASTER_BANDWIDTH, resolution })),
+        m3u8,
+      );
+    }
+
+    await this.s3.deleteByPrefix(`${keyPrefix}/slot-`);
     // fileSize старых записей считался по slot-N/ — теперь след записи в
     // хранилище один download.mp4.
-    await this.prisma.recording.update({ where: { id: recordingId }, data: { fileSize: size } });
+    await this.prisma.recording.update({
+      where: { id: recordingId },
+      data: { fileSize: size, expiresAt: null },
+    });
     this.logger.log(`Legacy archive ${recordingId} migrated to byte-range VOD (${keyPrefix})`);
   }
 

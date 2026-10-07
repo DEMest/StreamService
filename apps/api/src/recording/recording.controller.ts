@@ -1,6 +1,7 @@
 import { Controller, Get, Logger, Param, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { RecordingService } from './recording.service';
+import { DOWNLOAD_FILE } from './hls-vod';
 import { S3Service } from '../storage/s3.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -265,7 +266,7 @@ export class RecordingController {
     }
 
     const keyPrefix = await this.recording.getRecordingKeyPrefix(broadcastId, 1);
-    const key = `${keyPrefix}/download.mp4`;
+    const key = `${keyPrefix}/${DOWNLOAD_FILE}`;
     const fileName = `${broadcast.title.replace(/[^a-zA-Z0-9а-яА-ЯёЁ\s_-]/g, '')}.mp4`;
 
     const url = await this.s3.getPresignedUrl(key, {
