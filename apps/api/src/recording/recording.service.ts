@@ -32,8 +32,8 @@ const FFMPEG_FRAME_TIMEOUT_MS = 30_000;
 const GLUE_TIMEOUT_MINUTES = parseInt(process.env.RECORDING_GLUE_TIMEOUT_MINUTES ?? '60', 10);
 /**
  * Пауза между стартом API и пересборкой записей, прерванных рестартом:
- * рестарт — это деплой, и склейка десятков ГБ не должна ложиться на диск
- * раньше, чем API поднимется и снова начнёт раздавать эфир.
+ * рестарт — это деплой, и склейка десятков ГБ не должна ложиться на диск,
+ * пока deploy.sh ещё проверяет, что эфиры и раздача пережили выкатку.
  */
 const RESUME_INTERRUPTED_DELAY_MS = 2 * 60_000;
 const MASTER_PLAYLIST = 'master.m3u8';
@@ -536,13 +536,8 @@ export class RecordingService {
    *
    * Фоном при старте: API не ждёт, ошибка одной записи не останавливает
    * остальные и повторится на следующем старте.
-   *
-   * Сброс прерванных записей, наоборот, ждём: Nest открывает порт только
-   * после этого хука, так что вебхук не успеет завести новую processing-запись
-   * этого процесса, и сброс её не заденет.
    */
-  async onApplicationBootstrap(): Promise<void> {
-    await this.failInterruptedRecordings();
+  onApplicationBootstrap(): void {
     this.migrateLegacyArchives().catch((err: any) =>
       this.logger.error(`Legacy archive migration failed: ${err?.message ?? err}`));
   }
@@ -657,8 +652,14 @@ export class RecordingService {
    * конверсией и со scratch failed-записей, из которого их пересобирает retryFailed.
    * Удаляется только broadcastDir без строки Recording; каталоги org и
    * стримов не удаляются никогда.
+   *
+   * До чистки — сброс записей, прерванных рестартом. Именно здесь: Nest
+   * открывает порт и запускает кроны (finalizeStaleGlue тоже создаёт записи)
+   * только после onModuleInit всех модулей, так что новая processing-запись
+   * этого процесса появиться ещё не может, и сброс её не заденет.
    */
   async onModuleInit(): Promise<void> {
+    await this.failInterruptedRecordings();
     if (!fs.existsSync(ARCHIVE_ROOT)) return;
 
     const broadcastDirs: string[] = [];

@@ -623,17 +623,20 @@ describe('RecordingService', () => {
     // Конверсия идёт в процессе API; деплой (каждый мерж в main) его
     // перезапускает, и запись оставалась в processing навсегда: retryFailed
     // выбирает только failed.
+    // Ответ БД приходит не в той же микрозадаче, а через макрозадачу — как у
+    // настоящего запроса. Иначе тест не отличил бы ожидаемый сброс от фонового.
     const processingIds = (ids: string[]) => {
       mockPrisma.recording.findMany.mockImplementation(({ where }: any) =>
-        Promise.resolve(where.status === 'processing' ? ids.map((id) => ({ id })) : []));
+        new Promise((resolve) => setImmediate(() =>
+          resolve(where.status === 'processing' ? ids.map((id) => ({ id })) : []))));
     };
 
     it('старт переводит processing прошлого процесса в failed — до того, как API откроет порт', async () => {
       processingIds(['rec-a', 'rec-b']);
 
-      // Nest открывает порт после onApplicationBootstrap: сброс обязан
-      // завершиться внутри хука, а не фоном.
-      await service.onApplicationBootstrap();
+      // Nest открывает порт и запускает кроны после onModuleInit всех
+      // модулей: сброс обязан завершиться внутри хука, а не фоном.
+      await service.onModuleInit();
 
       expect(mockPrisma.recording.findMany).toHaveBeenCalledWith({
         where: { status: 'processing' },
@@ -648,7 +651,7 @@ describe('RecordingService', () => {
     it('нет processing-записей — ничего не обновляет', async () => {
       processingIds([]);
 
-      await service.onApplicationBootstrap();
+      await service.onModuleInit();
 
       expect(mockPrisma.recording.updateMany).not.toHaveBeenCalled();
     });
@@ -656,7 +659,7 @@ describe('RecordingService', () => {
     it('ошибка БД при сбросе не роняет старт API', async () => {
       mockPrisma.recording.findMany.mockRejectedValueOnce(new Error('connection refused'));
 
-      await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
       expect(mockPrisma.recording.updateMany).not.toHaveBeenCalled();
     });
 
@@ -678,8 +681,7 @@ describe('RecordingService', () => {
       /** Старт сбросил rec-cut; дальше findMany отдаёт её как failed. */
       async function bootWithInterrupted() {
         processingIds(['rec-cut']);
-        await service.onApplicationBootstrap();
-        await flush();
+        await service.onModuleInit();
         jest.clearAllMocks();
         mockPrisma.recording.findMany.mockImplementation(({ where }: any) =>
           Promise.resolve(where.status === 'failed' ? [interrupted] : []));
