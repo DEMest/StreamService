@@ -114,7 +114,11 @@ model Recording {
   // Наружу отдаётся как number — см. toRecordingSummary (BigInt не сериализуется в JSON).
   fileSize     BigInt?
   duration     Int?
-  expiresAt    DateTime
+  // Не заполняется: автоудаление записей отключено, запись живёт, пока орга
+  // не удалит трансляцию. Колонка осталась от 7-дневного срока хранения —
+  // nullable, а не DROP, чтобы откат на прежнюю версию API не падал на
+  // вставке Recording.
+  expiresAt    DateTime?
   createdAt    DateTime  @default(now())
 
   @@unique([broadcastId, slotIndex])

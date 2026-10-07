@@ -62,7 +62,7 @@ describe('OrgService', () => {
       else process.env.S3_ENDPOINT = OLD_ENDPOINT;
     });
 
-    it('удваивает fileSize (сегменты + download.mp4) и считает только ready', async () => {
+    it('берёт fileSize как есть (download.mp4 — единственная копия) и считает только ready', async () => {
       process.env.S3_ENDPOINT = 'http://minio:9000';
       mockPrisma.recording.aggregate.mockResolvedValue({
         // _sum по bigint-колонке Prisma возвращает BigInt — арифметика ниже
@@ -78,13 +78,14 @@ describe('OrgService', () => {
         _sum: { fileSize: true, duration: true },
         _count: { _all: true },
       });
-      expect(r.archive.usedBytes).toBe(2_000_000_000);
+      expect(r.archive.usedBytes).toBe(1_000_000_000);
       expect(r.archive.recordingsCount).toBe(3);
       expect(r.archive.durationSeconds).toBe(3600);
-      expect(r.retentionDays).toBe(7);
-      // час эфира на 2 ГБ архива → расход считается по истории орги
+      // Автоудаления нет — срока хранения в ответе больше нет.
+      expect((r as any).retentionDays).toBeUndefined();
+      // час эфира на 1 ГБ архива → расход считается по истории орги
       expect(r.estimate.fromHistory).toBe(true);
-      expect(r.estimate.bytesPerHour).toBe(2_000_000_000);
+      expect(r.estimate.bytesPerHour).toBe(1_000_000_000);
     });
 
     it('переживает пустой архив (aggregate вернул NULL-суммы)', async () => {

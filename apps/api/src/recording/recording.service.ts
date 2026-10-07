@@ -8,22 +8,42 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
-import { buildHlsVodPlaylist, buildMasterPlaylist, FmpSegment } from './hls-vod';
+import {
+  buildByteRangeVodPlaylist,
+  buildMasterPlaylist,
+  groupFragments,
+  legacySlotDir,
+  VOD_PLAYLIST,
+} from './hls-vod';
+import { ByteSource, fileByteSource, indexFmp4 } from './fmp4-index';
 
 const execFileAsync = promisify(execFile);
 export const RECORDINGS_ROOT = '/recordings';
 const ARCHIVE_ROOT = '/recordings/archive';
-/**
- * Срок жизни записи (`Recording.expiresAt`), после которого cleanupExpired
- * (крон 03:00) сносит её префикс из S3. Экспортируется, потому что метрика
- * хранилища в дашборде орги показывает то же число — дублировать «7» в двух
- * местах нельзя, иначе они разъедутся.
- */
-export const RECORDING_RETENTION_DAYS = 7;
 const FFPROBE_TIMEOUT_MS = 30_000;
-const FFMPEG_CONCAT_TIMEOUT_MS = 120_000;
+/**
+ * Склейка многочасовой записи — это copy десятков гигабайт. Таймаут страхует
+ * только от зависшего процесса; оборванная по нему склейка в S3 не уедет —
+ * её отвергнет сверка длительности в vodFromSource.
+ */
+const FFMPEG_CONCAT_TIMEOUT_MS = 60 * 60_000;
 const FFMPEG_FRAME_TIMEOUT_MS = 30_000;
 const GLUE_TIMEOUT_MINUTES = parseInt(process.env.RECORDING_GLUE_TIMEOUT_MINUTES ?? '60', 10);
+/**
+ * Склейка всех сегментов записи — единственная копия видео в архиве: и файл
+ * для скачивания, и (байтовыми диапазонами через vod.m3u8) поток для плеера.
+ */
+const DOWNLOAD_FILE = 'download.mp4';
+const MASTER_PLAYLIST = 'master.m3u8';
+const PREVIEW_FILE = 'preview.jpg';
+/** Приближение; плееру с единственным variant'ом выбирать не из чего. */
+const MASTER_BANDWIDTH = 5_000_000;
+/**
+ * Допуск сверки длительности склейки с исходниками: доли секунды на стыках
+ * сегментов и разница длин аудио/видео — норма, минуты — недописанный файл.
+ */
+const DURATION_TOLERANCE_SECONDS = 10;
+const DURATION_TOLERANCE_RATIO = 0.002;
 
 @Injectable()
 export class RecordingService {
@@ -38,9 +58,6 @@ export class RecordingService {
     broadcastId: string,
     basePath: string,
   ): Promise<void> {
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + RECORDING_RETENTION_DAYS);
-
     // Segments lie directly in /recordings/live/<basePath>/.
     const segmentsDir = path.join(RECORDINGS_ROOT, 'live', basePath);
 
@@ -59,7 +76,7 @@ export class RecordingService {
     }
 
     const recording = await this.prisma.recording.create({
-      data: { broadcastId, slotIndex: 1, status: 'processing', expiresAt },
+      data: { broadcastId, slotIndex: 1, status: 'processing' },
     });
 
     this.convertRecording(recording.id, basePath, broadcastId, 1, files, segmentsDir).catch(err => {
@@ -68,10 +85,8 @@ export class RecordingService {
   }
 
   /**
-   * Конвертация: перемещает fmp4-сегменты в архив, генерирует HLS-VOD
-   * manifest + единый MP4 для скачивания, заливает готовый архив в S3.
-   * Финализация Recording (status='ready') происходит ТОЛЬКО после успешной
-   * заливки — иначе запись пометится «готовой», хотя объекта в S3 нет.
+   * Конвертация: перемещает fmp4-сегменты MediaMTX в scratch архива и
+   * собирает из них архив (buildAndUpload).
    */
   private async convertRecording(
     recordingId: string,
@@ -86,65 +101,13 @@ export class RecordingService {
     fs.mkdirSync(slotDir, { recursive: true });
 
     try {
-      // Step 1: переместить сегменты в slot-N/, переименовать в стабильный формат
-      const segments: FmpSegment[] = [];
-      let totalDuration = 0;
-      let firstWidth = 0;
-      let firstHeight = 0;
-
+      // Step 1: переместить сегменты в slot-N/, переименовать в стабильный формат.
+      // slot-N/ — только исходники склейки: в S3 они не уезжают.
       for (let i = 0; i < files.length; i++) {
-        const src = path.join(segmentsDir, files[i]);
         const stableName = `seg-${String(i + 1).padStart(4, '0')}.mp4`;
-        const dst = path.join(slotDir, stableName);
-
-        fs.renameSync(src, dst);
-
-        const probe = await this.probeMp4(dst);
-        segments.push({ filename: stableName, duration: probe.duration });
-        totalDuration += probe.duration;
-        if (i === 0) {
-          firstWidth = probe.width;
-          firstHeight = probe.height;
-        }
+        fs.renameSync(path.join(segmentsDir, files[i]), path.join(slotDir, stableName));
       }
-
-      // Step 2: написать slot-N/index.m3u8
-      const slotPlaylist = buildHlsVodPlaylist(segments);
-      fs.writeFileSync(path.join(slotDir, 'index.m3u8'), slotPlaylist);
-
-      // Step 3: написать master.m3u8 в broadcast-dir (variant ровно один).
-      // slotIndex — тот же, что у slotDir выше: master обязан ссылаться на
-      // каталог, в который реально легли сегменты.
-      const resolution = firstWidth && firstHeight ? `${firstWidth}x${firstHeight}` : '1920x1080';
-      const masterPlaylist = buildMasterPlaylist({
-        slotIndex,
-        bandwidth: 5_000_000,  // approximation; real value не критичен для variant-выбора плеера
-        resolution,
-      });
-      const masterPath = path.join(broadcastDir, 'master.m3u8');
-      fs.writeFileSync(masterPath, masterPlaylist);
-
-      // Step 4: собрать единый скачиваемый MP4 (один раз, пока сегменты локальные).
-      await this.buildDownloadMp4(slotDir, broadcastDir);
-
-      // Step 4.5: превью записи — кадр из середины первого сегмента, кладётся
-      // в broadcastDir и уезжает в S3 общей заливкой ниже. НЕ-фатально:
-      // запись важнее картинки (превью можно потом загрузить вручную).
-      await this.buildPreviewJpeg(
-        path.join(slotDir, segments[0].filename),
-        segments[0].duration,
-        broadcastDir,
-      ).catch((err: any) =>
-        this.logger.warn(`Preview frame failed for ${broadcastId}: ${err?.message ?? err}`),
-      );
-
-      // fileSize считаем только по slot-N/ (до заливки/удаления) — «честный»
-      // расход данного Recording'а, не всего broadcastDir.
-      const totalSize = this.getDirSize(slotDir);
-
-      // Step 5-6: заливка в S3 + финализация (общий код с retry-путём).
-      const keyPrefix = `archive/${mediamtxPath}/${broadcastId}`;
-      await this.uploadAndFinalize(recordingId, broadcastId, broadcastDir, keyPrefix, totalSize, Math.round(totalDuration));
+      await this.buildAndUpload(recordingId, broadcastId, mediamtxPath, broadcastDir, slotDir);
     } catch (err: any) {
       this.logger.error(`Conversion/upload failed for ${recordingId}: ${err.message}`);
       // Локальный broadcastDir НЕ удаляем при ошибке (ни конверсии, ни заливки) —
@@ -157,11 +120,103 @@ export class RecordingService {
   }
 
   /**
-   * Заливка готового broadcastDir в S3 + финализация Recording (status='ready',
-   * manifestPath=S3-ключ, локальный scratch удаляется ТОЛЬКО после успешной
-   * заливки). Вынесено из convertRecording, чтобы retryFailed мог возобновить
-   * упавшую ЗАЛИВКУ без повторной конверсии — после первой попытки сегменты
-   * уже перемещены из live/ в archive-scratch, и полный пайплайн их не найдёт.
+   * Сборка архива из исходников slot-N/: склейка download.mp4, плейлисты
+   * поверх неё, превью, заливка в S3 и финализация. Целиком повторяема — ей же
+   * пользуется retryFailed: всё, что лежит в broadcastDir помимо slot-N/,
+   * пересобирается заново.
+   */
+  private async buildAndUpload(
+    recordingId: string,
+    broadcastId: string,
+    mediamtxPath: string,
+    broadcastDir: string,
+    slotDir: string,
+  ): Promise<void> {
+    const sources = this.listSourceSegments(slotDir);
+    if (sources.length === 0) throw new Error(`no source segments in ${slotDir}`);
+
+    // Step 2: длительности исходников — эталон для сверки склейки; первый
+    // сегмент даёт разрешение для master и кадр для превью.
+    let expectedDuration = 0;
+    let first = { duration: 0, width: 0, height: 0 };
+    for (let i = 0; i < sources.length; i++) {
+      const probe = await this.probeMp4(path.join(slotDir, sources[i]));
+      expectedDuration += probe.duration;
+      if (i === 0) first = probe;
+    }
+
+    // Step 3: склейка — единственная копия видео в архиве.
+    await this.buildDownloadMp4(slotDir, broadcastDir);
+    const downloadPath = path.join(broadcastDir, DOWNLOAD_FILE);
+
+    // Step 4: vod.m3u8 — байтовые диапазоны download.mp4 по ключевым кадрам;
+    // master.m3u8 — единственный variant, указывающий на него.
+    const vod = await this.vodFromFile(downloadPath, expectedDuration);
+    fs.writeFileSync(path.join(broadcastDir, VOD_PLAYLIST), vod.playlist);
+    const resolution = first.width && first.height ? `${first.width}x${first.height}` : '1920x1080';
+    fs.writeFileSync(
+      path.join(broadcastDir, MASTER_PLAYLIST),
+      buildMasterPlaylist({ uri: VOD_PLAYLIST, bandwidth: MASTER_BANDWIDTH, resolution }),
+    );
+
+    // Step 5: превью записи — кадр из середины первого сегмента. НЕ-фатально:
+    // запись важнее картинки (превью можно потом загрузить вручную).
+    await this.buildPreviewJpeg(path.join(slotDir, sources[0]), first.duration, broadcastDir).catch((err: any) =>
+      this.logger.warn(`Preview frame failed for ${broadcastId}: ${err?.message ?? err}`),
+    );
+
+    // Step 6: заливка + финализация. fileSize — то, что запись реально
+    // занимает в хранилище, то есть download.mp4.
+    const fileSize = fs.statSync(downloadPath).size;
+    const keyPrefix = `archive/${mediamtxPath}/${broadcastId}`;
+    await this.uploadAndFinalize(recordingId, broadcastId, broadcastDir, keyPrefix, fileSize, Math.round(vod.duration));
+  }
+
+  /**
+   * vod.m3u8 по оглавлению fMP4 плюс сверка его длительности с ожидаемой.
+   * Склейка, покрывающая заметно меньше исходников, — недописанный файл: в
+   * архив он уйти не должен, потому что после заливки исходники удаляются.
+   */
+  private async vodFromSource(
+    source: ByteSource,
+    expectedDuration: number,
+  ): Promise<{ playlist: string; duration: number }> {
+    const index = await indexFmp4(source);
+    const chunks = groupFragments(index.fragments);
+    const duration = chunks.reduce((sum, c) => sum + c.duration, 0);
+    const tolerance = Math.max(DURATION_TOLERANCE_SECONDS, expectedDuration * DURATION_TOLERANCE_RATIO);
+    if (expectedDuration > 0 && Math.abs(duration - expectedDuration) > tolerance) {
+      throw new Error(
+        `${DOWNLOAD_FILE} covers ${duration.toFixed(1)}s, expected ${expectedDuration.toFixed(1)}s`,
+      );
+    }
+    return { playlist: buildByteRangeVodPlaylist(DOWNLOAD_FILE, index.initLength, chunks), duration };
+  }
+
+  private async vodFromFile(
+    filePath: string,
+    expectedDuration: number,
+  ): Promise<{ playlist: string; duration: number }> {
+    const source = await fileByteSource(filePath);
+    try {
+      return await this.vodFromSource(source, expectedDuration);
+    } finally {
+      await source.close();
+    }
+  }
+
+  private listSourceSegments(slotDir: string): string[] {
+    if (!fs.existsSync(slotDir)) return [];
+    return fs.readdirSync(slotDir)
+      .filter((f: string) => f.startsWith('seg-') && f.endsWith('.mp4'))
+      .sort();
+  }
+
+  /**
+   * Заливка готового архива в S3 + финализация Recording (status='ready',
+   * manifestPath=S3-ключ). Локальный scratch вместе с исходниками удаляется
+   * ТОЛЬКО после успешной заливки — иначе запись пометится «готовой», хотя
+   * объекта в S3 нет, а retryFailed будет не из чего пересобрать.
    */
   private async uploadAndFinalize(
     recordingId: string,
@@ -172,14 +227,17 @@ export class RecordingService {
     duration: number,
   ): Promise<void> {
     // Проверить ДО rmSync: после заливки scratch удаляется.
-    const hasPreview = fs.existsSync(path.join(broadcastDir, 'preview.jpg'));
-    await this.s3.uploadDirectory(broadcastDir, keyPrefix);
+    const hasPreview = fs.existsSync(path.join(broadcastDir, PREVIEW_FILE));
+    // Видео первым, плейлисты после: master не должен оказаться в S3 раньше
+    // того, на что он ссылается.
+    const files = [DOWNLOAD_FILE, VOD_PLAYLIST, MASTER_PLAYLIST, ...(hasPreview ? [PREVIEW_FILE] : [])];
+    await this.s3.uploadFiles(broadcastDir, files, keyPrefix);
     fs.rmSync(broadcastDir, { recursive: true, force: true });
     await this.prisma.recording.update({
       where: { id: recordingId },
       data: {
         status: 'ready',
-        manifestPath: `${keyPrefix}/master.m3u8`,
+        manifestPath: `${keyPrefix}/${MASTER_PLAYLIST}`,
         fileSize,
         duration,
       },
@@ -187,7 +245,7 @@ export class RecordingService {
     if (hasPreview) {
       await this.prisma.broadcast.update({
         where: { id: broadcastId },
-        data: { previewImagePath: `${keyPrefix}/preview.jpg` },
+        data: { previewImagePath: `${keyPrefix}/${PREVIEW_FILE}` },
       }).catch((err: any) =>
         this.logger.warn(`Preview key update failed for ${broadcastId}: ${err?.message ?? err}`));
     }
@@ -210,20 +268,8 @@ export class RecordingService {
       '-frames:v', '1',
       '-vf', 'scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720',
       '-q:v', '5',
-      '-y', path.join(broadcastDir, 'preview.jpg'),
+      '-y', path.join(broadcastDir, PREVIEW_FILE),
     ], { timeout: FFMPEG_FRAME_TIMEOUT_MS });
-  }
-
-  /** Суммарная длительность из #EXTINF-строк нашего же slot-плейлиста (без повторного ffprobe). */
-  private parsePlaylistDuration(indexPath: string): number {
-    try {
-      const text = fs.readFileSync(indexPath, 'utf8');
-      let total = 0;
-      for (const m of text.matchAll(/#EXTINF:([\d.]+)/g)) total += parseFloat(m[1]);
-      return Math.round(total);
-    } catch {
-      return 0;
-    }
   }
 
   private async probeMp4(filePath: string): Promise<{ duration: number; width: number; height: number }> {
@@ -243,14 +289,13 @@ export class RecordingService {
   }
 
   /**
-   * Собирает единый скачиваемый MP4 один раз, сразу после эфира — вместо
-   * прежней ленивой сборки на каждый запрос скачивания. Складывается в корень
-   * broadcastDir рядом с master.m3u8, заливается в S3 вместе с HLS-VOD.
+   * Склеивает исходники slot-N/ в один фрагментированный MP4 (`-c copy`, без
+   * перекодирования). `frag_keyframe` начинает фрагмент на каждом ключевом
+   * кадре, `default_base_moof` делает фрагменты самодостаточными — на этом
+   * держится vod.m3u8, отдающий их плееру байтовыми диапазонами.
    */
   private async buildDownloadMp4(slotDir: string, broadcastDir: string): Promise<void> {
-    const segments = fs.readdirSync(slotDir)
-      .filter((f: string) => f.startsWith('seg-') && f.endsWith('.mp4'))
-      .sort();
+    const segments = this.listSourceSegments(slotDir);
     if (segments.length === 0) return;
 
     const listFile = path.join(os.tmpdir(), `_archive_${randomBytes(8).toString('hex')}.txt`);
@@ -259,9 +304,12 @@ export class RecordingService {
       .join('\n');
     fs.writeFileSync(listFile, listContent);
 
-    const outputPath = path.join(broadcastDir, 'download.mp4');
+    const outputPath = path.join(broadcastDir, DOWNLOAD_FILE);
     try {
       await execFileAsync('ffmpeg', [
+        // Без прогресса и предупреждений: на многочасовой склейке они могут
+        // переполнить maxBuffer execFile (1 МБ) — и процесс будет убит.
+        '-nostats', '-loglevel', 'error',
         '-f', 'concat', '-safe', '0',
         '-i', listFile,
         '-c', 'copy',
@@ -271,18 +319,6 @@ export class RecordingService {
     } finally {
       fs.unlink(listFile, () => { /* ignore */ });
     }
-  }
-
-  private getDirSize(dirPath: string): number {
-    let total = 0;
-    if (!fs.existsSync(dirPath)) return 0;
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dirPath, entry.name);
-      if (entry.isDirectory()) total += this.getDirSize(fullPath);
-      else total += fs.statSync(fullPath).size;
-    }
-    return total;
   }
 
   /**
@@ -313,38 +349,6 @@ export class RecordingService {
     }
   }
 
-  @Cron('0 3 * * *')
-  async cleanupExpired(): Promise<void> {
-    const expired = await this.prisma.recording.findMany({
-      where: { expiresAt: { lt: new Date() } },
-    });
-
-    // Group by key prefix to avoid double-deleting the same prefix (e.g.
-    // broadcastDir with multiple slots sharing one master.m3u8 directory).
-    const prefixes = new Set<string>();
-    for (const rec of expired) {
-      if (rec.manifestPath) prefixes.add(path.posix.dirname(rec.manifestPath));
-    }
-    for (const prefix of prefixes) {
-      await this.s3.deleteByPrefix(prefix);
-    }
-
-    // Превью записи лежит под тем же префиксом (deleteByPrefix его уже удалил) —
-    // обнуляем ключ, чтобы в БД не оставались висячие ссылки.
-    const broadcastIds = [...new Set(expired.map((rec) => rec.broadcastId))];
-    if (broadcastIds.length > 0) {
-      await this.prisma.broadcast.updateMany({
-        where: { id: { in: broadcastIds } },
-        data: { previewImagePath: null },
-      });
-    }
-
-    for (const rec of expired) {
-      await this.prisma.recording.delete({ where: { id: rec.id } });
-      this.logger.log(`Deleted expired recording ${rec.id}`);
-    }
-  }
-
   @Cron('30 3 * * *')
   async retryFailed(): Promise<void> {
     const failed = await this.prisma.recording.findMany({
@@ -357,23 +361,19 @@ export class RecordingService {
       const { stream } = rec.broadcast;
       const basePath = stream.slug === '' ? stream.org.slug : `${stream.org.slug}/${stream.slug}`;
 
-      // Возобновление упавшей ЗАЛИВКИ: если конверсия первой попытки уже прошла
-      // (master.m3u8 собран, сегменты перемещены из live/ в archive-scratch),
-      // повторять нужно только upload+finalize — в live/ уже пусто, и падение
-      // в старую ветку ниже переместило бы сегменты СЛЕДУЮЩЕЙ трансляции этого
-      // стрима в чужой broadcastDir (cross-contamination).
+      // Первая попытка уже перенесла сегменты из live/ в scratch — архив
+      // пересобирается из них целиком (склейка, плейлисты, заливка). В live/
+      // при этом не смотрим: там может лежать СЛЕДУЮЩАЯ трансляция этого
+      // стрима, и её сегменты уехали бы в чужой broadcastDir (cross-contamination).
       const broadcastDir = path.join(ARCHIVE_ROOT, basePath, rec.broadcastId);
       const slotDir = path.join(broadcastDir, `slot-${rec.slotIndex}`);
-      if (fs.existsSync(path.join(broadcastDir, 'master.m3u8'))) {
+      if (this.listSourceSegments(slotDir).length > 0) {
         await this.prisma.recording.update({
           where: { id: rec.id },
           data: { status: 'processing' },
         });
-        const keyPrefix = `archive/${basePath}/${rec.broadcastId}`;
-        const fileSize = this.getDirSize(slotDir);
-        const duration = this.parsePlaylistDuration(path.join(slotDir, 'index.m3u8'));
-        this.uploadAndFinalize(rec.id, rec.broadcastId, broadcastDir, keyPrefix, fileSize, duration).catch(async (err) => {
-          this.logger.error(`Retry upload failed for ${rec.id}: ${err.message}`);
+        this.buildAndUpload(rec.id, rec.broadcastId, basePath, broadcastDir, slotDir).catch(async (err) => {
+          this.logger.error(`Retry build/upload failed for ${rec.id}: ${err.message}`);
           // Возвращаем в 'failed', иначе запись навсегда зависнет в 'processing'
           // и следующий прогон крона её не увидит.
           await this.prisma.recording.update({
@@ -400,6 +400,71 @@ export class RecordingService {
         this.logger.error(`Retry conversion failed for ${rec.id}: ${err.message}`);
       });
     }
+  }
+
+  /**
+   * Перевод архивов, залитых до байтовых плейлистов. Их master.m3u8 ссылается
+   * на slot-N/index.m3u8 поверх сырых сегментов MediaMTX по 3 часа, которые
+   * браузер не в состоянии загрузить. download.mp4 у них уже лежит в S3 — по
+   * нему строится vod.m3u8, master переключается на него, а slot-N/ (полный
+   * дубль тех же байт) удаляется.
+   *
+   * Фоном при старте: API не ждёт, ошибка одной записи не останавливает
+   * остальные. Идемпотентно — переведённая запись стоит одного GET master.m3u8.
+   */
+  onApplicationBootstrap(): void {
+    this.migrateLegacyArchives().catch((err: any) =>
+      this.logger.error(`Legacy archive migration failed: ${err?.message ?? err}`));
+  }
+
+  async migrateLegacyArchives(): Promise<void> {
+    const ready = await this.prisma.recording.findMany({
+      where: { status: 'ready', manifestPath: { not: null } },
+      select: { id: true, manifestPath: true, duration: true },
+    });
+    for (const rec of ready) {
+      try {
+        await this.migrateLegacyArchive(rec.id, rec.manifestPath!, rec.duration ?? 0);
+      } catch (err: any) {
+        this.logger.warn(`Legacy archive ${rec.id} not migrated: ${err?.message ?? err}`);
+      }
+    }
+  }
+
+  private async migrateLegacyArchive(recordingId: string, manifestPath: string, expectedDuration: number): Promise<void> {
+    const master = await this.s3.getObjectText(manifestPath);
+    const slotDir = legacySlotDir(master);
+    if (!slotDir) return;
+    // Без эталона сверить download.mp4 не с чем — а дубль удаляется только
+    // после сверки.
+    if (!expectedDuration) throw new Error('recording has no duration to verify download.mp4 against');
+
+    const keyPrefix = path.posix.dirname(manifestPath);
+    const downloadKey = `${keyPrefix}/${DOWNLOAD_FILE}`;
+    const size = await this.s3.getObjectSize(downloadKey);
+    // Сверка с длительностью записи: дубль удаляется ниже, и недописанный
+    // download.mp4 остался бы единственной копией.
+    const vod = await this.vodFromSource(
+      { size, read: (offset, length) => this.s3.getObjectRange(downloadKey, offset, length) },
+      expectedDuration,
+    );
+    const resolution = master.match(/RESOLUTION=(\d+x\d+)/)?.[1] ?? '1920x1080';
+
+    // Порядок: vod.m3u8 → master → удаление дубля. Плеер ни в какой момент не
+    // видит master, указывающий в пустоту, а дубль уходит, только когда
+    // новый master уже на месте.
+    const m3u8 = 'application/vnd.apple.mpegurl';
+    await this.s3.putObject(`${keyPrefix}/${VOD_PLAYLIST}`, Buffer.from(vod.playlist), m3u8);
+    await this.s3.putObject(
+      manifestPath,
+      Buffer.from(buildMasterPlaylist({ uri: VOD_PLAYLIST, bandwidth: MASTER_BANDWIDTH, resolution })),
+      m3u8,
+    );
+    await this.s3.deleteByPrefix(`${keyPrefix}/${slotDir}/`);
+    // fileSize старых записей считался по slot-N/ — теперь след записи в
+    // хранилище один download.mp4.
+    await this.prisma.recording.update({ where: { id: recordingId }, data: { fileSize: size } });
+    this.logger.log(`Legacy archive ${recordingId} migrated to byte-range VOD (${keyPrefix})`);
   }
 
   /**

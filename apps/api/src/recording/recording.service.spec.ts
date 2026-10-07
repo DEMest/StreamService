@@ -5,6 +5,7 @@ import { S3Service } from '../storage/s3.service';
 import { NotFoundException } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
+import { makeFmp4 } from './fmp4.fixture-spec';
 
 // We mock child_process with actual module spread to avoid breaking Prisma's node:child_process.
 // The execFile mock here is not used directly — instead we spy on service.probeMp4 below.
@@ -39,10 +40,23 @@ const mockPrisma = {
 };
 
 const mockS3 = {
-  uploadDirectory: jest.fn().mockResolvedValue(undefined),
+  uploadFiles: jest.fn().mockResolvedValue(undefined),
   deleteByPrefix: jest.fn().mockResolvedValue(undefined),
   getPresignedUrl: jest.fn().mockResolvedValue('https://s3.example.com/signed'),
+  getObjectText: jest.fn(),
+  getObjectSize: jest.fn(),
+  getObjectRange: jest.fn(),
+  putObject: jest.fn().mockResolvedValue(undefined),
 };
+
+/** Даёт пайплайну исходники: каталог существует и в нём лежат сегменты. */
+function withSources(spyExists: jest.SpyInstance, spyReaddir: jest.SpyInstance, files = ['seg-0001.mp4']) {
+  spyExists.mockReturnValue(true);
+  spyReaddir.mockImplementation((_p: any, opts?: any) => {
+    if (opts && (opts as any).withFileTypes) return [];
+    return files as any;
+  });
+}
 
 describe('RecordingService', () => {
   let service: RecordingService;
@@ -89,6 +103,12 @@ describe('RecordingService', () => {
       height: 1080,
     });
     jest.spyOn(service as any, 'buildDownloadMp4').mockResolvedValue(undefined);
+    // Оглавление download.mp4 — свой модуль со своими тестами (fmp4-index.spec);
+    // здесь важно только, что пайплайн кладёт плейлист и длительность.
+    jest.spyOn(service as any, 'vodFromFile').mockResolvedValue({
+      playlist: '#EXTM3U\n#EXT-X-MAP:URI="download.mp4",BYTERANGE="1296@0"\n',
+      duration: 10.5,
+    });
     // Превью — авто-кадр из ffmpeg; мокаем глобально, чтобы существующие
     // convert-тесты не спавнили реальный ffmpeg-процесс. Тесты превью ниже
     // переопределяют этот спай под свой сценарий.
@@ -154,8 +174,10 @@ describe('RecordingService', () => {
         await new Promise((r) => setImmediate(r));
       }
 
-      expect(mockS3.uploadDirectory).toHaveBeenCalledWith(
+      // В S3 уезжают склейка и плейлисты — но не исходные сегменты slot-1/.
+      expect(mockS3.uploadFiles).toHaveBeenCalledWith(
         expect.stringContaining(path.join('archive', 'orgA', 'bcast2')),
+        ['download.mp4', 'vod.m3u8', 'master.m3u8', 'preview.jpg'],
         'archive/orgA/bcast2',
       );
       expect(spyRmSync).toHaveBeenCalledWith(
@@ -168,6 +190,7 @@ describe('RecordingService', () => {
           data: expect.objectContaining({
             status: 'ready',
             manifestPath: 'archive/orgA/bcast2/master.m3u8',
+            duration: 11,
           }),
         }),
       );
@@ -182,7 +205,7 @@ describe('RecordingService', () => {
 
       mockPrisma.recording.create.mockResolvedValue({ id: 'r-fail', slotIndex: 1 });
       mockPrisma.recording.update.mockResolvedValue({});
-      mockS3.uploadDirectory.mockRejectedValueOnce(new Error('S3 unreachable'));
+      mockS3.uploadFiles.mockRejectedValueOnce(new Error('S3 unreachable'));
 
       await service.onStreamEnded('bcast-fail', 'orgFail');
       for (let i = 0; i < 20; i++) {
@@ -226,21 +249,14 @@ describe('RecordingService', () => {
       );
     });
 
-    it('master.m3u8 contains exactly one EXT-X-STREAM-INF referencing slot-1', async () => {
-      spyExistsSync.mockReturnValue(true);
-      spyReaddirSync.mockImplementation((_p: any, opts?: any) => {
-        if (opts && (opts as any).withFileTypes) return [];
-        return ['seg-001.mp4'] as any;
-      });
-
+    it('пишет vod.m3u8 и master.m3u8 с единственным variant на него', async () => {
+      withSources(spyExistsSync, spyReaddirSync);
       mockPrisma.recording.create.mockResolvedValue({ id: 'rm', slotIndex: 1 });
       mockPrisma.recording.update.mockResolvedValue({});
 
-      const masterWrites: string[] = [];
+      const writes: Record<string, string> = {};
       spyWriteFileSync.mockImplementation((p: any, content: any) => {
-        if (String(p).endsWith('master.m3u8')) {
-          masterWrites.push(String(content));
-        }
+        writes[path.basename(String(p))] = String(content);
       });
 
       await service.onStreamEnded('bcast-master', 'orgA');
@@ -248,27 +264,21 @@ describe('RecordingService', () => {
         await new Promise((r) => setImmediate(r));
       }
 
-      expect(masterWrites.length).toBeGreaterThan(0);
-      const lastMaster = masterWrites[masterWrites.length - 1];
-      const streamInfMatches = lastMaster.match(/#EXT-X-STREAM-INF/g) || [];
-      expect(streamInfMatches.length).toBe(1);
-      expect(lastMaster).toContain('slot-1/index.m3u8');
+      expect(writes['vod.m3u8']).toContain('EXT-X-MAP:URI="download.mp4"');
+      const master = writes['master.m3u8'];
+      expect(master.match(/#EXT-X-STREAM-INF/g)).toHaveLength(1);
+      expect(master).toContain('RESOLUTION=1920x1080');
+      expect(master).toContain('\nvod.m3u8\n');
+      expect(master).not.toContain('slot-1');
     });
 
-    it('fileSize counts only slot-1 dir contents (not whole broadcastDir)', async () => {
-      spyExistsSync.mockReturnValue(true);
-
-      const sizedPaths: string[] = [];
-      spyReaddirSync.mockImplementation((p: any, opts?: any) => {
-        const s = String(p);
-        if (opts && (opts as any).withFileTypes) {
-          sizedPaths.push(s);
-          return [{ name: 'seg-0001.mp4', isDirectory: () => false } as any];
-        }
-        return ['seg-001.mp4'] as any;
+    it('fileSize — размер download.mp4: в хранилище запись занимает только его', async () => {
+      withSources(spyExistsSync, spyReaddirSync);
+      const statted: string[] = [];
+      spyStatSync.mockImplementation((p: any) => {
+        statted.push(String(p));
+        return { size: 4096, isDirectory: () => false } as any;
       });
-      spyStatSync.mockReturnValue({ size: 1024, isDirectory: () => false } as any);
-
       mockPrisma.recording.create.mockResolvedValue({ id: 'rsize', slotIndex: 1 });
       mockPrisma.recording.update.mockResolvedValue({});
 
@@ -277,10 +287,47 @@ describe('RecordingService', () => {
         await new Promise((r) => setImmediate(r));
       }
 
-      const broadcastDirArch = path.join('/recordings', 'archive', 'org1', 'bcast-size');
-      const slotDirArch = path.join(broadcastDirArch, 'slot-1');
-      expect(sizedPaths).toContain(slotDirArch);
-      expect(sizedPaths).not.toContain(broadcastDirArch);
+      expect(statted).toContain(path.join('/recordings', 'archive', 'org1', 'bcast-size', 'download.mp4'));
+      expect(mockPrisma.recording.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'ready', fileSize: 4096 }) }),
+      );
+    });
+
+    it('не создаёт запись со сроком хранения — автоудаления нет', async () => {
+      withSources(spyExistsSync, spyReaddirSync);
+      mockPrisma.recording.create.mockResolvedValue({ id: 'r1', slotIndex: 1 });
+      mockPrisma.recording.update.mockResolvedValue({});
+
+      await service.onStreamEnded('bcast1', 'org1');
+
+      expect(mockPrisma.recording.create.mock.calls[0][0].data.expiresAt).toBeUndefined();
+    });
+
+    it('склейка короче исходников — запись failed, в S3 ничего не уходит, scratch цел', async () => {
+      withSources(spyExistsSync, spyReaddirSync);
+      mockPrisma.recording.create.mockResolvedValue({ id: 'r-short', slotIndex: 1 });
+      mockPrisma.recording.update.mockResolvedValue({});
+      // Настоящая сверка vodFromSource поверх оборванной склейки: 2 фрагмента
+      // по 2 с против 10.5 с исходников.
+      const short = makeFmp4(2);
+      (service as any).vodFromFile.mockImplementation((_p: string, expected: number) =>
+        (service as any).vodFromSource(
+          { size: short.length, read: async (o: number, l: number) => short.subarray(o, o + l) },
+          expected,
+        ));
+      jest.spyOn(service as any, 'probeMp4').mockResolvedValue({ duration: 600, width: 1920, height: 1080 });
+
+      await service.onStreamEnded('bcast-short', 'org1');
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setImmediate(r));
+      }
+
+      expect(mockS3.uploadFiles).not.toHaveBeenCalled();
+      expect(spyRmSync).not.toHaveBeenCalled();
+      expect(mockPrisma.recording.update).toHaveBeenCalledWith({
+        where: { id: 'r-short' },
+        data: { status: 'failed' },
+      });
     });
   });
 
@@ -364,25 +411,28 @@ describe('RecordingService', () => {
       expect(mockPrisma.recording.update).not.toHaveBeenCalled();
     });
 
-    it('resumes a failed UPLOAD from the archive scratch dir (segments no longer in live/)', async () => {
-      // Регрессия на находку karen: после первой попытки convertRecording уже
-      // перенёс сегменты из live/ в archive-scratch. Если заливка упала, старый
-      // retry смотрел только в live/ (пусто) и молча пропускал запись навсегда.
+    it('пересобирает архив из исходников scratch, не заглядывая в live/', async () => {
+      // Первая попытка уже перенесла сегменты из live/ в scratch. В live/ к
+      // этому моменту может лежать СЛЕДУЮЩАЯ трансляция стрима — трогать её нельзя.
       mockPrisma.recording.findMany.mockResolvedValue([failedRow]);
       mockPrisma.recording.update.mockResolvedValue({});
-      // master.m3u8 существует в scratch → resume-ветка; live/ не проверяется.
-      spyExistsSync.mockImplementation((p: any) => String(p).endsWith('master.m3u8'));
-      jest.spyOn(fs, 'readFileSync').mockReturnValue(
-        '#EXTM3U\n#EXTINF:10.5,\nseg-0001.mp4\n#EXTINF:9.5,\nseg-0002.mp4\n' as any,
-      );
+      const slotDir = path.join('/recordings', 'archive', 'org1/court-a', 'bcast-resume', 'slot-1');
+      const listed: string[] = [];
+      spyExistsSync.mockReturnValue(true);
+      spyReaddirSync.mockImplementation((p: any) => {
+        listed.push(String(p));
+        return (String(p) === slotDir ? ['seg-0001.mp4', 'seg-0002.mp4'] : []) as any;
+      });
 
       await service.retryFailed();
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setImmediate(r));
       }
 
-      expect(mockS3.uploadDirectory).toHaveBeenCalledWith(
+      expect(listed).not.toContain(path.join('/recordings', 'live', 'org1/court-a'));
+      expect(mockS3.uploadFiles).toHaveBeenCalledWith(
         expect.stringContaining(path.join('archive', 'org1/court-a', 'bcast-resume')),
+        expect.arrayContaining(['download.mp4', 'vod.m3u8', 'master.m3u8']),
         'archive/org1/court-a/bcast-resume',
       );
       expect(mockPrisma.recording.update).toHaveBeenCalledWith(
@@ -391,19 +441,18 @@ describe('RecordingService', () => {
           data: expect.objectContaining({
             status: 'ready',
             manifestPath: 'archive/org1/court-a/bcast-resume/master.m3u8',
-            duration: 20,
           }),
         }),
       );
-      // Полный пайплайн (перенос сегментов из live/) НЕ запускался.
+      // Исходники уже на месте — повторный перенос из live/ не запускался.
       expect(spyRenameSync).not.toHaveBeenCalled();
     });
 
-    it('marks the recording failed again when the resumed upload also fails', async () => {
+    it('marks the recording failed again when the rebuild also fails', async () => {
       mockPrisma.recording.findMany.mockResolvedValue([failedRow]);
       mockPrisma.recording.update.mockResolvedValue({});
-      spyExistsSync.mockImplementation((p: any) => String(p).endsWith('master.m3u8'));
-      mockS3.uploadDirectory.mockRejectedValueOnce(new Error('S3 still unreachable'));
+      withSources(spyExistsSync, spyReaddirSync);
+      mockS3.uploadFiles.mockRejectedValueOnce(new Error('S3 still unreachable'));
 
       await service.retryFailed();
       for (let i = 0; i < 20; i++) {
@@ -523,12 +572,14 @@ describe('RecordingService', () => {
     it('convertRecording строит preview.jpg после download.mp4 и до заливки', async () => {
       // настроить существующие спаи convert-пайплайна (probeMp4, buildDownloadMp4,
       // uploadAndFinalize) как в соседних тестах convertRecording
+      withSources(spyExistsSync, spyReaddirSync);
       const previewSpy = jest.spyOn(service as any, 'buildPreviewJpeg').mockResolvedValue(undefined);
       await (service as any).convertRecording('rec-1', 'org1/main', 'b1', 1, ['a.mp4'], '/recordings/live/org1/main');
       expect(previewSpy).toHaveBeenCalled();
     });
 
     it('ошибка кадра НЕ фатальна: uploadAndFinalize всё равно вызывается', async () => {
+      withSources(spyExistsSync, spyReaddirSync);
       jest.spyOn(service as any, 'buildPreviewJpeg').mockRejectedValue(new Error('ffmpeg died'));
       const finalizeSpy = jest.spyOn(service as any, 'uploadAndFinalize').mockResolvedValue(undefined);
       await (service as any).convertRecording('rec-1', 'org1/main', 'b1', 1, ['a.mp4'], '/recordings/live/org1/main');
@@ -541,7 +592,7 @@ describe('RecordingService', () => {
     it('uploadAndFinalize ставит Broadcast.previewImagePath если preview.jpg существует', async () => {
       jest.spyOn(fs, 'existsSync').mockReturnValue(true);
       jest.spyOn(fs, 'rmSync').mockImplementation(() => {});
-      mockS3.uploadDirectory.mockResolvedValue(undefined);
+      mockS3.uploadFiles.mockResolvedValue(undefined);
       mockPrisma.recording.update.mockResolvedValue({});
       mockPrisma.broadcast.update.mockResolvedValue({});
       await (service as any).uploadAndFinalize('rec-1', 'b1', '/scratch/b1', 'archive/org1/main/b1', 100, 60);
@@ -554,7 +605,7 @@ describe('RecordingService', () => {
     it('uploadAndFinalize НЕ трогает Broadcast без preview.jpg', async () => {
       jest.spyOn(fs, 'existsSync').mockReturnValue(false);
       jest.spyOn(fs, 'rmSync').mockImplementation(() => {});
-      mockS3.uploadDirectory.mockResolvedValue(undefined);
+      mockS3.uploadFiles.mockResolvedValue(undefined);
       mockPrisma.recording.update.mockResolvedValue({});
       await (service as any).uploadAndFinalize('rec-1', 'b1', '/scratch/b1', 'archive/org1/main/b1', 100, 60);
       expect(mockPrisma.broadcast.update).not.toHaveBeenCalled();
@@ -572,19 +623,120 @@ describe('RecordingService', () => {
     });
   });
 
-  describe('cleanupExpired обнуляет previewImagePath', () => {
-    it('updateMany по broadcastId истёкших recordings', async () => {
+  describe('автоудаление отключено', () => {
+    it('у сервиса нет крона, удаляющего записи по сроку', () => {
+      expect((service as any).cleanupExpired).toBeUndefined();
+    });
+  });
+
+  describe('migrateLegacyArchives (перевод старых архивов на байтовые диапазоны)', () => {
+    const LEGACY_MASTER =
+      '#EXTM3U\n#EXT-X-VERSION:7\n\n' +
+      '#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1280x720,NAME="slot-1"\n' +
+      'slot-1/index.m3u8\n';
+    const NEW_MASTER = '#EXTM3U\n#EXT-X-VERSION:7\n\n#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1280x720\nvod.m3u8\n';
+
+    /** download.mp4 в «S3»: 5 фрагментов по 2 с = 10 с. */
+    function s3WithDownload(file = makeFmp4(5)) {
+      mockS3.getObjectSize.mockResolvedValue(file.length);
+      mockS3.getObjectRange.mockImplementation(async (_k: string, o: number, l: number) => file.subarray(o, o + l));
+      return file;
+    }
+
+    it('переключает master на vod.m3u8 поверх download.mp4 и удаляет дубль slot-1/', async () => {
       mockPrisma.recording.findMany.mockResolvedValue([
-        { id: 'r1', broadcastId: 'b1', manifestPath: 'archive/org1/main/b1/master.m3u8' },
-        { id: 'r2', broadcastId: 'b2', manifestPath: 'archive/org1/main/b2/master.m3u8' },
+        { id: 'r-old', manifestPath: 'archive/org/s/b1/master.m3u8', duration: 10 },
       ]);
-      mockPrisma.recording.delete.mockResolvedValue({});
-      mockS3.deleteByPrefix.mockResolvedValue(undefined);
-      mockPrisma.broadcast.updateMany.mockResolvedValue({ count: 2 });
-      await service.cleanupExpired();
-      expect(mockPrisma.broadcast.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['b1', 'b2'] } },
-        data: { previewImagePath: null },
+      mockPrisma.recording.update.mockResolvedValue({});
+      mockS3.getObjectText.mockResolvedValue(LEGACY_MASTER);
+      const file = s3WithDownload();
+      const order: string[] = [];
+      mockS3.putObject.mockImplementation(async (key: string) => { order.push(`put ${key}`); });
+      mockS3.deleteByPrefix.mockImplementation(async (prefix: string) => { order.push(`delete ${prefix}`); });
+
+      await service.migrateLegacyArchives();
+
+      expect(mockS3.getObjectRange.mock.calls[0][0]).toBe('archive/org/s/b1/download.mp4');
+      // Сначала новый плейлист, затем master, дубль — последним.
+      expect(order).toEqual([
+        'put archive/org/s/b1/vod.m3u8',
+        'put archive/org/s/b1/master.m3u8',
+        'delete archive/org/s/b1/slot-1/',
+      ]);
+      const vod = String(mockS3.putObject.mock.calls[0][1]);
+      expect(vod).toContain('#EXT-X-MAP:URI="download.mp4",BYTERANGE=');
+      expect(vod.match(/#EXT-X-BYTERANGE:/g)).toHaveLength(1 + 1); // 5×2 с → куски 6 с + 4 с
+      expect(String(mockS3.putObject.mock.calls[1][1])).toBe(NEW_MASTER);
+      expect(mockPrisma.recording.update).toHaveBeenCalledWith({
+        where: { id: 'r-old' },
+        data: { fileSize: file.length },
+      });
+    });
+
+    it('уже переведённую запись не трогает', async () => {
+      mockPrisma.recording.findMany.mockResolvedValue([
+        { id: 'r-new', manifestPath: 'archive/org/s/b2/master.m3u8', duration: 10 },
+      ]);
+      mockS3.getObjectText.mockResolvedValue(NEW_MASTER);
+
+      await service.migrateLegacyArchives();
+
+      expect(mockS3.getObjectSize).not.toHaveBeenCalled();
+      expect(mockS3.putObject).not.toHaveBeenCalled();
+      expect(mockS3.deleteByPrefix).not.toHaveBeenCalled();
+    });
+
+    it('download.mp4 короче записи — ничего не переключает и дубль НЕ удаляет', async () => {
+      mockPrisma.recording.findMany.mockResolvedValue([
+        { id: 'r-cut', manifestPath: 'archive/org/s/b3/master.m3u8', duration: 3600 },
+      ]);
+      mockS3.getObjectText.mockResolvedValue(LEGACY_MASTER);
+      s3WithDownload(); // 10 с против часа
+
+      await service.migrateLegacyArchives();
+
+      expect(mockS3.putObject).not.toHaveBeenCalled();
+      expect(mockS3.deleteByPrefix).not.toHaveBeenCalled();
+      expect(mockPrisma.recording.update).not.toHaveBeenCalled();
+    });
+
+    it('без длительности в БД сверять не с чем — запись не трогается', async () => {
+      mockPrisma.recording.findMany.mockResolvedValue([
+        { id: 'r-nodur', manifestPath: 'archive/org/s/b4/master.m3u8', duration: null },
+      ]);
+      mockS3.getObjectText.mockResolvedValue(LEGACY_MASTER);
+      s3WithDownload();
+
+      await service.migrateLegacyArchives();
+
+      expect(mockS3.putObject).not.toHaveBeenCalled();
+      expect(mockS3.deleteByPrefix).not.toHaveBeenCalled();
+    });
+
+    it('ошибка одной записи не останавливает остальные', async () => {
+      mockPrisma.recording.findMany.mockResolvedValue([
+        { id: 'r-broken', manifestPath: 'archive/org/s/bad/master.m3u8', duration: 10 },
+        { id: 'r-ok', manifestPath: 'archive/org/s/ok/master.m3u8', duration: 10 },
+      ]);
+      mockPrisma.recording.update.mockResolvedValue({});
+      mockS3.getObjectText.mockImplementation(async (key: string) => {
+        if (key.includes('/bad/')) throw new Error('NoSuchKey');
+        return LEGACY_MASTER;
+      });
+      s3WithDownload();
+
+      await service.migrateLegacyArchives();
+
+      expect(mockS3.deleteByPrefix).toHaveBeenCalledWith('archive/org/s/ok/slot-1/');
+      expect(mockS3.deleteByPrefix).toHaveBeenCalledTimes(1);
+    });
+
+    it('выбирает только готовые записи с манифестом', async () => {
+      mockPrisma.recording.findMany.mockResolvedValue([]);
+      await service.migrateLegacyArchives();
+      expect(mockPrisma.recording.findMany).toHaveBeenCalledWith({
+        where: { status: 'ready', manifestPath: { not: null } },
+        select: { id: true, manifestPath: true, duration: true },
       });
     });
   });

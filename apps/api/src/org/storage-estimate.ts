@@ -5,20 +5,6 @@
  */
 
 /**
- * Реальный след записи в S3 = сегменты `slot-1/` + склеенный `download.mp4`,
- * который RecordingService собирает из тех же сегментов через `-c copy`
- * (buildDownloadMp4) — то есть байт в нём столько же. При этом
- * `Recording.fileSize` считается ТОЛЬКО по `slot-1/` (см. комментарий в
- * convertRecording), поэтому для метрики занятого места его удваиваем.
- *
- * ВНИМАНИЕ на будущее: множитель верен, пока на broadcast приходится один
- * Recording — `onStreamEnded` жёстко создаёт `slotIndex: 1`. Если появится
- * multistream с несколькими слотами, в S3 будет лежать `ΣS_i + S_1` (склейка
- * download.mp4 одна на broadcast), а не `2·ΣS_i`, и метрика начнёт завышать.
- */
-export const ARCHIVE_OVERHEAD = 2;
-
-/**
  * Резерв на всё, что делит том с архивом: live-HLS (`/hls`), scratch записи до
  * заливки в S3 (`/recordings`), postgres и образы docker. Показывать орге
  * «свободно» вплоть до нуля нельзя — забитый под ноль том роняет весь стек,
@@ -27,17 +13,17 @@ export const ARCHIVE_OVERHEAD = 2;
 export const DISK_RESERVE_BYTES = 50 * 1024 ** 3;
 
 /**
- * Пик расхода в момент финализации записи, в единицах ARCHIVE_OVERHEAD.
+ * Пик расхода в момент финализации записи, в единицах установившегося следа.
  *
- * `uploadAndFinalize` (recording.service.ts) сначала копирует готовый
- * broadcastDir в S3 — а MinIO хранит объекты в томе `minio_data` на ТОМ ЖЕ
- * разделе — и только ПОСЛЕ успешной заливки делает `rmSync` локального
- * scratch. То есть какое-то время запись занимает место дважды: 2×
- * установившегося следа. Прогноз обязан считать по пику, иначе орга упрётся
- * в ENOSPC внутри uploadDirectory ровно в том же сценарии «после эфира, когда
- * уже поздно», ради которого fileSize переводили в BigInt.
+ * Установившийся след записи — один `download.mp4` в S3: склейка `-c copy`,
+ * байт в ней столько же, сколько в исходных сегментах MediaMTX. Но при
+ * финализации (`buildAndUpload` в recording.service.ts) на томе одновременно
+ * лежат исходники в scratch, локальная склейка и её копия в S3 — MinIO хранит
+ * объекты в томе `minio_data` на ТОМ ЖЕ разделе, а scratch удаляется только
+ * ПОСЛЕ успешной заливки. Прогноз обязан считать по пику, иначе орга упрётся
+ * в ENOSPC посреди заливки ровно в сценарии «после эфира, когда уже поздно».
  */
-export const FINALIZE_PEAK_FACTOR = 2;
+export const FINALIZE_PEAK_FACTOR = 3;
 
 /**
  * Битрейт для прогноза, пока у орги нет ни одной готовой записи: 4 Мбит/с —
@@ -56,12 +42,12 @@ const SECONDS_PER_HOUR = 3600;
 
 /** Байт архива на час эфира при заданном битрейте потока (Мбит/с). */
 export function bytesPerHourAt(bitrateMbps: number): number {
-  return Math.round(((bitrateMbps * 1e6) / 8) * SECONDS_PER_HOUR * ARCHIVE_OVERHEAD);
+  return Math.round(((bitrateMbps * 1e6) / 8) * SECONDS_PER_HOUR);
 }
 
 /** Обратное преобразование: из «байт на час архива» в битрейт потока, Мбит/с. */
 export function bitrateFromBytesPerHour(bytesPerHour: number): number {
-  return (bytesPerHour * 8) / ARCHIVE_OVERHEAD / SECONDS_PER_HOUR / 1e6;
+  return (bytesPerHour * 8) / SECONDS_PER_HOUR / 1e6;
 }
 
 export interface HourlyRate {
@@ -73,7 +59,7 @@ export interface HourlyRate {
 
 /**
  * Расход на час записи: по собственной истории орги, если её достаточно,
- * иначе по дефолтному битрейту. `usedBytes` — уже с учётом ARCHIVE_OVERHEAD.
+ * иначе по дефолтному битрейту.
  */
 export function hourlyRate(usedBytes: number, durationSeconds: number): HourlyRate {
   if (durationSeconds >= MIN_HISTORY_SECONDS && usedBytes > 0) {
