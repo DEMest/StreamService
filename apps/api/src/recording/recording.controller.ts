@@ -40,7 +40,7 @@ export class RecordingController {
     @Param('0') wildcard: string,
     @Res() res: Response,
   ) {
-    this.logger.log(`serveHlsNamed: orgSlug=${orgSlug} streamSlug=${streamSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
+    this.logger.debug(`serveHlsNamed: orgSlug=${orgSlug} streamSlug=${streamSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
     await this.serveArchiveHlsImpl(orgSlug, streamSlug, broadcastId, wildcard, res);
   }
 
@@ -56,7 +56,7 @@ export class RecordingController {
     @Param('0') wildcard: string,
     @Res() res: Response,
   ) {
-    this.logger.log(`serveHlsDefault: orgSlug=${orgSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
+    this.logger.debug(`serveHlsDefault: orgSlug=${orgSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
     await this.serveArchiveHlsImpl(orgSlug, '', broadcastId, wildcard, res);
   }
 
