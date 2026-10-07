@@ -43,9 +43,10 @@ export interface CapacityIncident {
   id: string;
   /**
    * uplink — канал занят выше порога; encode — FFmpeg не успевает;
-   * errors — всплеск 4xx/5xx; stalls — зрителям плохо.
+   * errors — всплеск 4xx/5xx; stalls — зрителям плохо;
+   * disk — на томе архива кончается место (`disk-watch.ts`).
    */
-  kind: 'uplink' | 'encode' | 'errors' | 'stalls';
+  kind: 'uplink' | 'encode' | 'errors' | 'stalls' | 'disk';
   severity: 'warn' | 'crit';
   title: string;
   startedAt: number;

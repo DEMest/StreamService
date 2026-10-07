@@ -3,13 +3,31 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../notify/mail.service';
 import { TelegramService } from '../notify/telegram.service';
+import { DiskStatus, readArchiveDisk } from '../org/archive-disk';
 import { CapacityCollectorService } from './capacity-collector.service';
 import { CapacityIncident } from './capacity.types';
-import { DetectorEvent, IncidentDetector } from './incident-detector';
+import { IncidentDetector } from './incident-detector';
+import { DiskSpaceWatch } from './disk-watch';
 import { CapacityService } from './capacity.service';
 
 /** Сколько последних инцидентов показываем на экране. */
 const FEED_LIMIT = 20;
+
+/**
+ * Открытие, повышение или закрытие инцидента — общий вид для порогов
+ * детектора и для тревоги о диске: дальше их пишут в базу и рассылают одним
+ * и тем же кодом.
+ */
+interface IncidentEvent {
+  kind: CapacityIncident['kind'];
+  action: 'open' | 'escalate' | 'close';
+  severity: CapacityIncident['severity'];
+  title: string;
+  peak: string;
+  at: number;
+  /** Что делать получившему тревогу — дописывается в уведомление. */
+  hint?: string;
+}
 
 /**
  * Инциденты ёмкости: обнаружение, хранение и уведомления.
@@ -19,6 +37,8 @@ const FEED_LIMIT = 20;
  * «моменты падения» пережили перезапуск API: ночной инцидент, о котором знала
  * только оперативная память, ничем не отличается от неслучившегося.
  *
+ * Тем же кроном проверяется свободное место на томе архива (`disk-watch.ts`).
+ *
  * Уведомления уходят fire-and-forget — недоступная почта или телеграм не
  * должны влиять ни на эфир, ни на запись самого инцидента.
  */
@@ -26,7 +46,11 @@ const FEED_LIMIT = 20;
 export class CapacityAlertsService {
   private readonly logger = new Logger(CapacityAlertsService.name);
   private readonly detector = new IncidentDetector();
+  private readonly disk = new DiskSpaceWatch();
   private readonly demo = process.env.CAPACITY_DEMO === 'true';
+  /** Подхвачен ли из базы disk-инцидент, открытый до рестарта. */
+  private diskResumed = false;
+  private lastDiskStatus: DiskStatus | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -43,48 +67,107 @@ export class CapacityAlertsService {
     // проверки стенд молча рассылал бы тревоги о канале, которого нет.
     if (this.demo) return;
 
-    const history = this.collector.history();
-    const last = history[history.length - 1];
-    if (!last) return;
-
-    const snapshot = this.capacity.getSnapshot();
-    const events = this.detector.evaluate(
-      last,
-      { utilization: snapshot.utilization, encodeSpeed: snapshot.health.encodeSpeed },
-      Date.now(),
-    );
+    const now = Date.now();
+    const events = [...this.thresholdEvents(now), ...(await this.diskEvents(now))];
 
     for (const e of events) {
       try {
         await this.apply(e);
       } catch (err: unknown) {
-        this.logger.warn(`Не удалось записать инцидент ${e.rule.kind}: ${(err as Error)?.message}`);
+        this.logger.warn(`Не удалось записать инцидент ${e.kind}: ${(err as Error)?.message}`);
       }
     }
   }
 
-  private async apply(e: DetectorEvent): Promise<void> {
+  private thresholdEvents(now: number): IncidentEvent[] {
+    const history = this.collector.history();
+    const last = history[history.length - 1];
+    if (!last) return [];
+
+    const snapshot = this.capacity.getSnapshot();
+    return this.detector
+      .evaluate(last, { utilization: snapshot.utilization, encodeSpeed: snapshot.health.encodeSpeed }, now)
+      .map((e) => ({
+        kind: e.rule.kind,
+        action: e.action,
+        severity: e.rule.severity,
+        title: e.rule.title,
+        peak: e.peak,
+        at: e.at,
+      }));
+  }
+
+  /**
+   * Диск не зависит от точек сборщика: место кончается и без единого зрителя.
+   * Тот же statfs, что у карточки «Хранилище», и то же условие — архив в
+   * локальном MinIO; во внешнем S3 архив этот том не ест.
+   */
+  private async diskEvents(now: number): Promise<IncidentEvent[]> {
+    const reading = readArchiveDisk();
+    this.logDiskStatus(reading.diskStatus, reading.error);
+    if (!reading.disk) return [];
+
+    if (!this.diskResumed) {
+      try {
+        const open = await this.prisma.capacityIncident.findFirst({
+          where: { kind: 'disk', endedAt: null },
+          orderBy: { startedAt: 'desc' },
+        });
+        if (open && (open.severity === 'warn' || open.severity === 'crit')) {
+          this.disk.resume(open.severity, open.peak);
+        }
+        this.diskResumed = true;
+      } catch (err: unknown) {
+        // Не зная, открыт ли инцидент, лучше пропустить минуту, чем открыть
+        // дубликат. Следующий тик попробует снова.
+        this.logger.warn(`Не удалось прочитать открытый инцидент диска: ${(err as Error)?.message}`);
+        return [];
+      }
+    }
+
+    return this.disk.evaluate(reading.disk.freeBytes, now);
+  }
+
+  /** Раз на смену статуса, а не каждую минуту: на dev-машине /recordings нет вовсе. */
+  private logDiskStatus(status: DiskStatus, error?: string): void {
+    if (status === this.lastDiskStatus) return;
+    this.lastDiskStatus = status;
+    if (status === 'unavailable') this.logger.warn(`Место на диске не проверяется: ${error}`);
+    if (status === 'external') {
+      this.logger.log('Архив не в локальном MinIO (S3_ENDPOINT) — тревога о месте на диске выключена');
+    }
+  }
+
+  private async apply(e: IncidentEvent): Promise<void> {
     if (e.action === 'open') {
-      await this.prisma.capacityIncident.create({
-        data: {
-          kind: e.rule.kind,
-          severity: e.rule.severity,
-          title: e.rule.title,
-          startedAt: new Date(e.at),
-          peak: e.peak,
-        },
-      });
-      this.notify(`⚠️ ${e.rule.title}`, `Пик: ${e.peak}`);
+      await this.create(e);
+      this.notify(`⚠️ ${e.title}`, withHint(`Пик: ${e.peak}`, e.hint));
       return;
     }
 
-    // Закрываем самый свежий незакрытый инцидент этого типа. Их не может быть
-    // больше одного — детектор не откроет второй, пока не закрыт первый, — но
-    // после перезапуска API в базе мог остаться висящий.
+    // Обновляем и закрываем самый свежий незакрытый инцидент этого типа. Их не
+    // может быть больше одного — детектор не откроет второй, пока не закрыт
+    // первый, — но после перезапуска API в базе мог остаться висящий.
     const open = await this.prisma.capacityIncident.findFirst({
-      where: { kind: e.rule.kind, endedAt: null },
+      where: { kind: e.kind, endedAt: null },
       orderBy: { startedAt: 'desc' },
     });
+
+    if (e.action === 'escalate') {
+      // Строки нет, если открытие не записалось (база была недоступна), —
+      // тогда повышение и есть первая запись об инциденте.
+      if (open) {
+        await this.prisma.capacityIncident.update({
+          where: { id: open.id },
+          data: { severity: e.severity, title: e.title, peak: e.peak || open.peak },
+        });
+      } else {
+        await this.create(e);
+      }
+      this.notify(`🔴 ${e.title}`, withHint(`Пик: ${e.peak}`, e.hint));
+      return;
+    }
+
     if (!open) return;
 
     await this.prisma.capacityIncident.update({
@@ -92,8 +175,20 @@ export class CapacityAlertsService {
       data: { endedAt: new Date(e.at), peak: e.peak || open.peak },
     });
 
-    const minutes = Math.max(1, Math.round((e.at - open.startedAt.getTime()) / 60_000));
-    this.notify(`✅ Восстановлено: ${e.rule.title}`, `Длилось ${minutes} мин, пик: ${e.peak}`);
+    const lasted = humanDuration(e.at - open.startedAt.getTime());
+    this.notify(`✅ Восстановлено: ${e.title}`, `Длилось ${lasted}, пик: ${e.peak || open.peak}`);
+  }
+
+  private async create(e: IncidentEvent): Promise<void> {
+    await this.prisma.capacityIncident.create({
+      data: {
+        kind: e.kind,
+        severity: e.severity,
+        title: e.title,
+        startedAt: new Date(e.at),
+        peak: e.peak,
+      },
+    });
   }
 
   /** Оба канала разом и без ожидания: это уведомление, а не транзакция. */
@@ -119,4 +214,18 @@ export class CapacityAlertsService {
       peak: r.peak,
     }));
   }
+}
+
+function withHint(text: string, hint?: string): string {
+  return hint ? `${text}\n${hint}` : text;
+}
+
+/** Инцидент с диском длится сутками — «4320 мин» в письме никто не пересчитает. */
+export function humanDuration(ms: number): string {
+  const min = Math.max(1, Math.round(ms / 60_000));
+  if (min < 60) return `${min} мин`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return min % 60 ? `${h} ч ${min % 60} мин` : `${h} ч`;
+  const d = Math.floor(h / 24);
+  return h % 24 ? `${d} дн ${h % 24} ч` : `${d} дн`;
 }
