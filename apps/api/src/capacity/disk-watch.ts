@@ -1,4 +1,4 @@
-import { CapacityIncident } from './capacity.types';
+import { CapacityIncident, IncidentEvent } from './capacity.types';
 import { CLOSE_AFTER, OPEN_AFTER } from './incident-detector';
 import { DISK_RESERVE_BYTES } from '../org/storage-estimate';
 
@@ -35,14 +35,16 @@ export const DISK_CRIT_BYTES = DISK_RESERVE_BYTES;
  */
 export const DISK_CLEAR_BYTES = DISK_WARN_BYTES + DISK_RESERVE_BYTES;
 
+/** Короткие: на телефоне строку ленты делят заголовок и пик «свободно 87 ГБ». */
 const TITLES: Record<Severity, string> = {
-  warn: 'Заканчивается место на диске',
+  warn: 'Мало места на диске',
   crit: 'Диск почти заполнен',
 };
 
 /**
  * Двоичные гигабайты, как у плитки диска на `/admin/capacity`: пик инцидента
  * читают рядом с ней, и разные единицы дали бы два разных числа об одном.
+ * Десятые — только ниже 10 ГБ: шире строка пика не влезает в ленту на телефоне.
  */
 const GIB = 1024 ** 3;
 const gib = (bytes: number) => (bytes < 10 * GIB ? (bytes / GIB).toFixed(1) : Math.round(bytes / GIB).toString());
@@ -71,22 +73,6 @@ export function diskLevel(freeBytes: number): Severity | null {
   if (freeBytes < DISK_CRIT_BYTES) return 'crit';
   if (freeBytes < DISK_WARN_BYTES) return 'warn';
   return null;
-}
-
-export interface DiskEvent {
-  kind: 'disk';
-  /**
-   * escalate — тот же инцидент перешёл из warn в crit. Отдельного инцидента
-   * на crit нет: два открытых сразу о том же диске — это две строки в ленте
-   * и двойные письма об одной беде.
-   */
-  action: 'open' | 'escalate' | 'close';
-  /** Худший уровень за время инцидента: назад до warn он не опускается. */
-  severity: Severity;
-  title: string;
-  peak: string;
-  at: number;
-  hint: string;
 }
 
 /**
@@ -129,7 +115,7 @@ export class DiskSpaceWatch {
   }
 
   /** @param freeBytes null — замера нет; он ничего не подтверждает и не опровергает. */
-  evaluate(freeBytes: number | null, now: number): DiskEvent[] {
+  evaluate(freeBytes: number | null, now: number): IncidentEvent[] {
     if (freeBytes === null) return [];
 
     const level = diskLevel(freeBytes);
@@ -168,7 +154,7 @@ export class DiskSpaceWatch {
     return [];
   }
 
-  private event(action: DiskEvent['action'], at: number): DiskEvent {
+  private event(action: IncidentEvent['action'], at: number): IncidentEvent {
     const severity = this.level!;
     return { kind: 'disk', action, severity, title: TITLES[severity], peak: this.worstText, at, hint: DISK_HINT };
   }

@@ -171,7 +171,7 @@ describe('CapacityAlertsService', () => {
         severity: 'warn',
         peak: 'свободно 90 ГБ',
       });
-      expect(mail.send.mock.calls[0][0]).toContain('Заканчивается место на диске');
+      expect(mail.send.mock.calls[0][0]).toContain('Мало места на диске');
       expect(mail.send.mock.calls[0][1]).toContain('Архив записей сам не удаляется');
       expect(telegram.send).toHaveBeenCalledTimes(1);
     });
@@ -225,8 +225,24 @@ describe('CapacityAlertsService', () => {
 
       expect(prisma.capacityIncident.update).toHaveBeenCalledTimes(1);
       expect(prisma.capacityIncident.update.mock.calls[0][0].data).toMatchObject({ peak: 'свободно 80 ГБ' });
-      expect(mail.send.mock.calls[0][0]).toBe('✅ Восстановлено: Заканчивается место на диске');
+      expect(mail.send.mock.calls[0][0]).toBe('✅ Восстановлено: Мало места на диске');
       expect(mail.send.mock.calls[0][1]).toContain('3 дн');
+    });
+
+    it('тревога уходит, даже если база не записала инцидент', async () => {
+      // Полный диск роняет Postgres — тревога о нём не должна от Postgres зависеть.
+      prisma.capacityIncident.create.mockRejectedValue(new Error('база недоступна'));
+      free(40);
+      await checks(make(), 2);
+
+      expect(mail.send).toHaveBeenCalledWith('⚠️ Диск почти заполнен', expect.stringContaining('свободно 40 ГБ'));
+      expect(telegram.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('открытый до рестарта инцидент ищется в базе один раз, а не каждую минуту', async () => {
+      free(160);
+      await checks(make(), 4);
+      expect(prisma.capacityIncident.findFirst).toHaveBeenCalledTimes(1);
     });
 
     it('архив во внешнем S3 — диск не проверяется и база о нём не спрашивается', async () => {

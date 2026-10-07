@@ -114,6 +114,12 @@ describe('DiskSpaceWatch', () => {
     expect(out[0].peak).toBe('свободно 90 ГБ');
   });
 
+  it('следующий инцидент получает свой пик, а не пик закрытого', () => {
+    const w = new DiskSpaceWatch();
+    run(w, [40, 38, 160, 160, 160]);
+    expect(run(w, [90, 85], 5 * MIN)[0].peak).toBe('свободно 85 ГБ');
+  });
+
   it('после закрытия может открыться снова', () => {
     const w = new DiskSpaceWatch();
     run(w, [95, 90, 160, 160, 160]);

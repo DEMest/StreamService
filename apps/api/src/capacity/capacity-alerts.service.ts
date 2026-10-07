@@ -5,29 +5,13 @@ import { MailService } from '../notify/mail.service';
 import { TelegramService } from '../notify/telegram.service';
 import { DiskStatus, readArchiveDisk } from '../org/archive-disk';
 import { CapacityCollectorService } from './capacity-collector.service';
-import { CapacityIncident } from './capacity.types';
+import { CapacityIncident, IncidentEvent } from './capacity.types';
 import { IncidentDetector } from './incident-detector';
 import { DiskSpaceWatch } from './disk-watch';
 import { CapacityService } from './capacity.service';
 
 /** Сколько последних инцидентов показываем на экране. */
 const FEED_LIMIT = 20;
-
-/**
- * Открытие, повышение или закрытие инцидента — общий вид для порогов
- * детектора и для тревоги о диске: дальше их пишут в базу и рассылают одним
- * и тем же кодом.
- */
-interface IncidentEvent {
-  kind: CapacityIncident['kind'];
-  action: 'open' | 'escalate' | 'close';
-  severity: CapacityIncident['severity'];
-  title: string;
-  peak: string;
-  at: number;
-  /** Что делать получившему тревогу — дописывается в уведомление. */
-  hint?: string;
-}
 
 /**
  * Инциденты ёмкости: обнаружение, хранение и уведомления.
@@ -64,7 +48,9 @@ export class CapacityAlertsService {
   async check(): Promise<void> {
     // Синтетическая нагрузка стенда не должна порождать настоящих инцидентов и
     // настоящих писем. Демо-кривая специально доходит до перегруза — без этой
-    // проверки стенд молча рассылал бы тревоги о канале, которого нет.
+    // проверки стенд молча рассылал бы тревоги о канале, которого нет. Диск на
+    // стенде настоящий, но и его пропускаем: экран там показывает демо-ленту,
+    // и письмо пришло бы об инциденте, которого на экране не найти.
     if (this.demo) return;
 
     const now = Date.now();
@@ -139,9 +125,16 @@ export class CapacityAlertsService {
   }
 
   private async apply(e: IncidentEvent): Promise<void> {
+    // Тревогу шлём до записи в базу, а не после: запись может не пройти, и
+    // ровно тогда, когда тревога нужнее всего, — полный диск роняет Postgres.
+    // Состояние детектора к этому моменту уже сдвинулось, так что неудачная
+    // запись без этого означала бы потерянную тревогу без повтора.
+    if (e.action !== 'close') {
+      this.notify(`${e.action === 'open' ? '⚠️' : '🔴'} ${e.title}`, withHint(`Пик: ${e.peak}`, e.hint));
+    }
+
     if (e.action === 'open') {
       await this.create(e);
-      this.notify(`⚠️ ${e.title}`, withHint(`Пик: ${e.peak}`, e.hint));
       return;
     }
 
@@ -164,7 +157,6 @@ export class CapacityAlertsService {
       } else {
         await this.create(e);
       }
-      this.notify(`🔴 ${e.title}`, withHint(`Пик: ${e.peak}`, e.hint));
       return;
     }
 

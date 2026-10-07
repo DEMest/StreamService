@@ -56,6 +56,28 @@ export interface CapacityIncident {
   peak: string;
 }
 
+/**
+ * Открытие, повышение или закрытие инцидента — общий вид для порогов
+ * детектора и для тревоги о диске: дальше их пишет в базу и рассылает один
+ * и тот же код (`CapacityAlertsService.apply`).
+ */
+export interface IncidentEvent {
+  kind: CapacityIncident['kind'];
+  /**
+   * escalate — тот же инцидент стал хуже (у диска: warn → crit). Отдельного
+   * инцидента на новый уровень нет: два открытых сразу об одной беде — это
+   * две строки в ленте и двойные письма.
+   */
+  action: 'open' | 'escalate' | 'close';
+  /** Худший уровень за время инцидента: назад он не опускается. */
+  severity: CapacityIncident['severity'];
+  title: string;
+  peak: string;
+  at: number;
+  /** Что делать получившему тревогу — дописывается в уведомление, на экран не идёт. */
+  hint?: string;
+}
+
 /** Глубина графика. Час живёт в памяти, остальное — из базы. */
 export type CapacityPeriod = 'hour' | 'day' | 'week';
 
