@@ -1,14 +1,10 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as fs from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  RecordingService,
-  RECORDINGS_ROOT,
-  RECORDING_RETENTION_DAYS,
-} from '../recording/recording.service';
+import { RecordingService, RECORDINGS_ROOT } from '../recording/recording.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { ImageService } from '../storage/image.service';
-import { ARCHIVE_OVERHEAD, hourlyRate, hoursLeft } from './storage-estimate';
+import { hourlyRate, hoursLeft } from './storage-estimate';
 import { IngestConfigDto, readIngestConfig } from './ingest-config';
 
 /**
@@ -32,7 +28,6 @@ export interface OrgStorageDto {
     /** Часов записи до исчерпания свободного места; null — когда disk===null. */
     hoursLeft: number | null;
   };
-  retentionDays: number;
 }
 
 /**
@@ -123,11 +118,10 @@ export class OrgService {
       _count: { _all: true },
     });
 
-    // fileSize учитывает только slot-N/; в S3 рядом лежит ещё download.mp4
-    // такого же размера — отсюда ARCHIVE_OVERHEAD (см. storage-estimate.ts).
+    // fileSize — весь след записи в хранилище (download.mp4, см. buildAndUpload).
     // Number() — _sum по BigInt-колонке возвращает bigint, а дальше идёт
     // обычная арифметика и JSON-ответ (BigInt не сериализуется).
-    const usedBytes = Number(agg._sum.fileSize ?? 0) * ARCHIVE_OVERHEAD;
+    const usedBytes = Number(agg._sum.fileSize ?? 0);
     const durationSeconds = agg._sum.duration ?? 0;
 
     const { disk, diskStatus } = this.readDiskStats();
@@ -147,7 +141,6 @@ export class OrgService {
         fromHistory: rate.fromHistory,
         hoursLeft: disk ? hoursLeft(disk.freeBytes, rate.bytesPerHour) : null,
       },
-      retentionDays: RECORDING_RETENTION_DAYS,
     };
   }
 

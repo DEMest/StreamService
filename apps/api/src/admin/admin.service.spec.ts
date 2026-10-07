@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { AdminService } from './admin.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
+import { RecordingService } from '../recording/recording.service';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 
 const mockPrisma = {
@@ -17,6 +18,7 @@ const mockPrisma = {
     findMany: jest.fn(),
   },
 };
+const mockRecording = { deleteRecordingsForStreams: jest.fn().mockResolvedValue(undefined) };
 const mockMediamtx = {
   addPath: jest.fn(),
   deletePath: jest.fn(),
@@ -34,6 +36,7 @@ describe('AdminService', () => {
         AdminService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: MediamtxService, useValue: mockMediamtx },
+        { provide: RecordingService, useValue: mockRecording },
       ],
     }).compile();
     service = module.get(AdminService);
@@ -74,14 +77,28 @@ describe('AdminService', () => {
   it('deletes all stream paths of org when deleting org', async () => {
     mockPrisma.organization.findUnique.mockResolvedValue({
       streams: [
-        { slug: '' },
-        { slug: 'tournament' },
+        { id: 's0', slug: '' },
+        { id: 's1', slug: 'tournament' },
       ],
     });
     mockPrisma.organization.delete.mockResolvedValue({});
     await service.deleteOrg('club');
     expect(mockMediamtx.deleteStreamPaths).toHaveBeenCalledWith('club', '');
     expect(mockMediamtx.deleteStreamPaths).toHaveBeenCalledWith('club', 'tournament');
+  });
+
+  it('удаляет архив записей всех Stream\'ов орги из S3 до каскадного удаления', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      streams: [{ id: 's0', slug: '' }, { id: 's1', slug: 'tournament' }],
+    });
+    const order: string[] = [];
+    mockRecording.deleteRecordingsForStreams.mockImplementation(async () => { order.push('s3'); });
+    mockPrisma.organization.delete.mockImplementation(async () => { order.push('db'); });
+
+    await service.deleteOrg('club');
+
+    expect(mockRecording.deleteRecordingsForStreams).toHaveBeenCalledWith(['s0', 's1']);
+    expect(order).toEqual(['s3', 'db']);
   });
 
   it('restore (onModuleInit) передаёт recordingEnabled из БД в addStreamPaths', async () => {

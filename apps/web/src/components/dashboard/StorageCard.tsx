@@ -31,12 +31,10 @@ interface OrgStorage {
     fromHistory: boolean;
     hoursLeft: number | null;
   };
-  retentionDays?: number;
 }
 
 /** Ответ, которого хватает, чтобы нарисовать цифры. */
-type CompleteStorage = OrgStorage &
-  Required<Pick<OrgStorage, 'archive' | 'estimate' | 'retentionDays'>>;
+type CompleteStorage = OrgStorage & Required<Pick<OrgStorage, 'archive' | 'estimate'>>;
 
 /**
  * Решение «есть ли что показывать» принимается здесь один раз, до первого
@@ -45,7 +43,7 @@ type CompleteStorage = OrgStorage &
  * штатно (внешний S3, неудавшийся замер) и разобрано отдельной веткой.
  */
 function isCompleteStorage(data: OrgStorage | undefined): data is CompleteStorage {
-  return Boolean(data?.archive && data.estimate && typeof data.retentionDays === 'number');
+  return Boolean(data?.archive && data.estimate);
 }
 
 /**
@@ -217,24 +215,20 @@ export function StorageCard() {
             />
             <Stat
               label="Срок хранения"
-              value={`${storage.retentionDays} ${plural(storage.retentionDays, 'день', 'дня', 'дней')}`}
-              hint="дальше удаляется автоматически"
+              value="Без срока"
+              hint="запись удаляется только вручную"
             />
           </div>
 
           <div className="flex items-start gap-2 text-[11px] text-zinc-600 leading-relaxed">
             <Info size={14} className="shrink-0 mt-px text-zinc-700" />
             <p>
-              {/* Пояснение про удвоение нужно в ОБЕИХ ветках: иначе «3,6 ГБ/час»
-                  рядом с «~4 Мбит/с» не сходится арифметически, а новая орга
-                  видит именно ветку без истории. */}
-              Час записи занимает вдвое больше самого видео: хранятся и поток для
-              просмотра в браузере, и склеенный файл для скачивания.{' '}
+              Записи не удаляются сами — освобождайте место, удаляя ненужные трансляции.{' '}
               {storage.estimate.fromHistory
                 ? 'Расход посчитан по вашим прошлым записям.'
                 : `Пока записей нет — прогноз по ~${bitrateLabel} Мбит/с, рекомендованному битрейту для 720p; после первой трансляции пересчитается по вашему реальному потоку.`}
               {storage.disk &&
-                ' Прогноз намеренно осторожный: во время выгрузки в архив запись какое-то время занимает место дважды, и в расчёте учтён технический резерв тома — поэтому часов выходит меньше, чем прямое деление свободного места. Диск общий для всех организаций сервиса и для эфира, идущего прямо сейчас.'}
+                ' Прогноз намеренно осторожный: во время выгрузки в архив запись какое-то время занимает место трижды, и в расчёте учтён технический резерв тома — поэтому часов выходит меньше, чем прямое деление свободного места. Диск общий для всех организаций сервиса и для эфира, идущего прямо сейчас.'}
               {storage.diskStatus === 'external' &&
                 ' Архив хранится во внешнем хранилище — свободное место сервером не измеряется.'}
               {storage.diskStatus === 'unavailable' &&

@@ -56,7 +56,10 @@ const mockMediamtx = {
   deletePath: jest.fn(),
 };
 
-const mockRecording = { onStreamEnded: jest.fn().mockResolvedValue(undefined) };
+const mockRecording = {
+  onStreamEnded: jest.fn().mockResolvedValue(undefined),
+  deleteRecordingsForStreams: jest.fn().mockResolvedValue(undefined),
+};
 const mockChatService = { clearMessagesByStream: jest.fn() };
 const mockImages = { upload: jest.fn(), delete: jest.fn(), serve: jest.fn() };
 const mockStats = { getSnapshot: jest.fn() };

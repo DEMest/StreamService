@@ -114,7 +114,14 @@ model Recording {
   // Наружу отдаётся как number — см. toRecordingSummary (BigInt не сериализуется в JSON).
   fileSize     BigInt?
   duration     Int?
-  expiresAt    DateTime
+  // Новые записи его не получают: автоудаление отключено, запись живёт, пока
+  // орга не удалит трансляцию. Непустое значение осталось только у записей
+  // со времён 7-дневного срока и служит маркером «архив ещё не переведён на
+  // байтовые плейлисты» — по нему его выбирает и при переводе обнуляет
+  // RecordingService.migrateLegacyArchives. Не заполнять и не удалять
+  // колонку, пока такие строки есть. Перед откатом API на версию, где она
+  // обязательна, — SQL из миграции 20261007120000_recording_no_expiry.
+  expiresAt    DateTime?
   createdAt    DateTime  @default(now())
 
   @@unique([broadcastId, slotIndex])

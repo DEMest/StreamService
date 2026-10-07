@@ -1,6 +1,7 @@
 import { Controller, Get, Logger, Param, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { RecordingService } from './recording.service';
+import { DOWNLOAD_FILE } from './hls-vod';
 import { S3Service } from '../storage/s3.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -39,7 +40,7 @@ export class RecordingController {
     @Param('0') wildcard: string,
     @Res() res: Response,
   ) {
-    this.logger.log(`serveHlsNamed: orgSlug=${orgSlug} streamSlug=${streamSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
+    this.logger.debug(`serveHlsNamed: orgSlug=${orgSlug} streamSlug=${streamSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
     await this.serveArchiveHlsImpl(orgSlug, streamSlug, broadcastId, wildcard, res);
   }
 
@@ -55,7 +56,7 @@ export class RecordingController {
     @Param('0') wildcard: string,
     @Res() res: Response,
   ) {
-    this.logger.log(`serveHlsDefault: orgSlug=${orgSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
+    this.logger.debug(`serveHlsDefault: orgSlug=${orgSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
     await this.serveArchiveHlsImpl(orgSlug, '', broadcastId, wildcard, res);
   }
 
@@ -66,10 +67,12 @@ export class RecordingController {
    *    оптимизационный компромисс, а условие работоспособности: hls.js
    *    резолвит относительные URI плейлиста против ФИНАЛЬНОГО URL ответа
    *    (`xhr.responseURL`). Если бы плейлист отдавался 302-редиректом на S3,
-   *    все `seg-*.mp4` резолвились бы в S3-адрес БЕЗ подписи → 403 на каждый
-   *    сегмент приватного бакета. Прокси же оставляет базой API-URL, и каждый
-   *    сегмент приходит сюда за собственным свежеподписанным редиректом.
-   *  - сегменты/MP4 (тяжёлые байты) — presigned 302 в S3, мимо канала API.
+   *    `download.mp4` резолвился бы в S3-адрес БЕЗ подписи → 403 на каждый
+   *    кусок приватного бакета. Прокси же оставляет базой API-URL, и каждый
+   *    кусок приходит сюда за собственным свежеподписанным редиректом.
+   *  - MP4 (тяжёлые байты) — presigned 302 в S3, мимо канала API. Плеер
+   *    просит у download.mp4 байтовые диапазоны (`EXT-X-BYTERANGE`); заголовок
+   *    Range браузер переносит через редирект, и S3 отдаёт 206 только кусок.
    *
    * S3-ключ вычисляется через getRecordingKeyPrefix(broadcastId); streamSlug
    * используется только для tenancy-фильтра в БД (404 на чужие пути).
@@ -263,7 +266,7 @@ export class RecordingController {
     }
 
     const keyPrefix = await this.recording.getRecordingKeyPrefix(broadcastId, 1);
-    const key = `${keyPrefix}/download.mp4`;
+    const key = `${keyPrefix}/${DOWNLOAD_FILE}`;
     const fileName = `${broadcast.title.replace(/[^a-zA-Z0-9а-яА-ЯёЁ\s_-]/g, '')}.mp4`;
 
     const url = await this.s3.getPresignedUrl(key, {
