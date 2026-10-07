@@ -160,7 +160,12 @@ export class CapacityAlertsService {
       return;
     }
 
-    if (!open) return;
+    if (!open) {
+      // Открытие не записалось, но тревога о нём ушла — значит, должно уйти и
+      // «восстановлено», пусть и без длительности: её не от чего считать.
+      this.notify(`✅ Восстановлено: ${e.title}`, `Пик: ${e.peak}`);
+      return;
+    }
 
     await this.prisma.capacityIncident.update({
       where: { id: open.id },

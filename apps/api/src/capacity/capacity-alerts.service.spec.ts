@@ -201,6 +201,7 @@ describe('CapacityAlertsService', () => {
         where: { id: 'd1' },
         data: { severity: 'crit', title: 'Диск почти заполнен', peak: 'свободно 40 ГБ' },
       });
+      expect(mail.send).toHaveBeenCalledTimes(2);
       expect(mail.send.mock.calls[1][0]).toBe('🔴 Диск почти заполнен');
     });
 
@@ -237,6 +238,19 @@ describe('CapacityAlertsService', () => {
 
       expect(mail.send).toHaveBeenCalledWith('⚠️ Диск почти заполнен', expect.stringContaining('свободно 40 ГБ'));
       expect(telegram.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('если открытие не записалось, «восстановлено» всё равно приходит', async () => {
+      prisma.capacityIncident.create.mockRejectedValue(new Error('база недоступна'));
+      free(90);
+      const svc = make();
+      await checks(svc, 2);
+
+      free(160);
+      await checks(svc, 3);
+
+      expect(mail.send).toHaveBeenCalledTimes(2);
+      expect(mail.send.mock.calls[1]).toEqual(['✅ Восстановлено: Мало места на диске', 'Пик: свободно 90 ГБ']);
     });
 
     it('открытый до рестарта инцидент ищется в базе один раз, а не каждую минуту', async () => {
