@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
+import { Cron, Timeout } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../storage/s3.service';
 import { execFile } from 'child_process';
@@ -30,6 +30,12 @@ const FFPROBE_TIMEOUT_MS = 30_000;
 const FFMPEG_CONCAT_TIMEOUT_MS = 60 * 60_000;
 const FFMPEG_FRAME_TIMEOUT_MS = 30_000;
 const GLUE_TIMEOUT_MINUTES = parseInt(process.env.RECORDING_GLUE_TIMEOUT_MINUTES ?? '60', 10);
+/**
+ * Пауза между стартом API и пересборкой записей, прерванных рестартом:
+ * рестарт — это деплой, и склейка десятков ГБ не должна ложиться на диск,
+ * пока deploy.sh ещё проверяет, что эфиры и раздача пережили выкатку.
+ */
+const RESUME_INTERRUPTED_DELAY_MS = 2 * 60_000;
 const MASTER_PLAYLIST = 'master.m3u8';
 const PREVIEW_FILE = 'preview.jpg';
 /** Файлы, по которым onModuleInit узнаёт broadcastDir (вместе с каталогом slot-N/). */
@@ -48,6 +54,8 @@ const DURATION_TOLERANCE_RATIO = 0.002;
 @Injectable()
 export class RecordingService {
   private readonly logger = new Logger(RecordingService.name);
+  /** Записи, которые прервал рестарт: их сбрасывает старт, пересобирает resumeInterrupted. */
+  private interruptedRecordingIds: string[] = [];
 
   constructor(
     private prisma: PrismaService,
@@ -377,8 +385,21 @@ export class RecordingService {
 
   @Cron('30 3 * * *')
   async retryFailed(): Promise<void> {
+    // Без аргументов намеренно: cron передаёт в onTick свой onComplete.
+    await this.retryRecordings();
+  }
+
+  /**
+   * Повтор failed-записей. Крон берёт все; resumeInterrupted передаёт
+   * onlyIds — записи, прерванные рестартом, — и такой прогон собирает только
+   * из scratch: в live/ он не заглядывает никогда (см. ниже).
+   *
+   * Записи идут по одной: склейка — это copy десятков ГБ по диску, общему с
+   * эфиром, и несколько склеек разом мешали бы ингесту.
+   */
+  private async retryRecordings(onlyIds?: string[]): Promise<void> {
     const failed = await this.prisma.recording.findMany({
-      where: { status: 'failed' },
+      where: { status: 'failed', ...(onlyIds ? { id: { in: onlyIds } } : {}) },
       include: { broadcast: { include: { stream: { include: { org: { select: { slug: true } } } } } } },
     });
 
@@ -394,11 +415,10 @@ export class RecordingService {
       const broadcastDir = path.join(ARCHIVE_ROOT, basePath, rec.broadcastId);
       const slotDir = path.join(broadcastDir, `slot-${rec.slotIndex}`);
       if (this.listSourceSegments(slotDir).length > 0) {
-        await this.prisma.recording.update({
-          where: { id: rec.id },
-          data: { status: 'processing' },
-        });
-        this.buildAndUpload(rec.id, rec.broadcastId, basePath, broadcastDir, slotDir).catch(async (err) => {
+        if (!(await this.claimForRetry(rec.id))) continue;
+        try {
+          await this.buildAndUpload(rec.id, rec.broadcastId, basePath, broadcastDir, slotDir);
+        } catch (err: any) {
           this.logger.error(`Retry build/upload failed for ${rec.id}: ${err.message}`);
           // Возвращаем в 'failed', иначе запись навсегда зависнет в 'processing'
           // и следующий прогон крона её не увидит.
@@ -406,25 +426,98 @@ export class RecordingService {
             where: { id: rec.id },
             data: { status: 'failed' },
           }).catch(() => { /* ignore */ });
-        });
+        }
         continue;
       }
 
-      // Конверсия первой попытки не дошла до конца — полный пайплайн из live/.
+      // Прогон после рестарта live/ не трогает: рестарт — это деплой, деплой
+      // обычно идёт посреди эфира, и в live/ лежит сегмент, который MediaMTX
+      // пишет прямо сейчас. Такие записи ждут крона.
+      if (onlyIds) continue;
+
+      // Конверсия первой попытки не дошла до переноса сегментов — полный пайплайн из live/.
       const segmentsDir = path.join(RECORDINGS_ROOT, 'live', basePath);
 
       if (!fs.existsSync(segmentsDir)) continue;
       const files = fs.readdirSync(segmentsDir).filter((f: string) => f.endsWith('.mp4')).sort();
       if (files.length === 0) continue;
 
-      await this.prisma.recording.update({
-        where: { id: rec.id },
-        data: { status: 'processing' },
+      // Сегменты в live/ — этой записи, только если стрим после неё в эфир не
+      // выходил. Иначе там следующая трансляция (идущая или в паузе), а свои
+      // сегменты этой записи забрал её onStreamEnded.
+      const later = await this.prisma.broadcast.findFirst({
+        where: { streamId: rec.broadcast.streamId, startedAt: { gt: rec.broadcast.startedAt } },
+        select: { id: true },
       });
+      if (later) {
+        this.logger.warn(`Retry of ${rec.id} skipped: ${segmentsDir} belongs to later broadcast ${later.id}`);
+        continue;
+      }
 
-      this.convertRecording(rec.id, basePath, rec.broadcastId, rec.slotIndex, files, segmentsDir).catch(err => {
+      if (!(await this.claimForRetry(rec.id))) continue;
+      try {
+        await this.convertRecording(rec.id, basePath, rec.broadcastId, rec.slotIndex, files, segmentsDir);
+      } catch (err: any) {
         this.logger.error(`Retry conversion failed for ${rec.id}: ${err.message}`);
+        await this.prisma.recording.update({
+          where: { id: rec.id },
+          data: { status: 'failed' },
+        }).catch(() => { /* ignore */ });
+      }
+    }
+  }
+
+  /**
+   * failed → processing, только если запись всё ещё failed. Крон и
+   * resumeInterrupted могут выбрать одну запись одновременно — пересобрать
+   * её должен кто-то один.
+   */
+  private async claimForRetry(recordingId: string): Promise<boolean> {
+    const { count } = await this.prisma.recording.updateMany({
+      where: { id: recordingId, status: 'failed' },
+      data: { status: 'processing' },
+    });
+    return count === 1;
+  }
+
+  /**
+   * Пересборка записей, прерванных рестартом, — без ожидания крона в 03:30.
+   * Только из scratch: на него приходится почти всё окно конверсии (склейка
+   * и заливка). Записи без scratch остаются failed до крона.
+   */
+  @Timeout(RESUME_INTERRUPTED_DELAY_MS)
+  async resumeInterrupted(): Promise<void> {
+    const ids = this.interruptedRecordingIds;
+    this.interruptedRecordingIds = [];
+    if (ids.length === 0) return;
+    await this.retryRecordings(ids);
+  }
+
+  /**
+   * Конверсия идёт внутри процесса API, поэтому всё, что на старте числится
+   * processing, прервал прошлый процесс — рестарт (каждый мерж в main
+   * перезапускает api) или падение. retryFailed выбирает только failed, и без
+   * сброса такая запись висела бы в processing вечно, хотя её scratch с
+   * исходниками рестарт пережил.
+   */
+  private async failInterruptedRecordings(): Promise<void> {
+    try {
+      const stale = await this.prisma.recording.findMany({
+        where: { status: 'processing' },
+        select: { id: true },
       });
+      if (stale.length === 0) return;
+      const ids = stale.map((r) => r.id);
+      await this.prisma.recording.updateMany({
+        where: { id: { in: ids }, status: 'processing' },
+        data: { status: 'failed' },
+      });
+      this.interruptedRecordingIds = ids;
+      this.logger.warn(`Recordings interrupted by restart marked failed: ${ids.join(', ')}`);
+    } catch (err: any) {
+      // Не повод не поднимать API (и с ним раздачу эфира): записи дождутся
+      // следующего старта.
+      this.logger.error(`Interrupted recordings not reset: ${err?.message ?? err}`);
     }
   }
 
@@ -559,8 +652,14 @@ export class RecordingService {
    * конверсией и со scratch failed-записей, из которого их пересобирает retryFailed.
    * Удаляется только broadcastDir без строки Recording; каталоги org и
    * стримов не удаляются никогда.
+   *
+   * До чистки — сброс записей, прерванных рестартом. Именно здесь: Nest
+   * открывает порт и запускает кроны (finalizeStaleGlue тоже создаёт записи)
+   * только после onModuleInit всех модулей, так что новая processing-запись
+   * этого процесса появиться ещё не может, и сброс её не заденет.
    */
   async onModuleInit(): Promise<void> {
+    await this.failInterruptedRecordings();
     if (!fs.existsSync(ARCHIVE_ROOT)) return;
 
     const broadcastDirs: string[] = [];
