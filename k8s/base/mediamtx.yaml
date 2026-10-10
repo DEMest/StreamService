@@ -1,0 +1,128 @@
+# MediaMTX: приём SRT/RTMP, запись, запуск FFmpeg (on-ready.sh).
+#
+# ВАЖНО: любой рестарт этого пода обрывает приём потока у ВСЕХ стримеров.
+# Поэтому Recreate (а не накат со вторым подом на тех же портах) и конфиг без
+# хеш-суффикса — см. kustomization.yaml.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mediamtx
+  labels:
+    app.kubernetes.io/name: mediamtx
+    app.kubernetes.io/part-of: streamservice
+spec:
+  # Только внутри кластера: control-API (9997) дёргает один api, наружу его
+  # публиковать нельзя (в compose он тоже не публикуется).
+  selector:
+    app.kubernetes.io/name: mediamtx
+  ports:
+    - name: control-api
+      port: 9997
+      targetPort: control-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mediamtx-ingest
+  labels:
+    app.kubernetes.io/name: mediamtx
+    app.kubernetes.io/part-of: streamservice
+spec:
+  # Приём потока от энкодеров. Это не HTTP, через Ingress он не пройдёт, поэтому
+  # отдельный LoadBalancer. В k3s его выставляет на хост встроенный servicelb.
+  # HLS (8888) не публикуется: его отдаёт api.
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mediamtx
+  ports:
+    - name: srt
+      protocol: UDP
+      port: 8890
+      targetPort: srt
+    - name: rtmp
+      protocol: TCP
+      port: 1935
+      targetPort: rtmp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mediamtx
+  labels:
+    app.kubernetes.io/name: mediamtx
+    app.kubernetes.io/part-of: streamservice
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mediamtx
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mediamtx
+        app.kubernetes.io/part-of: streamservice
+    spec:
+      containers:
+        - name: mediamtx
+          image: streamservice-mediamtx
+          ports:
+            - name: srt
+              protocol: UDP
+              containerPort: 8890
+            - name: rtmp
+              protocol: TCP
+              containerPort: 1935
+            - name: control-api
+              protocol: TCP
+              containerPort: 9997
+          env:
+            - name: MEDIAMTX_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: streamservice-secrets
+                  key: MEDIAMTX_WEBHOOK_SECRET
+            # Читается on-ready.sh (HD-copy + x264-рендиции или только HD-copy).
+            - name: HLS_LQ_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: streamservice-config
+                  key: HLS_LQ_ENABLED
+          volumeMounts:
+            - name: config
+              mountPath: /mediamtx.yml
+              subPath: mediamtx.yml
+              readOnly: true
+            - name: recordings
+              mountPath: /recordings
+            - name: hls
+              mountPath: /hls
+          # Control-API требует basic auth (authInternalUsers), поэтому проверяем
+          # только что порт слушается, а не ответ.
+          readinessProbe:
+            tcpSocket:
+              port: control-api
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: control-api
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          # CPU-лимит не ставим: при HLS_LQ_ENABLED=true FFmpeg съедает до
+          # ~7 ядер на 4K-входе, троттлинг дал бы разваленный эфир.
+          resources:
+            requests:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: mediamtx-config
+        - name: recordings
+          persistentVolumeClaim:
+            claimName: recordings-data
+        - name: hls
+          persistentVolumeClaim:
+            claimName: hls-data
