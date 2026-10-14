@@ -28,6 +28,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   // socketId → orgSlug (для broadcastChatEnabled/Cleared по orgSlug)
   private readonly socketOrg = new Map<string, string>();
   private readonly roomViewers = new Map<string, number>(); // room → count
+  // Растёт на каждом отзыве доступа (accessChanged с revoke) — см. handleJoin.
+  private accessEpoch = 0;
 
   constructor(private chat: ChatService) {}
 
@@ -56,11 +58,20 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   @SubscribeMessage('join')
   async handleJoin(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { orgSlug: string; streamSlug?: string },
+    @MessageBody() data: { orgSlug: string; streamSlug?: string; key?: string },
   ) {
     if (!data?.orgSlug) return;
 
-    const streamId = await this.chat.resolveStreamId(data.orgSlug, data.streamSlug);
+    // Проверка ключа — запрос в БД. Если за это время организация закрыла
+    // стрим или сменила ссылку, сокет со старым ключом вошёл бы в только что
+    // опустошённую комнату. Поэтому перепроверяем, пока отзывов за время
+    // запроса не было; дальше до client.join всё синхронно.
+    let streamId: string | null;
+    let epoch: number;
+    do {
+      epoch = this.accessEpoch;
+      streamId = await this.chat.resolveStreamId(data.orgSlug, data.streamSlug, data.key);
+    } while (streamId && epoch !== this.accessEpoch);
     if (!streamId) {
       client.emit('error', { message: 'Stream not found' });
       return;
@@ -148,6 +159,34 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
    */
   getViewers(streamId: string): number {
     return this.roomViewers.get(chatRoomKey(streamId)) ?? 0;
+  }
+
+  /**
+   * Режим доступа Stream'а сменился (публичный ↔ приватный, новый ключ).
+   *
+   * Всем в комнате уходит `access_changed` — страница просмотра перезапрашивает
+   * доступ и адрес эфира: стрим, ставший публичным, переключается на обычный
+   * адрес без перезагрузки, а закрытый показывает заглушку и глушит плеер.
+   *
+   * `revoke` — доступ сузился: старой ссылкой больше не войти. Тогда комнату
+   * ещё и опустошаем, иначе отрезанные зрители продолжали бы читать чат и
+   * висеть в счётчике, который организация видит в студии. Те, у кого есть
+   * новая ссылка, войдут заново со своим ключом.
+   */
+  accessChanged(streamId: string, revoke: boolean) {
+    const room = chatRoomKey(streamId);
+    this.server.to(room).emit('access_changed');
+    if (!revoke) return;
+
+    this.accessEpoch += 1;
+    this.server.in(room).socketsLeave(room);
+    for (const [socketId, socketRoom] of this.socketRoom.entries()) {
+      if (socketRoom !== room) continue;
+      this.socketRoom.delete(socketId);
+      this.socketStreamId.delete(socketId);
+      this.socketOrg.delete(socketId);
+    }
+    this.roomViewers.delete(room);
   }
 
   broadcastChatEnabled(orgSlug: string, enabled: boolean) {

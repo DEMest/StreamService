@@ -133,6 +133,15 @@ export class StreamController {
   }
 
   /**
+   * POST /v1/org/streams/:id/rotate-preview-key — новая ссылка для зрителей
+   * приватного Stream'а; старая перестаёт работать сразу. Ингест не трогает.
+   */
+  @Post(':id/rotate-preview-key')
+  rotatePreviewKey(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.streams.rotatePreviewKeyForOrg(user.orgId!, id);
+  }
+
+  /**
    * POST /v1/org/streams/:id/stop — принудительно завершить активный Broadcast.
    * MediaMTX push при этом не останавливается (vMix продолжает паблишить);
    * только закрывается Broadcast и сбрасывается isLive.

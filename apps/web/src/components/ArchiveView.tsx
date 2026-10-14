@@ -28,6 +28,11 @@ interface BroadcastItem {
     fileSize?: number | null;
     duration?: number | null;
   };
+  /**
+   * Адрес master.m3u8 записи. Собирает сервер: у приватного стрима архив
+   * играет только адрес с ключом в пути, и только сервер знает текущий режим.
+   */
+  hlsUrl: string;
 }
 
 function formatTime(seconds: number): string {
@@ -61,7 +66,7 @@ interface ArchiveViewProps {
  *
  * URL'ы endpoint'ов (именованный Stream / дефолтный Stream):
  *   /v1/public/orgs/<org>/streams/<stream>/broadcasts            | /v1/public/orgs/<org>/broadcasts
- *   .../streams/<stream>/broadcasts/<id>/recording/hls/master.m3u8 | .../broadcasts/<id>/recording/hls/master.m3u8
+ *   адрес записи приходит готовым в `hlsUrl` (у приватного стрима — с ключом в пути)
  *   /v1/public/orgs/<org>/streams/<stream>/broadcasts/<id>/preview | /v1/public/orgs/<org>/broadcasts/<id>/preview
  *
  * Кнопка «← к стриму» ведёт на watch-страницу `/watch/<org>/<stream>`
@@ -73,10 +78,6 @@ export function ArchiveView({ orgSlug, streamSlug }: ArchiveViewProps) {
   const apiBasePath = isDefaultStream
     ? `/v1/public/orgs/${orgSlug}`
     : `/v1/public/orgs/${orgSlug}/streams/${streamSlug}`;
-  // Recording playback URL формируется RecordingController'ом.
-  const recordingBasePath = isDefaultStream
-    ? `/api/v1/public/orgs/${orgSlug}`
-    : `/api/v1/public/orgs/${orgSlug}/streams/${streamSlug}`;
 
   const searchParams = useSearchParams();
   const previewKey = searchParams.get('key') ?? undefined;
@@ -125,9 +126,7 @@ export function ArchiveView({ orgSlug, streamSlug }: ArchiveViewProps) {
   }, [initialBroadcastId, broadcasts]);
 
   const selected = broadcasts?.find(b => b.id === selectedId);
-  const recordingUrl = selectedId
-    ? `${recordingBasePath}/broadcasts/${selectedId}/recording/hls/master.m3u8`
-    : null;
+  const recordingUrl = selected?.hlsUrl ?? null;
 
   const watchBasePath = isDefaultStream ? `/watch/${orgSlug}` : `/watch/${orgSlug}/${streamSlug}`;
   const watchLink = previewKey ? `${watchBasePath}?key=${previewKey}` : watchBasePath;

@@ -1,4 +1,5 @@
 import { RecordingController } from './recording.controller';
+import { LiveAccessCache } from './live-access-cache';
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
@@ -39,8 +40,11 @@ function makeRes() {
   return res;
 }
 
+const PUBLIC_BROADCAST = { id: 'b1', stream: { isPublic: true, previewKey: null } };
+
 describe('RecordingController', () => {
   let controller: RecordingController;
+  let liveAccess: LiveAccessCache;
   let spyExistsSync: jest.SpyInstance;
   let spyStatSync: jest.SpyInstance;
   let spyCreateReadStream: jest.SpyInstance;
@@ -56,10 +60,12 @@ describe('RecordingController', () => {
       return stream;
     });
 
+    liveAccess = new LiveAccessCache(mockPrisma as any);
     controller = new RecordingController(
       mockRecordingService as any,
       mockS3 as any,
       mockPrisma as any,
+      liveAccess,
     );
   });
 
@@ -73,7 +79,7 @@ describe('RecordingController', () => {
       spyExistsSync.mockReturnValue(true);
 
       const res = makeRes();
-      await controller.serveLiveHlsNamed('org1', 'foo', 'master.m3u8', undefined, res);
+      await controller.serveLiveHlsNamed('org1', 'foo', 'master.m3u8', res);
 
       const whereArg = mockPrisma.stream.findFirst.mock.calls[0][0].where;
       expect(whereArg.slug).toBe('foo');
@@ -84,30 +90,9 @@ describe('RecordingController', () => {
       mockPrisma.stream.findFirst.mockResolvedValue(null);
 
       const res = makeRes();
-      await controller.serveLiveHlsNamed('org1', 'nonexistent', 'master.m3u8', undefined, res);
+      await controller.serveLiveHlsNamed('org1', 'nonexistent', 'master.m3u8', res);
 
       expect(res.status).toHaveBeenCalledWith(404);
-    });
-
-    it('returns 404 when private named Stream + wrong key', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({ isPublic: false, previewKey: 'secret' });
-
-      const res = makeRes();
-      await controller.serveLiveHlsNamed('org1', 'foo', 'master.m3u8', 'wrong', res);
-
-      expect(res.status).toHaveBeenCalledWith(404);
-    });
-
-    it('allows access to private named Stream with correct key', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({ isPublic: false, previewKey: 'secret' });
-      spyExistsSync.mockReturnValue(true);
-
-      const res = makeRes();
-      await controller.serveLiveHlsNamed('org1', 'foo', 'master.m3u8', 'secret', res);
-
-      const notFoundCalls = (res.status as jest.Mock).mock.calls.filter(c => c[0] === 404);
-      expect(notFoundCalls.length).toBe(0);
-      expect(spyCreateReadStream).toHaveBeenCalled();
     });
 
     it('rejects path traversal for named Stream (liveDir = /hls/live/<org>/<stream>)', async () => {
@@ -116,15 +101,74 @@ describe('RecordingController', () => {
       const traversalRel = `../${path.basename(liveDirResolved)}evil/master.m3u8`;
 
       const res = makeRes();
-      await controller.serveLiveHlsNamed('org1', 'foo', traversalRel, undefined, res);
+      await controller.serveLiveHlsNamed('org1', 'foo', traversalRel, res);
 
       expect(res.status).toHaveBeenCalledWith(403);
     });
   });
 
+  describe('live HLS приватного Stream\'а — ключ в пути, обычный адрес закрыт', () => {
+    const KEY = 'a'.repeat(64);
+
+    it('обычный адрес приватного Stream\'а — 404, файлы не читаются', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({ isPublic: false, previewKey: KEY });
+
+      const res = makeRes();
+      await controller.serveLiveHlsNamed('org1', 'foo', 'hd/seg00001.ts', res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(spyCreateReadStream).not.toHaveBeenCalled();
+    });
+
+    it('адрес с верным ключом отдаёт и master, и вложенные плейлисты с сегментами', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({ isPublic: false, previewKey: KEY });
+
+      for (const file of ['master.m3u8', 'hd/index.m3u8', 'hd/seg00001.ts']) {
+        const res = makeRes();
+        await controller.serveLiveHlsPrivate('org1', 'foo', KEY, file, res);
+        expect(res.status).not.toHaveBeenCalledWith(404);
+      }
+      expect(spyCreateReadStream).toHaveBeenCalledTimes(3);
+    });
+
+    it('неверный ключ — 404', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({ isPublic: false, previewKey: KEY });
+
+      const res = makeRes();
+      await controller.serveLiveHlsPrivate('org1', 'foo', 'b'.repeat(64), 'master.m3u8', res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(spyCreateReadStream).not.toHaveBeenCalled();
+    });
+
+    it('адрес с ключом у публичного Stream\'а — 404 (старая приватная ссылка гаснет)', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({ isPublic: true, previewKey: null });
+
+      const res = makeRes();
+      await controller.serveLiveHlsPrivate('org1', 'foo', KEY, 'master.m3u8', res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    it('после invalidate() обычный адрес закрывается сразу, без 5-секундного хвоста кэша', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValueOnce({ isPublic: true, previewKey: null });
+      const before = makeRes();
+      await controller.serveLiveHlsNamed('org1', 'foo', 'hd/seg00001.ts', before);
+      expect(before.status).not.toHaveBeenCalledWith(404);
+
+      // Организация закрыла стрим.
+      mockPrisma.stream.findFirst.mockResolvedValue({ isPublic: false, previewKey: KEY });
+      liveAccess.invalidate();
+
+      const after = makeRes();
+      await controller.serveLiveHlsNamed('org1', 'foo', 'hd/seg00002.ts', after);
+      expect(after.status).toHaveBeenCalledWith(404);
+    });
+  });
+
   describe('serveHlsNamed — archive HLS (playlist proxy + segment presigned redirect)', () => {
     it('looks up broadcast with named streamSlug filter', async () => {
-      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      mockPrisma.broadcast.findFirst.mockResolvedValue(PUBLIC_BROADCAST);
       mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/foo/b1');
 
       const res = makeRes();
@@ -152,7 +196,7 @@ describe('RecordingController', () => {
       // Критично для играбельности: hls.js резолвит относительные URI против
       // финального URL ответа. Редирект плейлиста на S3 сломал бы подпись
       // у всех вложенных сегментов (см. serveArchiveHlsImpl JSDoc).
-      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      mockPrisma.broadcast.findFirst.mockResolvedValue(PUBLIC_BROADCAST);
       mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/foo/b1');
       const res = makeRes();
 
@@ -166,7 +210,7 @@ describe('RecordingController', () => {
     });
 
     it('returns 404 when the playlist object is missing in S3', async () => {
-      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      mockPrisma.broadcast.findFirst.mockResolvedValue(PUBLIC_BROADCAST);
       mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/foo/b1');
       mockS3.getObjectText.mockRejectedValueOnce(new Error('NoSuchKey'));
       const res = makeRes();
@@ -178,7 +222,7 @@ describe('RecordingController', () => {
     });
 
     it('redirects SEGMENTS (.mp4) to a per-object presigned S3 URL', async () => {
-      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      mockPrisma.broadcast.findFirst.mockResolvedValue(PUBLIC_BROADCAST);
       mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/foo/b1');
       const res = makeRes();
 
@@ -190,7 +234,7 @@ describe('RecordingController', () => {
     });
 
     it('rejects disallowed file extensions with 403', async () => {
-      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      mockPrisma.broadcast.findFirst.mockResolvedValue(PUBLIC_BROADCAST);
       const res = makeRes();
 
       await controller.serveHlsNamed('org1', 'foo', 'b1', 'evil.exe', res);
@@ -200,7 +244,7 @@ describe('RecordingController', () => {
     });
 
     it('rejects paths containing ".." with 403', async () => {
-      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      mockPrisma.broadcast.findFirst.mockResolvedValue(PUBLIC_BROADCAST);
       const res = makeRes();
 
       await controller.serveHlsNamed('org1', 'foo', 'b1', '../../etc/passwd.mp4', res);
@@ -212,7 +256,7 @@ describe('RecordingController', () => {
 
   describe('serveHlsDefault — archive HLS for the org default Stream (slug=\'\')', () => {
     it('looks up broadcast with an empty streamSlug filter (default Stream)', async () => {
-      mockPrisma.broadcast.findFirst.mockResolvedValue({ id: 'b1' });
+      mockPrisma.broadcast.findFirst.mockResolvedValue(PUBLIC_BROADCAST);
       mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/b1');
 
       const res = makeRes();
@@ -234,6 +278,53 @@ describe('RecordingController', () => {
 
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.redirect).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('архив приватного Stream\'а', () => {
+    const KEY = 'c'.repeat(64);
+    const PRIVATE_BROADCAST = { id: 'b1', stream: { isPublic: false, previewKey: KEY } };
+
+    it('обычный адрес — 404 и для плейлиста, и для куска download.mp4', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue(PRIVATE_BROADCAST);
+
+      for (const file of ['master.m3u8', 'download.mp4']) {
+        const res = makeRes();
+        await controller.serveHlsNamed('org1', 'foo', 'b1', file, res);
+        expect(res.status).toHaveBeenCalledWith(404);
+      }
+      expect(mockS3.getObjectText).not.toHaveBeenCalled();
+      expect(mockS3.getPresignedUrl).not.toHaveBeenCalled();
+    });
+
+    it('адрес с верным ключом отдаёт плейлист и presigned-кусок', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue(PRIVATE_BROADCAST);
+      mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/foo/b1');
+
+      const playlist = makeRes();
+      await controller.serveHlsNamedPrivate('org1', 'foo', KEY, 'b1', 'vod.m3u8', playlist);
+      expect(mockS3.getObjectText).toHaveBeenCalledWith('archive/org1/foo/b1/vod.m3u8');
+
+      const chunk = makeRes();
+      await controller.serveHlsNamedPrivate('org1', 'foo', KEY, 'b1', 'download.mp4', chunk);
+      expect(chunk.redirect).toHaveBeenCalledWith(302, 'https://s3.example.com/signed-url');
+    });
+
+    it('неверный ключ — 404; дефолтный Stream орги — по тому же правилу', async () => {
+      mockPrisma.broadcast.findFirst.mockResolvedValue(PRIVATE_BROADCAST);
+
+      const named = makeRes();
+      await controller.serveHlsNamedPrivate('org1', 'foo', 'd'.repeat(64), 'b1', 'master.m3u8', named);
+      expect(named.status).toHaveBeenCalledWith(404);
+
+      const defaultPublic = makeRes();
+      await controller.serveHlsDefault('org1', 'b1', 'master.m3u8', defaultPublic);
+      expect(defaultPublic.status).toHaveBeenCalledWith(404);
+
+      mockRecordingService.getRecordingKeyPrefix.mockResolvedValue('archive/org1/b1');
+      const defaultPrivate = makeRes();
+      await controller.serveHlsDefaultPrivate('org1', KEY, 'b1', 'master.m3u8', defaultPrivate);
+      expect(defaultPrivate.status).not.toHaveBeenCalledWith(404);
     });
   });
 

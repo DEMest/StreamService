@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { canView } from '../stream/stream-access';
 
 export const DEFAULT_CHAT_TTL_MINUTES = 180;
 export const ALLOWED_CHAT_TTL_MINUTES = [5, 30, 60, 180, 300] as const;
@@ -31,15 +32,18 @@ export class ChatService {
   /**
    * Резолвит streamId для пары (orgSlug, streamSlug?).
    * streamSlug undefined/null/'' → default Stream орги (slug='').
-   * Возвращает null если org/stream не найдены или org.isActive=false.
+   * Возвращает null если org/stream не найдены, org.isActive=false или Stream
+   * приватный, а `key` не совпал: чат закрытой трансляции — такая же её часть,
+   * как и плеер (история сообщений, счётчик зрителей).
    */
-  async resolveStreamId(orgSlug: string, streamSlug?: string | null): Promise<string | null> {
+  async resolveStreamId(orgSlug: string, streamSlug?: string | null, key?: string | null): Promise<string | null> {
     const sSlug = streamSlug && streamSlug.length > 0 ? streamSlug : '';
     const stream = await this.prisma.stream.findFirst({
       where: { slug: sSlug, org: { slug: orgSlug, isActive: true } },
-      select: { id: true },
+      select: { id: true, isPublic: true, previewKey: true },
     });
-    return stream?.id ?? null;
+    if (!stream || !canView(stream, key)) return null;
+    return stream.id;
   }
 
   /**

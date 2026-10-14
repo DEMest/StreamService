@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ThumbnailService } from '../thumbnail/thumbnail.service';
 import { ImageService } from '../storage/image.service';
 import { toRecordingSummary } from '../recording/recording-summary';
+import { canView, mediaUrlPrefix } from '../stream/stream-access';
 
 /**
  * DTO `/v1/public/orgs/:orgSlug/streams/:streamSlug/stream` для viewer'а.
@@ -58,10 +59,6 @@ export interface PublicArchiveItem {
   orgName: string;
   streamSlug: string;
   streamName: string;
-}
-
-function publicUrlPrefix(orgSlug: string, streamSlug: string): string {
-  return `/api/v1/public/orgs/${orgSlug}/streams/${streamSlug}`;
 }
 
 @Injectable()
@@ -172,13 +169,15 @@ export class PublicService {
 
   /**
    * Thumbnail для Stream'а. streamSlug ОБЯЗАТЕЛЕН — каждый Stream самостоятелен.
+   * Во время эфира это свежий кадр из него, поэтому у приватного Stream'а —
+   * только с ключом: иначе закрытый эфир утекал бы кадром раз в 30 секунд.
    */
-  async getThumbnail(orgSlug: string, streamSlug: string): Promise<{ buffer: Buffer; maxAge: number }> {
+  async getThumbnail(orgSlug: string, streamSlug: string, key?: string): Promise<{ buffer: Buffer; maxAge: number }> {
     const stream = await this.prisma.stream.findFirst({
       where: { slug: streamSlug, org: { slug: orgSlug, isActive: true } },
-      select: { isLive: true, previewMode: true, previewImagePath: true },
+      select: { isLive: true, previewMode: true, previewImagePath: true, isPublic: true, previewKey: true },
     });
-    if (!stream) throw new NotFoundException('Stream not found');
+    if (!stream || !canView(stream, key)) throw new NotFoundException('Stream not found');
 
     if (stream.isLive) {
       const snapshotKey = `${orgSlug}/${streamSlug}`;
@@ -218,7 +217,7 @@ export class PublicService {
     });
     if (!stream) throw new NotFoundException('Stream not found');
 
-    if (!stream.isPublic && stream.previewKey !== key) {
+    if (!canView(stream, key)) {
       return {
         slug: stream.org.slug,
         name: stream.org.name,
@@ -263,16 +262,18 @@ export class PublicService {
       },
     });
     if (!stream || !stream.isLive) throw new NotFoundException('No live stream');
-    if (!stream.isPublic && stream.previewKey !== key) {
+    if (!canView(stream, key)) {
       throw new NotFoundException('No live stream');
     }
 
-    const prefix = publicUrlPrefix(orgSlug, streamSlug);
+    const prefix = mediaUrlPrefix(orgSlug, streamSlug, stream);
     return { hlsUrl: `${prefix}/live/hls/master.m3u8`, feedMode: stream.feedMode as 'single' | 'composite' };
   }
 
   /**
    * Список broadcast'ов конкретного Stream'а. streamSlug обязателен.
+   * `hlsUrl` записи собирает сервер: у приватного Stream'а архив играет только
+   * адрес с ключом (см. `stream-access.ts`).
    */
   async getOrgBroadcasts(orgSlug: string, streamSlug: string, key?: string) {
     const stream = await this.prisma.stream.findFirst({
@@ -280,7 +281,8 @@ export class PublicService {
       select: { id: true, isPublic: true, previewKey: true },
     });
     if (!stream) throw new NotFoundException('Stream not found');
-    if (!stream.isPublic && stream.previewKey !== key) return [];
+    if (!canView(stream, key)) return [];
+    const mediaPrefix = mediaUrlPrefix(orgSlug, streamSlug, stream);
 
     const broadcasts = await this.prisma.broadcast.findMany({
       where: { streamId: stream.id, endedAt: { not: null } },
@@ -303,6 +305,7 @@ export class PublicService {
       ...rest,
       hasPreview: !!previewImagePath,
       recording: toRecordingSummary(recordings[0]),
+      hlsUrl: `${mediaPrefix}/broadcasts/${rest.id}/recording/hls/master.m3u8`,
     }));
   }
 
@@ -361,8 +364,7 @@ export class PublicService {
       where: { slug: streamSlug, org: { slug: orgSlug, isActive: true } },
       select: { id: true, isPublic: true, previewKey: true },
     });
-    if (!stream) throw new NotFoundException('Stream not found');
-    if (!stream.isPublic && stream.previewKey !== key) throw new NotFoundException('Stream not found');
+    if (!stream || !canView(stream, key)) throw new NotFoundException('Stream not found');
 
     const broadcast = await this.prisma.broadcast.findFirst({
       where: { id: broadcastId, streamId: stream.id },
