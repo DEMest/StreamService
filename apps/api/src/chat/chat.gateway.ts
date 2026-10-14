@@ -28,6 +28,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   // socketId → orgSlug (для broadcastChatEnabled/Cleared по orgSlug)
   private readonly socketOrg = new Map<string, string>();
   private readonly roomViewers = new Map<string, number>(); // room → count
+  // Растёт на каждом отзыве доступа (accessChanged с revoke) — см. handleJoin.
+  private accessEpoch = 0;
 
   constructor(private chat: ChatService) {}
 
@@ -60,7 +62,16 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   ) {
     if (!data?.orgSlug) return;
 
-    const streamId = await this.chat.resolveStreamId(data.orgSlug, data.streamSlug, data.key);
+    // Проверка ключа — запрос в БД. Если за это время организация закрыла
+    // стрим или сменила ссылку, сокет со старым ключом вошёл бы в только что
+    // опустошённую комнату. Поэтому перепроверяем, пока отзывов за время
+    // запроса не было; дальше до client.join всё синхронно.
+    let streamId: string | null;
+    let epoch: number;
+    do {
+      epoch = this.accessEpoch;
+      streamId = await this.chat.resolveStreamId(data.orgSlug, data.streamSlug, data.key);
+    } while (streamId && epoch !== this.accessEpoch);
     if (!streamId) {
       client.emit('error', { message: 'Stream not found' });
       return;
@@ -167,6 +178,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     this.server.to(room).emit('access_changed');
     if (!revoke) return;
 
+    this.accessEpoch += 1;
     this.server.in(room).socketsLeave(room);
     for (const [socketId, socketRoom] of this.socketRoom.entries()) {
       if (socketRoom !== room) continue;

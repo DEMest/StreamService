@@ -280,6 +280,24 @@ describe('ChatGateway — per-Stream rooms', () => {
       expect(chat.writeMessage).not.toHaveBeenCalled();
     });
 
+    it('отзыв доступа посреди join: сокет со старым ключом перепроверяется и в комнату не входит', async () => {
+      // Первая проверка ключа успевает пройти по старому режиму, но пока она
+      // в полёте, организация закрывает стрим.
+      chat.resolveStreamId
+        .mockImplementationOnce(async () => {
+          gateway.accessChanged('sA', true);
+          return 'sA';
+        })
+        .mockResolvedValueOnce(null);
+      const sock = makeSocket('late');
+
+      await gateway.handleJoin(sock as any, { orgSlug: 'club', streamSlug: 'mat-a', key: 'old' });
+
+      expect(chat.resolveStreamId).toHaveBeenCalledTimes(2);
+      expect(sock._joinedRooms).toEqual([]);
+      expect(gateway.getViewers('sA')).toBe(0);
+    });
+
     it('без revoke (стрим открыли): только уведомление, зрители остаются', async () => {
       chat.resolveStreamId.mockResolvedValue('sA');
       await gateway.handleJoin(makeSocket('v1') as any, { orgSlug: 'club', streamSlug: 'mat-a' });
