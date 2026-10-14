@@ -72,8 +72,16 @@ describe('ChatGateway — per-Stream rooms', () => {
       chat.resolveStreamId.mockResolvedValue('sDefault');
       const sock = makeSocket('s3');
       await gateway.handleJoin(sock as any, { orgSlug: 'club' });
-      expect(chat.resolveStreamId).toHaveBeenCalledWith('club', undefined);
+      expect(chat.resolveStreamId).toHaveBeenCalledWith('club', undefined, undefined);
       expect(sock._joinedRooms).toEqual(['stream:sDefault']);
+    });
+
+    it('ключ приватной ссылки уходит в resolveStreamId', async () => {
+      chat.resolveStreamId.mockResolvedValue('sPriv');
+      const sock = makeSocket('s3k');
+      await gateway.handleJoin(sock as any, { orgSlug: 'club', streamSlug: 'mat-a', key: 'k1' });
+      expect(chat.resolveStreamId).toHaveBeenCalledWith('club', 'mat-a', 'k1');
+      expect(sock._joinedRooms).toEqual(['stream:sPriv']);
     });
 
     it('streamId=null (org/stream not found) → emits error and does NOT join', async () => {
@@ -239,6 +247,48 @@ describe('ChatGateway — per-Stream rooms', () => {
       gateway.broadcastChatCleared('club', 'sA');
       expect(toMock).toHaveBeenCalledWith('stream:sA');
       expect(toMock).toHaveBeenCalledTimes(1);
+    });
+  });
+  describe('accessChanged — смена режима доступа Stream\'а', () => {
+    let roomEmit: jest.Mock;
+    let socketsLeave: jest.Mock;
+
+    beforeEach(() => {
+      roomEmit = jest.fn();
+      socketsLeave = jest.fn();
+      gateway.server = {
+        to: jest.fn(() => ({ emit: roomEmit })),
+        in: jest.fn(() => ({ socketsLeave })),
+      } as any;
+    });
+
+    it('revoke: шлёт access_changed, опустошает комнату и обнуляет счётчик зрителей', async () => {
+      chat.resolveStreamId.mockResolvedValue('sA');
+      await gateway.handleJoin(makeSocket('v1') as any, { orgSlug: 'club', streamSlug: 'mat-a' });
+      await gateway.handleJoin(makeSocket('v2') as any, { orgSlug: 'club', streamSlug: 'mat-a' });
+      expect(gateway.getViewers('sA')).toBe(2);
+
+      gateway.accessChanged('sA', true);
+
+      expect(gateway.server.to).toHaveBeenCalledWith('stream:sA');
+      expect(roomEmit).toHaveBeenCalledWith('access_changed');
+      expect(socketsLeave).toHaveBeenCalledWith('stream:sA');
+      expect(gateway.getViewers('sA')).toBe(0);
+
+      // Отключённый сокет больше не пишет в комнату закрытого стрима.
+      await gateway.handleMessage(makeSocket('v1') as any, { nickname: 'n', content: 'hi' });
+      expect(chat.writeMessage).not.toHaveBeenCalled();
+    });
+
+    it('без revoke (стрим открыли): только уведомление, зрители остаются', async () => {
+      chat.resolveStreamId.mockResolvedValue('sA');
+      await gateway.handleJoin(makeSocket('v1') as any, { orgSlug: 'club', streamSlug: 'mat-a' });
+
+      gateway.accessChanged('sA', false);
+
+      expect(roomEmit).toHaveBeenCalledWith('access_changed');
+      expect(socketsLeave).not.toHaveBeenCalled();
+      expect(gateway.getViewers('sA')).toBe(1);
     });
   });
 });

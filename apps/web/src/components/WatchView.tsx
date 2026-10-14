@@ -21,7 +21,7 @@ import {
   SpeakerHigh, SpeakerLow, SpeakerSlash,
   CaretLeft, CaretRight, ChatCircle, Archive,
   TelevisionSimple, GearSix, Play, Pause,
-  GridFour, VideoCamera,
+  GridFour, VideoCamera, LockSimple,
 } from '@phosphor-icons/react';
 
 // Camera-row entries shown on portrait mobile (composite: multicam + cam1..4).
@@ -186,8 +186,22 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
     retry: false,
   });
 
+  // Организация открыла/закрыла стрим или сменила ссылку — сервер сообщает
+  // об этом через чат, и мы сразу перезапрашиваем доступ и адрес эфира, а не
+  // ждём 15-секундного опроса: отрезанный зритель не должен лишние секунды
+  // долбить сервер 404-ми, а стрим, ставший публичным, — переключиться на
+  // обычный адрес (приватный в этот момент гаснет).
+  function handleAccessChanged() {
+    qc.invalidateQueries({ queryKey: ['watch', orgSlug, streamSlug] });
+    qc.invalidateQueries({ queryKey: ['stream', orgSlug, streamSlug] });
+  }
+
   // ── Derived state ───────────────────────────────────────────────────────
-  const compositeUrl = stream?.hlsUrl;
+  // Закрытый стрим глушит плеер явно: react-query держит прошлый ответ
+  // `stream` и после выключения запроса, и без этой проверки плеер продолжал
+  // бы тянуть уже закрытый адрес.
+  const accessDenied = org?.accessDenied === true;
+  const compositeUrl = accessDenied ? undefined : stream?.hlsUrl;
 
   // Camera-row entries for portrait mobile (composite: multicam + cam1..4).
   const cameraRowEntries = useMemo<CameraRowEntry[]>(() => {
@@ -372,6 +386,42 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
     );
   }
 
+  // Место плеера, пока смотреть нечего: эфира нет или стрим закрыт.
+  function renderIdle(iconSize: number, withCaption: boolean) {
+    if (accessDenied) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-2 px-6 text-center">
+          <LockSimple size={iconSize} className="text-zinc-600" weight="thin" />
+          <span className="text-zinc-400 text-sm">Трансляция закрыта</span>
+          <span className="text-zinc-600 text-xs max-w-[280px] leading-relaxed">
+            Организатор ограничил доступ. Смотреть можно только по ссылке-приглашению.
+          </span>
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2">
+        <TelevisionSimple size={iconSize} className="text-zinc-700" weight="thin" />
+        {withCaption && <span className="text-zinc-600 text-sm">Нет активной трансляции</span>}
+      </div>
+    );
+  }
+
+  function renderChat() {
+    if (!org || accessDenied) return null;
+    return (
+      <Chat
+        orgSlug={orgSlug}
+        streamSlug={streamSlug}
+        previewKey={previewKey}
+        onViewersChange={setViewerCount}
+        onAccessChanged={handleAccessChanged}
+        authorName={isOwner ? (org.name ?? 'Автор') : undefined}
+        authLoading={meLoading}
+      />
+    );
+  }
+
   // ── ViewSwitcher element ────────────────────────────────────────────────
   function renderViewSwitcher() {
     return (
@@ -409,12 +459,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
           /* ── Immersive (landscape OR fullscreen from portrait) ───────── */
           <>
             <div className="absolute inset-0 overflow-hidden" onClick={handleVideoClick}>
-              {compositeUrl
-                ? renderPlayer()
-                : <div className="flex items-center justify-center h-full">
-                    <TelevisionSimple size={48} className="text-zinc-700" weight="thin" />
-                  </div>
-              }
+              {compositeUrl ? renderPlayer() : renderIdle(48, false)}
 
               {stream && (
                 <div
@@ -543,7 +588,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
               className="absolute top-0 z-[25] backdrop-blur-sm"
               style={{ right: mobileChatOpen ? 0 : -240, bottom: 50, width: 240, background: 'rgba(12,12,14,0.95)', transition: 'right 0.2s' }}
             >
-              {org && <Chat orgSlug={orgSlug} streamSlug={streamSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
+              {renderChat()}
             </div>
           </>
         ) : (
@@ -565,12 +610,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
               onTouchMove={handleSwipeMove}
               onTouchEnd={handleSwipeEnd}
             >
-              {compositeUrl
-                ? renderPlayer()
-                : <div className="flex items-center justify-center h-full">
-                    <TelevisionSimple size={40} className="text-zinc-700" weight="thin" />
-                  </div>
-              }
+              {compositeUrl ? renderPlayer() : renderIdle(40, false)}
 
               {isBuffering && (
                 <div className="absolute inset-0 flex items-center justify-center z-[11] pointer-events-none">
@@ -689,7 +729,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
 
             {/* Chat */}
             <div className="flex-1 overflow-hidden">
-              {org && <Chat orgSlug={orgSlug} streamSlug={streamSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
+              {renderChat()}
             </div>
           </>
         )}
@@ -709,13 +749,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
           onClick={handleVideoClick}
           onMouseMove={isFullscreen ? resetDesktopControlsTimer : undefined}
         >
-          {compositeUrl
-            ? renderPlayer()
-            : <div className="flex flex-col items-center justify-center h-full gap-2">
-                <TelevisionSimple size={48} className="text-zinc-700" weight="thin" />
-                <span className="text-zinc-600 text-sm">Нет активной трансляции</span>
-              </div>
-          }
+          {compositeUrl ? renderPlayer() : renderIdle(48, true)}
 
           {/* Title overlay (top-left) */}
           {!isFullscreen && org && (
@@ -852,7 +886,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
           </button>
           <div className="overflow-hidden shrink-0 transition-[width] duration-200" style={{ width: chatOpen ? 300 : 0, borderLeft: chatOpen ? '1px solid rgba(39,39,42,0.6)' : 'none' }}>
             <div className="h-full" style={{ width: 300 }}>
-              {org && <Chat orgSlug={orgSlug} streamSlug={streamSlug} onViewersChange={setViewerCount} authorName={isOwner ? (org.name ?? 'Автор') : undefined} authLoading={meLoading} />}
+              {renderChat()}
             </div>
           </div>
         </>

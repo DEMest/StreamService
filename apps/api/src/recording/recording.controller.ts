@@ -1,7 +1,8 @@
-import { Controller, Get, Logger, Param, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Logger, Param, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { RecordingService } from './recording.service';
 import { DOWNLOAD_FILE } from './hls-vod';
+import { LiveAccessCache } from './live-access-cache';
 import { S3Service } from '../storage/s3.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -9,23 +10,31 @@ import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtPayload } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { canServeMedia } from '../stream/stream-access';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const HLS_LIVE_ROOT = '/hls/live';
 
+/**
+ * Медиа приватного Stream'а живёт по адресу с ключом в пути
+ * (`…/private/<key>/…`), публичного — по обычному; см. `stream-access.ts`.
+ * Несовпадение адреса с режимом — всегда 404, как и несуществующий стрим:
+ * существование закрытой трансляции не палим.
+ *
+ * Приватные адреса не попадают в кэширующие локации edge-nginx (их regex ждёт
+ * `/streams/<slug>/live/hls/` подряд), поэтому байты закрытого эфира в общем
+ * кэше nginx не оседают вовсе.
+ */
 @Controller()
 export class RecordingController {
   private readonly logger = new Logger(RecordingController.name);
-
-  // Кэш {isPublic, previewKey} по стриму: снимает запрос в Postgres с каждого HLS-сегмента.
-  private readonly liveAuthCache = new Map<string, { isPublic: boolean; previewKey: string | null; expires: number }>();
-  private readonly LIVE_AUTH_TTL_MS = 5000;
 
   constructor(
     private recording: RecordingService,
     private s3: S3Service,
     private prisma: PrismaService,
+    private liveAccess: LiveAccessCache,
   ) {}
 
   // ─────────── archive HLS ───────────
@@ -41,7 +50,20 @@ export class RecordingController {
     @Res() res: Response,
   ) {
     this.logger.debug(`serveHlsNamed: orgSlug=${orgSlug} streamSlug=${streamSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
-    await this.serveArchiveHlsImpl(orgSlug, streamSlug, broadcastId, wildcard, res);
+    await this.serveArchiveHlsImpl(orgSlug, streamSlug, undefined, broadcastId, wildcard, res);
+  }
+
+  /** Архив приватного Stream'а — только по адресу с текущим ключом. */
+  @Get('v1/public/orgs/:orgSlug/streams/:streamSlug/private/:key/broadcasts/:broadcastId/recording/hls/*')
+  async serveHlsNamedPrivate(
+    @Param('orgSlug') orgSlug: string,
+    @Param('streamSlug') streamSlug: string,
+    @Param('key') key: string,
+    @Param('broadcastId') broadcastId: string,
+    @Param('0') wildcard: string,
+    @Res() res: Response,
+  ) {
+    await this.serveArchiveHlsImpl(orgSlug, streamSlug, key, broadcastId, wildcard, res);
   }
 
   /**
@@ -57,7 +79,19 @@ export class RecordingController {
     @Res() res: Response,
   ) {
     this.logger.debug(`serveHlsDefault: orgSlug=${orgSlug} broadcastId=${broadcastId} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
-    await this.serveArchiveHlsImpl(orgSlug, '', broadcastId, wildcard, res);
+    await this.serveArchiveHlsImpl(orgSlug, '', undefined, broadcastId, wildcard, res);
+  }
+
+  /** Архив приватного дефолтного Stream'а орги — см. serveHlsDefault. */
+  @Get('v1/public/orgs/:orgSlug/private/:key/broadcasts/:broadcastId/recording/hls/*')
+  async serveHlsDefaultPrivate(
+    @Param('orgSlug') orgSlug: string,
+    @Param('key') key: string,
+    @Param('broadcastId') broadcastId: string,
+    @Param('0') wildcard: string,
+    @Res() res: Response,
+  ) {
+    await this.serveArchiveHlsImpl(orgSlug, '', key, broadcastId, wildcard, res);
   }
 
   /**
@@ -76,10 +110,13 @@ export class RecordingController {
    *
    * S3-ключ вычисляется через getRecordingKeyPrefix(broadcastId); streamSlug
    * используется только для tenancy-фильтра в БД (404 на чужие пути).
+   * Режим доступа проверяется на КАЖДЫЙ запрос, включая байтовые куски
+   * download.mp4: presigned-ссылка выдаётся на минуты, а не на сеанс.
    */
   private async serveArchiveHlsImpl(
     orgSlug: string,
     streamSlug: string,
+    pathKey: string | undefined,
     broadcastId: string,
     wildcard: string,
     res: Response,
@@ -89,8 +126,9 @@ export class RecordingController {
         id: broadcastId,
         stream: { slug: streamSlug, org: { slug: orgSlug, isActive: true } },
       },
+      select: { id: true, stream: { select: { isPublic: true, previewKey: true } } },
     });
-    if (!broadcast) {
+    if (!broadcast || !canServeMedia(broadcast.stream, pathKey)) {
       res.status(404).json({ message: 'Broadcast not found' });
       return;
     }
@@ -135,56 +173,49 @@ export class RecordingController {
   // HLS-output лежит под /hls/live/<orgSlug>/<streamSlug>/... (соответствует
   // MediaMTX path 'live/<orgSlug>/<streamSlug>').
 
+  /**
+   * Публичный адрес эфира. `?key=` здесь намеренно не читается: у приватного
+   * Stream'а этот адрес закрыт всегда, с любым query.
+   */
   @Get('v1/public/orgs/:orgSlug/streams/:streamSlug/live/hls/*')
   async serveLiveHlsNamed(
     @Param('orgSlug') orgSlug: string,
     @Param('streamSlug') streamSlug: string,
     @Param('0') wildcard: string,
-    @Query('key') key: string | undefined,
     @Res() res: Response,
   ) {
     this.logger.debug(`serveLiveHlsNamed: orgSlug=${orgSlug} streamSlug=${streamSlug} wildcard=${JSON.stringify(wildcard)} originalUrl=${res.req.originalUrl}`);
-    await this.serveLiveHlsImpl(orgSlug, streamSlug, wildcard, key, res);
+    await this.serveLiveHlsImpl(orgSlug, streamSlug, undefined, wildcard, res);
+  }
+
+  /** Эфир приватного Stream'а — только по адресу с текущим ключом. */
+  @Get('v1/public/orgs/:orgSlug/streams/:streamSlug/private/:key/live/hls/*')
+  async serveLiveHlsPrivate(
+    @Param('orgSlug') orgSlug: string,
+    @Param('streamSlug') streamSlug: string,
+    @Param('key') key: string,
+    @Param('0') wildcard: string,
+    @Res() res: Response,
+  ) {
+    await this.serveLiveHlsImpl(orgSlug, streamSlug, key, wildcard, res);
   }
 
   /**
    * Реализация live HLS-проксирования с диска.
    *
    * liveDir = /hls/live/<orgSlug>/<streamSlug>. Внутри — файлы по правилам
-   * FFmpeg/HLS: master.m3u8 + сегменты.
+   * FFmpeg/HLS: master.m3u8 + сегменты. Каталог на диске один на оба адреса —
+   * режим доступа решает, какой из них сейчас открыт.
    */
   private async serveLiveHlsImpl(
     orgSlug: string,
     streamSlug: string,
+    pathKey: string | undefined,
     wildcard: string,
-    key: string | undefined,
     res: Response,
   ) {
-    const authKey = `${orgSlug}/${streamSlug}`;
-    const now = Date.now();
-    let auth = this.liveAuthCache.get(authKey);
-    if (auth && auth.expires < now) {
-      this.liveAuthCache.delete(authKey);
-      auth = undefined;
-    }
-    if (!auth) {
-      const stream = await this.prisma.stream.findFirst({
-        where: { slug: streamSlug, org: { slug: orgSlug, isActive: true } },
-        select: { isPublic: true, previewKey: true },
-      });
-      if (!stream) {
-        // Несуществующие стримы НЕ кэшируем — иначе перебор slug'ов раздувает Map.
-        res.status(404).json({ message: 'Stream not found' });
-        return;
-      }
-      auth = {
-        isPublic: stream.isPublic,
-        previewKey: stream.previewKey ?? null,
-        expires: now + this.LIVE_AUTH_TTL_MS,
-      };
-      this.liveAuthCache.set(authKey, auth);
-    }
-    if (!auth.isPublic && auth.previewKey !== key) {
+    const visibility = await this.liveAccess.get(orgSlug, streamSlug);
+    if (!visibility || !canServeMedia(visibility, pathKey)) {
       res.status(404).json({ message: 'Stream not found' });
       return;
     }

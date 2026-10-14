@@ -6,13 +6,14 @@ import { api } from '@/lib/api';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { StorageCard } from '@/components/dashboard/StorageCard';
 import { ImageCropModal } from '@/components/ImageCropModal';
-import { Gear, Trash, VideoCamera, ArrowRight, Stack, Plus, DotsThreeVertical, PencilSimple, X, Warning } from '@phosphor-icons/react';
+import { Gear, Trash, VideoCamera, ArrowRight, Stack, Plus, DotsThreeVertical, PencilSimple, X, Warning, LockSimple } from '@phosphor-icons/react';
 
 interface OrgStreamSummary {
   id: string;
   slug: string;
   name: string;
   isLive: boolean;
+  isPublic: boolean;
 }
 
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -223,6 +224,14 @@ export default function DashboardPage() {
                     ) : (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-zinc-800/60 border border-zinc-700/40 text-zinc-500 text-[10px] font-medium">
                         <span className="w-1 h-1 rounded-full bg-zinc-600" /> OFF
+                      </span>
+                    )}
+                    {!s.isPublic && (
+                      <span
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-zinc-800/60 border border-zinc-700/40 text-zinc-300 text-[10px] font-medium"
+                        title="Смотреть можно только по ссылке-приглашению"
+                      >
+                        <LockSimple size={10} weight="bold" /> Приватная
                       </span>
                     )}
                   </div>

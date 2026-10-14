@@ -124,13 +124,13 @@ The `prisma` field in `apps/api/package.json` points the schema at the repo root
 
 MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/mediamtx.yml`). Live HLS is produced by FFmpeg launched from **`infra/mediamtx/on-ready.sh`** (`runOnReady`), and **served by the NestJS API**, not by MediaMTX:
 
-1. **Auth** — MediaMTX calls `POST /v1/internal/mediamtx/auth` (`MediamtxWebhookController`). SRT publishes are accepted (passphrase is enforced by the SRT transport itself). **RTMP** publishes are validated against the Stream's `ingestKey` via `StreamService.verifyIngestKey`.
+1. **Auth** — MediaMTX calls `POST /v1/internal/mediamtx/auth` (`MediamtxWebhookController`). SRT publishes are accepted (passphrase is enforced by the SRT transport itself). **RTMP** publishes are validated against the Stream's `ingestKey` via `StreamService.verifyIngestKey`. **Reads are denied except over RTSP**: the ingest ports are public, and an open `read` would hand anyone the raw feed of any Stream (private ones included) past every HLS check and nginx limit. The only legitimate reader is on-ready.sh's FFmpeg on `rtsp://localhost:8554`, and RTSP is not published to the host. A new internal reader must come in over RTSP, or this rule has to change with it.
 2. **on-ready.sh** (runs per published path): fires the `publish` webhook, then spawns FFmpeg to pull `rtsp://localhost:8554/<path>` and write HLS into `/hls/<path>` on the shared `hls_data` volume.
    - `master.m3u8` + `hd/` — video `-c:v copy`, audio remuxed to AAC. No transcode of the primary feed.
    - with `HLS_LQ_ENABLED=true` (the default) the **same** FFmpeg process also writes `p720/`, `p480/` and `p240/` via `libx264` (`-preset veryfast`, crf 25/26/28) — ~7 cores on a 4K input. `false` leaves only `hd/` (~1 core). Exact flags: `infra/mediamtx/on-ready.sh`.
 3. **on-not-ready.sh** fires the `unpublish` webhook and `rm -rf /hls/<path>`.
 4. **Webhook handler** — `POST /v1/internal/mediamtx/webhook` → `StreamService.handleWebhook(path, action)`. It resolves the path to a Stream (`resolvePathToStream`), and on `publish` creates a `Broadcast` (+ auto-enables recording if `recordingMode='auto'`); on `unpublish` it closes or pauses it. Concurrent webhooks per Stream are serialized by an in-process **per-streamId mutex** to avoid double-Broadcast races. The same call fires the SEO ping on an actual live-state change.
-5. **Live HLS serving** — `RecordingController` serves `/v1/public/orgs/:orgSlug[/streams/:streamSlug]/live/hls/*` by streaming files from `/hls/live/...` on disk, enforcing `isPublic`/`previewKey` and path-traversal protection (`Cache-Control: no-store` because live segments rotate).
+5. **Live HLS serving** — `RecordingController` serves `/v1/public/orgs/:orgSlug/streams/:streamSlug/live/hls/*` (public Streams) and `…/streams/:streamSlug/private/:key/live/hls/*` (private Streams) by streaming files from `/hls/live/...` on disk, with path-traversal protection (`Cache-Control: no-store` because live segments rotate). Access rules: see Private Streams below.
 
 
 ### Recording pipeline (`recording/`)
@@ -153,7 +153,7 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 | `auth` | `/v1/auth/*` (login, refresh, logout, me) | none / JWT |
 | `admin` | `/v1/admin/*` (orgs, contact-requests) | superadmin JWT |
 | `org` | `/v1/org/*` (profile, ingest-config, broadcasts, chat, preview upload) | org_admin JWT |
-| `stream` | `/v1/org/streams/*` (CRUD, rotate-key, stop, recording) | org_admin JWT |
+| `stream` | `/v1/org/streams/*` (CRUD, rotate-key, rotate-preview-key, stop, recording) | org_admin JWT |
 | `public` | `/v1/public/*` (catalog, watch, broadcasts, thumbnail, previews, contact, feedback) | none |
 | `search` | `/v1/public/search` | none |
 | `recording` | live + archive HLS serving, download | none (HLS) / org_admin JWT (download) |
@@ -210,7 +210,8 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
   уводит на `/`, а не в `/admin`, которого на этом имени нет.
 
 ### Chat (`chat/`) — one room per Stream
-- `/chat` Socket.io namespace. Client emits `join { orgSlug, streamSlug? }`; `ChatService.resolveStreamId` maps that to a Stream and the socket joins `stream:<streamId>` (`chatRoomKey`). There is no cross-Stream room.
+- `/chat` Socket.io namespace. Client emits `join { orgSlug, streamSlug?, key? }`; `ChatService.resolveStreamId` maps that to a Stream (a private one only with its `previewKey`) and the socket joins `stream:<streamId>` (`chatRoomKey`). There is no cross-Stream room.
+- `access_changed` is emitted to the room when the Stream's visibility or link changes; on a narrowing change the room is also emptied (`ChatGateway.accessChanged`). The watch page refetches access and the HLS address on it.
 - Server emits `history`, `chat_ttl`, `chat_enabled`, `viewers`. `chatEnabled`/`chatTtlMinutes` remain org-level. Nickname is stored client-side (`NicknameModal` / localStorage).
 - The gateway also owns the **viewer counter** per room, which `StreamService` reads for the dashboard's live stats — the socket count is the only viewer number the system has.
 
@@ -397,7 +398,12 @@ Additional skills are available on request in `.claude/skills/`:
 
 - **Single ingest per Stream, client-side compositing only.** One feed per Stream — `feedMode` only says whether that frame is a single camera or a mosaic. Never re-split or re-compose the primary feed server-side; the browser canvas crops and lays out. The delivery ladder (`p720`/`p480`/`p240`) transcodes *copies*, never the primary feed.
 - A Stream that is currently live cannot be deleted — stop the broadcast first (`POST /v1/org/streams/:id/stop`).
-- Private Streams use `previewKey`; watchers/HLS access them via `?key=<previewKey>`.
+- **Private Streams** (`isPublic=false`) let an org check its feed without an audience. The rules live in one place, `stream/stream-access.ts`:
+  - pages, archive lists, previews and chat take `?key=<previewKey>`;
+  - **media** (live HLS and archive) take the key **in the path**, `…/private/<previewKey>/…`. A private Stream's ordinary address is closed whatever the query, and a public Stream's keyed address is closed too. The key goes in the path for two reasons. hls.js and native iOS HLS resolve nested playlists and segments relative to master and drop the query, so `?key=` played nothing. And this way, switching modes kills the old address outright.
+  - The player gets its media addresses from the server (`hlsUrl` in `/stream` and in every archive item), never builds them itself.
+  - Closing a Stream always issues a **fresh** key. `POST /v1/org/streams/:id/rotate-preview-key` swaps it while the Stream stays private. Either way `StreamService` flushes `LiveAccessCache`, so the old address stops serving segments at once instead of 5 s later, and evicts the Stream's chat room.
+  - Private addresses don't match edge-nginx's caching HLS locations, so private bytes never land in its shared cache (and capacity metrics don't count them).
 - Stream slugs are validated: lowercase alphanumeric + single dashes, ≤32 chars, not reserved, not purely numeric.
 - Canvas layouts live only in `apps/web` — do not add a backend copy to "validate" them.
 
