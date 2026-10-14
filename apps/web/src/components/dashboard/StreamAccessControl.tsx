@@ -42,7 +42,10 @@ export function StreamAccessControl({
     return () => clearTimeout(t);
   }, [copied]);
 
+  // Кнопки на время запроса не `disabled`, а `aria-disabled`: отключённая
+  // кнопка теряет фокус, и после Space/Enter с клавиатуры он уезжал в <body>.
   function toggle() {
+    if (pending) return;
     const nextPublic = !isPublic;
     if (
       !nextPublic &&
@@ -57,6 +60,7 @@ export function StreamAccessControl({
   }
 
   function rotate() {
+    if (rotatePending) return;
     if (confirm('Сменить ссылку-приглашение?\n\nСтарая перестанет работать сразу, все, кто смотрит по ней, будут отключены.')) {
       onRotate();
     }
@@ -104,8 +108,8 @@ export function StreamAccessControl({
             aria-checked={isPublic}
             aria-label="Публичная трансляция"
             onClick={toggle}
-            disabled={pending}
-            className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-primary disabled:cursor-wait disabled:opacity-60 ${
+            aria-disabled={pending}
+            className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-primary aria-disabled:cursor-wait aria-disabled:opacity-60 ${
               isPublic ? 'bg-emerald-500' : 'bg-zinc-700'
             }`}
           >
@@ -153,8 +157,8 @@ export function StreamAccessControl({
             <button
               type="button"
               onClick={rotate}
-              disabled={rotatePending}
-              className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-wait disabled:opacity-50"
+              aria-disabled={rotatePending}
+              className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 aria-disabled:cursor-wait aria-disabled:opacity-50"
             >
               <ArrowsClockwise size={12} className={rotatePending ? 'animate-spin' : ''} />
               Сменить ссылку

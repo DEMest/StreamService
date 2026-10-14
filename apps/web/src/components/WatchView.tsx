@@ -183,29 +183,35 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
   //    `streamIsPublic` в ключе запроса. Обычно быстрее успевает
   //    `access_changed` из чата (handleAccessChanged), опрос — страховка на
   //    случай, если сокет это событие пропустил.
-  const { data: stream } = useQuery({
+  const accessDenied = org?.accessDenied === true;
+  const { data: streamData } = useQuery({
     queryKey: ['stream', orgSlug, streamSlug, previewKey, org?.streamIsPublic],
     queryFn: () => api.get<StreamInfo>(`${apiBasePath}/stream${previewKey ? `?key=${previewKey}` : ''}`),
-    enabled: org?.isLive === true,
+    enabled: org?.isLive === true && !accessDenied,
     retry: false,
   });
 
   // Организация открыла/закрыла стрим или сменила ссылку — сервер сообщает
-  // об этом через чат, и мы сразу перезапрашиваем доступ и адрес эфира, а не
-  // ждём 15-секундного опроса: отрезанный зритель не должен лишние секунды
-  // долбить сервер 404-ми, а стрим, ставший публичным, — переключиться на
-  // обычный адрес (приватный в этот момент гаснет).
+  // об этом через чат, и мы сразу перезапрашиваем доступ, а не ждём
+  // 15-секундного опроса: отрезанный зритель не должен лишние секунды долбить
+  // сервер 404-ми. Адрес эфира перезапрашивать отдельно не нужно — и вредно:
+  // запрос ушёл бы раньше, чем страница узнает о закрытии, и получил бы 404.
+  // Новый адрес стрима, ставшего публичным, приносит смена `streamIsPublic`
+  // в ключе запроса выше.
   function handleAccessChanged() {
     qc.invalidateQueries({ queryKey: ['watch', orgSlug, streamSlug] });
-    qc.invalidateQueries({ queryKey: ['stream', orgSlug, streamSlug] });
   }
 
+  // Отрезанному зрителю молча обнуляем всё, что было от эфира: react-query
+  // держит прошлый ответ `stream` и после выключения запроса, и без этого
+  // плеер тянул бы закрытый адрес, а панель управления висела бы без плеера.
+  useEffect(() => {
+    if (accessDenied) setViewerCount(null);
+  }, [accessDenied]);
+
   // ── Derived state ───────────────────────────────────────────────────────
-  // Закрытый стрим глушит плеер явно: react-query держит прошлый ответ
-  // `stream` и после выключения запроса, и без этой проверки плеер продолжал
-  // бы тянуть уже закрытый адрес.
-  const accessDenied = org?.accessDenied === true;
-  const compositeUrl = accessDenied ? undefined : stream?.hlsUrl;
+  const stream = accessDenied ? undefined : streamData;
+  const compositeUrl = stream?.hlsUrl;
 
   // Camera-row entries for portrait mobile (composite: multicam + cam1..4).
   const cameraRowEntries = useMemo<CameraRowEntry[]>(() => {
@@ -881,7 +887,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
           )}
         </div>
 
-        <>
+        {!accessDenied && <>
           <button
             onClick={(e) => { e.stopPropagation(); setChatOpen((v) => !v); }}
             className="absolute top-1/2 -translate-y-1/2 z-10 bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 p-1.5 cursor-pointer rounded-l-lg transition-all text-white"
@@ -893,7 +899,7 @@ export function WatchView({ orgSlug, streamSlug }: WatchViewProps) {
               {renderChat()}
             </div>
           </div>
-        </>
+        </>}
       </div>
     </div>
   );
