@@ -396,7 +396,11 @@ printf '%s\n' "$TARGET_SHA" > "$STATE"
 
 log "готово: $(git rev-parse --short "$TARGET_SHA") выкачен"
 
-notify "[liga-live] Выкачено: $(git log -1 --format=%s "$TARGET_SHA" | cut -c1-60)" \
+# Обрезает сам git, по символам: `cut -c` режет по байтам, разрывал
+# кириллическую букву пополам, и notify.py падал на битом UTF-8 — письмо
+# о выкатке не уходило примерно у каждой второй русской темы. sed убирает
+# пробелы, которыми %<(N,trunc) добивает короткую тему до N.
+notify "[liga-live] Выкачено: $(git log -1 --format='%<(60,trunc)%s' "$TARGET_SHA" | sed 's/ *$//')" \
 "Выкатка прошла и проверки пройдены.
 
 Коммит:    $(git rev-parse --short "$TARGET_SHA") — $(git log -1 --format=%s "$TARGET_SHA")
