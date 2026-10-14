@@ -34,6 +34,18 @@ describe('parseAccessLogLine', () => {
     expect(e.kind).toBe('segment');
   });
 
+  it('считает трафик приватного стрима, не вынося ключ из адреса', () => {
+    const key = 'f'.repeat(64);
+    const e = parseAccessLogLine(
+      `2026-08-29T14:03:11+03:00|200|999|0.002|HIT|/api/v1/public/orgs/club/streams/court-a/private/${key}/live/hls/p480/seg9.ts`,
+    )!;
+    expect(e.orgSlug).toBe('club');
+    expect(e.streamSlug).toBe('court-a');
+    expect(e.rendition).toBe('p480');
+    expect(e.kind).toBe('segment');
+    expect(JSON.stringify(e)).not.toContain(key);
+  });
+
   it('помечает прочерк кэша как other, а не как промах', () => {
     const e = parseAccessLogLine(
       '2026-08-29T14:03:11+03:00|404|0|0.001|-|/api/v1/public/orgs/club/streams/nope/live/hls/hd/seg1.ts',

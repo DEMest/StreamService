@@ -47,8 +47,12 @@ const KNOWN_RENDITIONS = new Set(LADDER.map((r) => r.key));
  * дефолтного стрима организации slug именно пустой, и адрес получается с
  * двойным слэшем. Требование непустого сегмента выкинуло бы весь трафик таких
  * стримов из статистики.
+ *
+ * Приватный стрим отдаётся по `…/streams/<slug>/private/<ключ>/live/hls/…` —
+ * это тот же трафик через тот же канал. Ключ сопоставляется без захвата и
+ * дальше разбора не уходит: в метриках ему не место.
  */
-const HLS_URI = /^\/api\/v1\/public\/orgs\/([^/?]+)\/streams\/([^/?]*)\/live\/hls\/(.+)$/;
+const HLS_URI = /^\/api\/v1\/public\/orgs\/([^/?]+)\/streams\/([^/?]*)(?:\/private\/[^/?]+)?\/live\/hls\/(.+)$/;
 
 export function parseAccessLogLine(line: string): AccessLogEntry | null {
   const parts = line.trim().split('|');
