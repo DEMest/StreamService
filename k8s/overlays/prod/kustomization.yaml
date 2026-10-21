@@ -1,0 +1,65 @@
+# ЧЕРНОВИК боевого оверлея. НЕ ПРИМЕНЯТЬ, пока compose-стек жив: Traefik и
+# servicelb займут порты 80/443/8890/1935 и столкнутся с edge-nginx и
+# контейнером mediamtx. Порядок переключения — в runbook (PR 2).
+#
+# Не проверено на реальном кластере и реальном Traefik: см. раздел
+# «Что не проверено» в k8s/README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: streamservice
+
+resources:
+  - ../../base
+  - middlewares.yaml
+  - certificate.yaml
+  - ingress-prod.yaml
+
+# Реестр образов и способ выкатки (ArgoCD или kubectl из CI) ещё не выбраны,
+# это решает Данила. ghcr.io/demest/* здесь — предположение по адресу
+# репозитория. Тег-заглушка заставит apply упасть, а не выкатить случайный образ.
+images:
+  - name: streamservice-api
+    newName: ghcr.io/demest/streamservice-api
+    newTag: REPLACE_WITH_TAG
+  - name: streamservice-web
+    newName: ghcr.io/demest/streamservice-web
+    newTag: REPLACE_WITH_TAG
+  - name: streamservice-mediamtx
+    newName: ghcr.io/demest/streamservice-mediamtx
+    newTag: REPLACE_WITH_TAG
+
+patches:
+  # Базовый Ingress без хоста здесь не нужен: ниже боевые, с TLS и поддоменами.
+  - target:
+      kind: Ingress
+      name: site
+    patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: site
+
+  - target:
+      kind: ConfigMap
+      name: streamservice-config
+    patch: |-
+      - op: replace
+        path: /data/CORS_ORIGIN
+        value: "https://liga-live.ru"
+      - op: replace
+        path: /data/SITE_URL
+        value: "https://liga-live.ru"
+      # Presigned-ссылки архива идут на :9443 того же домена (entrypoint
+      # `minio` в k8s/cluster/traefik-config.yaml), как сейчас на проде.
+      - op: replace
+        path: /data/S3_PUBLIC_ENDPOINT
+        value: "https://liga-live.ru:9443"
+
+# Размеры томов (storage.yaml, postgres, minio) — заглушки из base. Перед
+# боевым применением выставить по факту `df -h` на сервере и по объёму
+# текущих томов compose.
+#
+# Secret streamservice-secrets здесь не генерируется и в репозитории не
+# лежит. Шаблон ключей — secret.example.yaml (не входит в сборку).

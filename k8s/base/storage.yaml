@@ -1,0 +1,32 @@
+# Тома, общие для mediamtx и api (в compose: recordings_data и hls_data).
+#
+# ReadWriteOnce, но монтируются двумя подами. Это работает, пока оба пода на
+# ОДНОМ узле (одноузловой k3s — наш случай; local-path ещё и сам привяжет
+# поды к узлу тома). На нескольких узлах так нельзя: нужен RWX-класс либо
+# mediamtx и api в одном поде.
+#
+# Размеры — заглушки для локального прогона; боевые значения задаёт оверлей
+# prod по факту `df -h` на сервере.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: recordings-data
+  labels:
+    app.kubernetes.io/part-of: streamservice
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hls-data
+  labels:
+    app.kubernetes.io/part-of: streamservice
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
