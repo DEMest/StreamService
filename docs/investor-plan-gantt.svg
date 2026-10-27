@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="678" height="430" viewBox="0 0 678 430" style="font-family:'IBM Plex Sans', Arial, sans-serif">
+<rect x="0" y="0" width="678" height="430" fill="#FFFFFF"/>
+<rect x="236" y="44" width="54" height="336" fill="#F2F2EE"/>
+<text x="263.0" y="20" text-anchor="middle" font-size="11" fill="#6B7079">IV кв.</text>
+<text x="263.0" y="35" text-anchor="middle" font-size="11" fill="#6B7079">2026</text>
+<rect x="290" y="44" width="54" height="336" fill="#FFFFFF"/>
+<text x="317.0" y="20" text-anchor="middle" font-size="11" fill="#6B7079">I кв.</text>
+<text x="317.0" y="35" text-anchor="middle" font-size="11" fill="#6B7079">2027</text>
+<rect x="344" y="44" width="54" height="336" fill="#F2F2EE"/>
+<text x="371.0" y="20" text-anchor="middle" font-size="11" fill="#6B7079">II кв.</text>
+<text x="371.0" y="35" text-anchor="middle" font-size="11" fill="#6B7079">2027</text>
+<rect x="398" y="44" width="54" height="336" fill="#FFFFFF"/>
+<text x="425.0" y="20" text-anchor="middle" font-size="11" fill="#6B7079">III кв.</text>
+<text x="425.0" y="35" text-anchor="middle" font-size="11" fill="#6B7079">2027</text>
+<rect x="452" y="44" width="54" height="336" fill="#F2F2EE"/>
+<text x="479.0" y="20" text-anchor="middle" font-size="11" fill="#6B7079">IV кв.</text>
+<text x="479.0" y="35" text-anchor="middle" font-size="11" fill="#6B7079">2027</text>
+<rect x="506" y="44" width="54" height="336" fill="#FFFFFF"/>
+<text x="533.0" y="20" text-anchor="middle" font-size="11" fill="#6B7079">I кв.</text>
+<text x="533.0" y="35" text-anchor="middle" font-size="11" fill="#6B7079">2028</text>
+<rect x="560" y="44" width="54" height="336" fill="#F2F2EE"/>
+<text x="587.0" y="20" text-anchor="middle" font-size="11" fill="#6B7079">II кв.</text>
+<text x="587.0" y="35" text-anchor="middle" font-size="11" fill="#6B7079">2028</text>
+<rect x="614" y="44" width="54" height="336" fill="#FFFFFF"/>
+<text x="641.0" y="20" text-anchor="middle" font-size="11" fill="#6B7079">III кв.</text>
+<text x="641.0" y="35" text-anchor="middle" font-size="11" fill="#6B7079">2028</text>
+<text x="0" y="60" font-size="12" font-weight="600" fill="#16181C">Год 1 — разработка и пилотные трансляции</text>
+<text x="14" y="84" font-size="11" fill="#16181C">Переезд на новые серверы, CDN</text>
+<rect x="239" y="73" width="48" height="14" rx="5" fill="#E8432B"/>
+<text x="14" y="108" font-size="11" fill="#16181C">Пульт организатора</text>
+<rect x="239" y="97" width="102" height="14" rx="5" fill="#E8432B"/>
+<text x="14" y="132" font-size="11" fill="#16181C">Приложение зрителя (iOS, Android)</text>
+<rect x="293" y="121" width="102" height="14" rx="5" fill="#E8432B"/>
+<text x="14" y="156" font-size="11" fill="#16181C">Приложение организатора (камера, NDI)</text>
+<rect x="293" y="145" width="102" height="14" rx="5" fill="#E8432B"/>
+<text x="14" y="180" font-size="11" fill="#16181C">Автонарезка схваток, связка с секретарём</text>
+<rect x="293" y="169" width="102" height="14" rx="5" fill="#E8432B"/>
+<text x="14" y="204" font-size="11" fill="#16181C">Нагрузка и разделение на сервисы</text>
+<rect x="293" y="193" width="102" height="14" rx="5" fill="#9A9FA6"/>
+<text x="14" y="228" font-size="11" fill="#16181C">Пилотные трансляции турниров</text>
+<rect x="347" y="217" width="102" height="14" rx="5" fill="#E8432B"/>
+<text x="14" y="252" font-size="11" fill="#16181C">Юридический этап: оферты, выплаты</text>
+<rect x="347" y="241" width="102" height="14" rx="5" fill="#9A9FA6"/>
+<text x="0" y="276" font-size="12" font-weight="600" fill="#16181C">Год 2 — коммерческая эксплуатация</text>
+<text x="14" y="300" font-size="11" fill="#16181C">Запуск подписок и заказов съёмки</text>
+<rect x="455" y="289" width="48" height="14" rx="5" fill="#E8432B"/>
+<text x="14" y="324" font-size="11" fill="#16181C">Организации Новосибирской области</text>
+<rect x="401" y="313" width="156" height="14" rx="5" fill="#E8432B"/>
+<text x="14" y="348" font-size="11" fill="#16181C">Выход в остальные регионы СФО</text>
+<rect x="509" y="337" width="156" height="14" rx="5" fill="#E8432B"/>
+<text x="14" y="372" font-size="11" fill="#16181C">Выход на 300 событий и 2 500 подписчиков в год</text>
+<rect x="563" y="361" width="102" height="14" rx="5" fill="#E8432B"/>
+<line x1="560" y1="40" x2="560" y2="380" stroke="#16181C" stroke-width="1.5" stroke-dasharray="5,4"/>
+<text x="556" y="398" text-anchor="end" font-size="11" font-weight="600" fill="#16181C">Окупаемость — 1,5 года с момента старта</text>
+<rect x="0" y="410" width="14" height="12" rx="3" fill="#E8432B"/>
+<text x="20" y="420" font-size="11" fill="#6B7079">продукт и бизнес</text>
+<rect x="130" y="410" width="14" height="12" rx="3" fill="#9A9FA6"/>
+<text x="150" y="420" font-size="11" fill="#6B7079">инфраструктура и юридическая база</text>
+</svg>
