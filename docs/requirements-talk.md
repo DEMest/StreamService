@@ -9,6 +9,7 @@
 
 - [`requirements-talk-slides.pdf`](requirements-talk-slides.pdf) — презентация, 9 слайдов;
 - [`requirements-plan-gantt.png`](requirements-plan-gantt.png) — план работ диаграммой Ганта (тот же, что на последнем слайде).
+- [`srs.md`](srs.md) — полная спецификация требований с номерами и статусом.
 
 ---
 
