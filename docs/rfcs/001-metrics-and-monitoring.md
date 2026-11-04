@@ -118,3 +118,43 @@
 Сейчас нам наиболее полезны:
 - Concurrent Users (CCU) по регионам
 - Peak Concurrent Users (PCU) / Peak Online
+
+## Решение
+### Набора метрик
+Из описанных выше метрик выберем следующий *минимально необходимый* набор:
+- Базовое состояние машины
+	- Total CPU Utilization (%)
+	- CPU Load Average (1m, 5m, 15m)
+	- Memory Available (%)
+	- Disk Space Used (%)
+	- Network Traffic / Throughput (Bytes In/Out)
+- Состояние контейнеров
+	- Container CPU Throttling (Throttled Time)
+	- Container CPU Usage (Relative to Limit)
+	- Container Memory Usage (RSS / Cache)
+	- OOMKilled (Out of Memory Killed)
+- Обработка видеопотоков
+	- HTTP Status Codes By Content Type
+	- Transcoding Speed / Real-Time Factor (RTF)
+	- Ingest Packet Drop / Jitter
+- Расширение системы через CDN и тестирование
+	- Cache Hit Ratio(эмуляция)
+	- Concurrent Users (CCU) по регионам / ASN (провайдерам)
+	- Peak Concurrent Users (PCU) / Peak Online
+
+### Базовый стек
+Самым безопасным для нас выбором для сбора метрик будет Prometheus Stack из-за своей популярности:
+- **Prometheus** для агрегации метрик
+	- Если окажется сильно прожорливым, можно поменять на VictoriaMetrics. При этом конфигурация остаётся той же
+- **Node Exporter** для сбора метрик о хосте
+- **cAdvisor** для опроса контейнеров
+- **Grafana** для визуализации
+
+### Интеграция в систему
+Прежде чем разворачивать систему сбора метрик, необходимо явно задать лимиты для контейнеров, иначе метрики, связанные с ними, будут бесполезны
+
+Весь стек разворачивается отдельными отдельными контейнерами, после чего Prometheus сможет самостоятельно опрашивать нужные ресурсы. Данные о хосте и контейнерах будут собираться через Node Exporter и cAdvisor. От нас требуется только связь с приложением и MediaMTX
+
+Существует готовая библиотека для интеграции NestJS с Prometheus: `@willsoto/nestjs-prometheus`. В ней можно вводить кастомные метрики, что понадобиться для HTTP Status Codes By Content Type
+
+MediaMTX интегрируется нативно через конфигурацию. Сбор данных о пиковом онлайне и потерянных пакетах есть нативно. Для отслеживания географии потребуется читать логи Nginx, а для скорости обработки видеопотока - логи Ffmpeg. Для этого можно использовать Grafan Loki
