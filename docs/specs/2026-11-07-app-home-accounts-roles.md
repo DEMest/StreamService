@@ -318,7 +318,7 @@ Account ──владеет──► Organization ──► Stream (category) �
 | `Stream` | `+category` = `organizer` \| `personal` \| `school` \| `participant` \| `tournament` (default `organizer`), `+eventId` (nullable) | Категории каналов. Бэкфилл: все существующие строки — `organizer` |
 | `Subscription` | **Новая**: `id`, `accountId`, `targetType` (`organization` \| `account` \| `stream`), `targetId`, `notify Json`, `createdAt`; `@@unique([accountId, targetType, targetId])`, индекс по `(targetType, targetId)` | Одна таблица на три вида подписок; индекс по цели — чтобы при старте эфира быстро найти, кого уведомить |
 | `AccountRole` | **Новая**: `id`, `accountId`, `kind` (`school` \| `participant`), `attributes Json`, `searchName` (nullable, индекс), `schoolRoleId` (nullable, self-relation для участника), `streamId` (nullable), `createdAt`; `@@unique([accountId, kind])` | Роль с расширяемыми атрибутами; какие из них публичны — правило FR-135 в коде, а не флаг в данных |
-| `GuardianConsent` | **Новая**: `id`, `participantRoleId`, `guardianAccountId`, `consentAt`, `consentVersion`, `revokedAt` (nullable) | Согласие родителя за несовершеннолетнего участника: публикация (FR-136) и съёмка схваток ([`2026-11-07-media-agent-app.md`](2026-11-07-media-agent-app.md), FR-224) — одна таблица на оба случая |
+| `ParticipantConsent` | **Новая**: `id`, `participantRoleId`, `scope` (`publish` \| `filming`), `givenByAccountId`, `giver` (`self` \| `guardian`), `consentAt`, `consentVersion`, `revokedAt` (nullable) | Согласия участника: публикация страницы несовершеннолетнего (FR-136) и съёмка схваток ([`2026-11-07-media-agent-app.md`](2026-11-07-media-agent-app.md), FR-224, FR-225) — одна таблица |
 | `Event` | **Новая**, из FR-30: `id`, `orgId`, `title`, `startsAt`, `endsAt`, `venueCount`, `createdAt` | Турнир. В истории миграций есть `20260702000000_drop_event`, удалившая прежние `Event` и `EventStream` (M:N); здесь связь другая — `Stream.eventId` 1:N; старую миграцию не трогать, только новая вперёд |
 | `Registration` | **Новая**: `id`, `eventId`, `participantRoleId`, `registeredByAccountId`, `status`, `createdAt`; `@@unique([eventId, participantRoleId])` | Заявка участника на турнир |
 | `ChatMessage` | `+accountId` (nullable) | Сообщение авторизованного человека привязано к аккаунту; имя и аватар берутся из `Account` при выдаче, поэтому всегда текущие. Гость — по никнейму |
@@ -328,7 +328,7 @@ Account ──владеет──► Organization ──► Stream (category) �
 шаг 2 — идемпотентный скрипт в `prisma/data/004-*.ts`, как остальные
 бэкфиллы проекта; каждый шаг обратим):
 
-1. Таблицы `Account`, `Subscription`, `AccountRole`, `Event`, `Registration`;
+1. Таблицы `Account`, `Subscription`, `AccountRole`, `ParticipantConsent`, `Event`, `Registration`;
    колонки `Organization.ownerAccountId`, `Organization.kind`,
    `Stream.category`, `Stream.eventId`, `ChatMessage.accountId` — все
    nullable или с default.
