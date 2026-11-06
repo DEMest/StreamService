@@ -1,0 +1,39 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: streamservice
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - storage.yaml
+  - postgres.yaml
+  - minio.yaml
+  - minio-init-job.yaml
+  - mediamtx.yaml
+  - api.yaml
+  - web.yaml
+  - ingress.yaml
+
+# mediamtx.yml здесь — КОПИЯ infra/mediamtx/mediamtx.yml (kustomize не даёт
+# ссылаться на файлы вне своего каталога без отключения защиты). Пара легко
+# разъезжается: правя один файл, правь второй. Сам infra/mediamtx/* этим PR
+# не затронут намеренно: любой его diff рестартует MediaMTX на проде.
+configMapGenerator:
+  - name: mediamtx-config
+    files:
+      - mediamtx.yml
+
+# Без суффикса-хеша в имени ConfigMap. С хешем любая правка конфига меняла бы
+# имя, Deployment mediamtx пересоздавался бы сам и обрывал приём SRT/RTMP у
+# всех стримеров. Без хеша конфиг подхватывается только при ЯВНОМ рестарте
+# (kubectl rollout restart deploy/mediamtx), то есть тогда, когда это решил
+# человек, а не git push.
+generatorOptions:
+  disableNameSuffixHash: true
+
+# Образы без тега: тег подставляют оверлеи (images:).
+images:
+  - name: streamservice-api
+  - name: streamservice-web
+  - name: streamservice-mediamtx

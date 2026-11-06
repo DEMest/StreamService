@@ -1,0 +1,512 @@
+# ЧЕРНОВИК. Маршруты основного домена и поддоменов, перенесённые из
+# infra/deploy/nginx-streamservice.conf (снимок 2026-09-02) на Ingress + Traefik.
+# Файл сгенерирован по таблице маршрутов и правится руками как обычный YAML.
+#
+# Как читать приоритеты. Traefik выбирает маршрут по длине правила, а Exact-путь
+# короче Prefix-пути, поэтому полагаться на «самый длинный выигрывает» нельзя.
+# Приоритет задан явно (аннотация router.priority):
+#   200  точные редиректы (ads: «/»)
+#   150  защитные маршруты основного домена (/admin, /api/v1/admin)
+#   100  обычные маршруты
+#    50  ads: /admin → кабинет (уступает /admin/ads, который 100)
+#     1  catch-all'ы поддоменов и http→https
+# Если правишь маршруты — перепроверь порядок на каждом хосте.
+
+# Основной сайт → Next.js (он сам проксирует /api и /hls на api через rewrites).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: site-main
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-security-headers@kubernetescrd,streamservice-body-limit@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: liga-live.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+# Чат (WebSocket) → api. Без body-limit: buffering ломает апгрейд соединения.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: site-socketio
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-security-headers@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: liga-live.ru
+      http:
+        paths:
+          - path: /socket.io
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  name: http
+---
+# Публичная статика лендинга (демо-ролик) → бакет streamservice-public в MinIO.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: site-static
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-static-to-bucket@kubernetescrd,streamservice-security-headers@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: liga-live.ru
+      http:
+        paths:
+          - path: /static
+            pathType: Prefix
+            backend:
+              service:
+                name: minio
+                port:
+                  name: s3
+---
+# Админки на основном домене нет: /admin уезжает на admin.liga-live.ru.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: site-admin-redirect
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-redirect-admin-main@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "150"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: liga-live.ru
+      http:
+        paths:
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+# /api/v1/admin на основном домене → 404 (см. middleware block-path).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: site-admin-api-block
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-block-path@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "150"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: liga-live.ru
+      http:
+        paths:
+          - path: /api/v1/admin
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+# www → канонический домен одним редиректом.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: site-www
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-redirect-www@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - www.liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: www.liga-live.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+# Админка суперадмина. Только перечисленное: чем меньше живёт на этом имени,
+# тем меньше шансов затереть админскую cookie организацией.
+# /api/v1/public/feedback нужен общей шапке (FeedbackModal).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: admin-main
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-security-headers@kubernetescrd,streamservice-noindex@kubernetescrd,streamservice-body-limit@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - admin.liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: admin.liga-live.ru
+      http:
+        paths:
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+          - path: /login
+            pathType: Exact
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+          - path: /api/v1/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+          - path: /api/v1/admin
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+          - path: /api/v1/public/feedback
+            pathType: Exact
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+          - path: /_next
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+# Всё остальное на admin. → основной сайт (редирект, не 404).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: admin-catchall
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-redirect-to-main@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "1"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - admin.liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: admin.liga-live.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+# Кабинет рекламного менеджера: ровно одна страница /admin/ads и её API.
+# /api/v1/public/ads отдаёт превью баннеров.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ads-main
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-security-headers@kubernetescrd,streamservice-noindex@kubernetescrd,streamservice-body-limit@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - ads.liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: ads.liga-live.ru
+      http:
+        paths:
+          - path: /admin/ads
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+          - path: /login
+            pathType: Exact
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+          - path: /api/v1/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+          - path: /api/v1/admin/ads
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+          - path: /api/v1/public/ads
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+          - path: /api/v1/public/feedback
+            pathType: Exact
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+          - path: /_next
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+# Голое имя ads.liga-live.ru → кабинет.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ads-root
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-ads-to-cabinet@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "200"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - ads.liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: ads.liga-live.ru
+      http:
+        paths:
+          - path: /
+            pathType: Exact
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+# /admin на ads. → кабинет. Приоритет ниже ads-main, чтобы /admin/ads не перехватывался.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ads-admin-redirect
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-ads-to-cabinet@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "50"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - ads.liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: ads.liga-live.ru
+      http:
+        paths:
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+# Всё остальное на ads. → основной сайт.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ads-catchall
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-redirect-to-main@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "1"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - ads.liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: ads.liga-live.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+# http → https для всех имён. Приоритет 1: временные Ingress'ы cert-manager для
+# HTTP-01 (/.well-known/acme-challenge/<токен>) длиннее и выигрывают.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: http-redirect
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-redirect-https@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "1"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: liga-live.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+    - host: www.liga-live.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+    - host: admin.liga-live.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+    - host: ads.liga-live.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+# Прямой TLS-проброс S3 на :9443 для presigned-ссылок архива. Path не трогаем:
+# SigV4 подписывает весь путь. Entrypoint `minio` создаётся в
+# k8s/cluster/traefik-config.yaml.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: minio-s3
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: minio
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: liga-live.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio
+                port:
+                  name: s3

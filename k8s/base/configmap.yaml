@@ -1,0 +1,54 @@
+# Несекретные настройки. Те же имена, что в .env / docker-compose.yml.
+# Секреты (пароли, токены, ключи) здесь НЕ лежат: они в Secret
+# streamservice-secrets, который создаётся отдельно (см. k8s/README.md).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: streamservice-config
+  labels:
+    app.kubernetes.io/part-of: streamservice
+data:
+  NODE_ENV: "production"
+  API_PORT: "3001"
+
+  # Внутренние адреса. Имена сервисов совпадают с compose-алиасами
+  # (postgres, minio, mediamtx, api, web) — на них завязаны mediamtx.yml
+  # (authHTTPAddress: http://api:3001), on-ready.sh и build-arg API_UPSTREAM
+  # образа web. Переименуешь сервис — сломается связка.
+  MEDIAMTX_API_URL: "http://mediamtx:9997"
+  S3_ENDPOINT: "http://minio:9000"
+
+  # Задаются оверлеями (пусто = как в compose по умолчанию).
+  CORS_ORIGIN: ""
+  COOKIE_SECURE: ""
+  SITE_URL: ""
+  S3_PUBLIC_ENDPOINT: ""
+  INGEST_HOST: ""
+
+  MEDIAMTX_SRT_PORT: "8890"
+  MEDIAMTX_RTMP_PORT: "1935"
+
+  S3_REGION: "us-east-1"
+  S3_BUCKET: "streamservice-archive"
+  S3_FORCE_PATH_STYLE: "true"
+
+  RECORDING_GLUE_TIMEOUT_MINUTES: "60"
+
+  # true — три x264-рендиции (~7 ядер на 4K-входе), false — только HD-copy.
+  HLS_LQ_ENABLED: "true"
+
+  SMTP_HOST: ""
+  SMTP_PORT: "587"
+  SMTP_SECURE: ""
+  MAIL_FROM: ""
+  MAIL_TO: ""
+  TELEGRAM_CHAT_ID: ""
+  INDEXNOW_KEY: ""
+
+  # Метрики ёмкости. NGINX_LOG_PATH в кластере пока указывает в никуда:
+  # лог nginx сюда не смонтирован, метрики отдачи будут нулевыми (так же,
+  # как сейчас на проде, см. DEPLOY.md). Решается отдельно, не в этом PR.
+  UPLINK_MBPS: "750"
+  CAPACITY_HEADROOM: "0.2"
+  NGINX_LOG_PATH: "/var/log/nginx/capacity.log"
+  CAPACITY_DEMO: "false"
