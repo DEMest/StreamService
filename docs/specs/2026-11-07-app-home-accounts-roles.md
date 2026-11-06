@@ -218,22 +218,29 @@ Account ──владеет──► Organization ──► Stream (category) �
    │                             │
    │                             └── Registration ──► AccountRole (participant)
    │
-   └── AccountRole (school | participant) ──► Stream (category = school | participant)
+   └── AccountRole (school | participant) ──► Stream (category = school | participant,
+                                                      orgId = personal-организация аккаунта)
 ```
+
+Инвариант «каждый Stream принадлежит Organization» сохраняется: канал
+школы или участника лежит под скрытой `personal`-организацией того же
+аккаунта, а не вне тенантности.
 
 | Таблица | Изменение | Зачем |
 |---|---|---|
 | `Account` | **Новая**: `id`, `email` (unique), `passwordHash`, `displayName`, `emailVerifiedAt`, `createdAt` | Аккаунт человека. Не расширяем `User`: там живут служебные роли платформы с другим жизненным циклом и другим поддоменом входа |
-| `Organization` | `+ownerAccountId` (nullable на время миграции), `+kind` = `organizer` \| `personal` | Владение и «организаторство». `personal` — скрытый арендатор зрителя: так безликий канал живёт в той же модели `Organization → Stream`, и `/v1/org/*`, пути ингеста `live/<slug>/<stream>`, запись, чат и приватность работают без второй ветки кода |
+| `Organization` | `+ownerAccountId` (nullable на время миграции), `+kind` = `organizer` \| `personal` | Владение и «организаторство». `personal` — скрытый арендатор зрителя: так безликий канал живёт в той же модели `Organization → Stream`, и `/v1/org/*`, пути ингеста `live/<slug>/<stream>`, запись, чат и приватность работают без второй ветки кода. `slug` и `name` у неё генерируются (`u-<id аккаунта>`), не выбираются человеком и не пересекаются ни с публичными слагами, ни с `RESERVED_STREAM_SLUGS`. Вместе с ней создаётся её единственный Stream `personal` — осознанное исключение из правила «новая организация без Stream'ов», которое для `organizer` остаётся в силе |
 | `Organization.passwordHash` | Остаётся, пока есть организации без `ownerAccountId`; `AuthService.login` пробует `Account`, затем, как сегодня, `Organization` по slug | Плавный переход: ни одна организация не теряет вход в день выкатки |
 | `Stream` | `+category` = `organizer` \| `personal` \| `school` \| `participant` \| `tournament` (default `organizer`), `+eventId` (nullable) | «Новые категории в таблице каналов». Бэкфилл: все существующие строки — `organizer` |
 | `AccountRole` | **Новая**: `id`, `accountId`, `kind` (`school` \| `participant`), `attributes Json`, `searchName` (nullable, индекс), `schoolRoleId` (nullable, self-relation для участника), `streamId` (nullable), `createdAt`; `@@unique([accountId, kind])` | Роль с расширяемыми атрибутами; поиск по фамилии через `searchName` |
-| `Event` | Из FR-30: `id`, `orgId`, `title`, `startsAt`, `endsAt`, `venueCount`, `createdAt` | Турнир |
+| `Event` | **Новая**, из FR-30: `id`, `orgId`, `title`, `startsAt`, `endsAt`, `venueCount`, `createdAt` | Турнир. Таблица с таким именем уже была и удалена миграцией `20260702000000_drop_event` вместе с `EventStream` (M:N). Это повторное введение с другой связью — `Stream.eventId` 1:N; старую миграцию не трогать, только новая вперёд |
 | `Registration` | **Новая**: `id`, `eventId`, `participantRoleId`, `registeredByAccountId`, `status`, `createdAt`; `@@unique([eventId, participantRoleId])` | Заявка участника на турнир |
 | `ChatMessage` | `+accountId` (nullable) | Сообщение авторизованного зрителя привязано к аккаунту; гость на сайте — как сегодня, по никнейму |
 | JWT | `role: 'account'` с `accountId`, список `orgIds` владения; `org_admin` остаётся для не мигрировавших организаций | Клиент решает про «Студию» по наличию организаций в `/v1/auth/me` |
 
-Порядок миграции (каждый шаг — отдельная миграция, обратимая):
+Порядок миграции (шаги 1 и 3 — схемные миграции в `prisma/migrations/`,
+шаг 2 — идемпотентный скрипт в `prisma/data/004-*.ts`, как остальные
+бэкфиллы проекта; каждый шаг обратим):
 
 1. Таблицы `Account`, `AccountRole`, `Event`, `Registration`; колонки
    `Organization.ownerAccountId`, `Organization.kind`, `Stream.category`,
@@ -245,6 +252,12 @@ Account ──владеет──► Organization ──► Stream (category) �
 3. Вход через `Account`; `Organization.passwordHash` помечается
    устаревшим. Удаляется отдельной миграцией, когда организаций без
    владельца не останется — по тому же правилу, что `ChatMessage.orgId`.
+
+Что при реализации меняется в зафиксированных сегодня фактах `CLAUDE.md` и
+правится вместе с кодом: никнейм чата хранится на клиенте (FR-123); список
+ролей JWT и таблица разделов `apps/web/src/lib/sections.ts` с проверкой в
+`middleware.ts` (новая роль `account`); правило «новая организация без
+Stream'ов» (исключение для `personal`).
 
 ---
 
