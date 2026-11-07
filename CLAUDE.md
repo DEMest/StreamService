@@ -421,6 +421,14 @@ Additional skills are available on request in `.claude/skills/`:
   every task — this is the default for any session in this repository. It is
   overridden by an explicit request in a given session ("don't merge, leave it
   for review") and by the two hard stops below.
+- **Docs-only PRs have no CI.** `ci.yml` skips `**.md`, `docs/**`,
+  `.claude/**`, `CODEOWNERS`, `LICENSE` and `infra-diagram.html` on both
+  `pull_request` and `push`, so a PR touching only those gets no checks and
+  `gh pr checks --watch` has nothing to wait for — merge it right away. Its
+  merge does not deploy either: nothing in that list reaches a build or an
+  image, and the commits land on the server with the next code release. A PR
+  that mixes code and docs runs the full pipeline as before. The ruleset has
+  no required status checks on purpose — adding one would block these PRs.
 - **Hard stop 1 — red CI.** Never merge something broken. Stop and report.
 - **Hard stop 2 — `live-safety-auditor` returned FAIL.** See Deployment below.
 - Merge PRs **one at a time**, waiting for each deploy to finish before merging

@@ -12,13 +12,37 @@ on:
     paths-ignore:
       - 'services/telegram-github-issues-bot/**'
       - '.github/workflows/telegram-github-issues-bot.yml'
+      # Документация и настройки агентов. Ничего из этого не попадает ни в
+      # сборку, ни в образы: код не читает markdown (проверено — в apps/ нет
+      # ни одного .md), docs/diagrams/*.cjs — генератор картинок, а не часть
+      # приложения. Прогон на self-hosted раннере ради правки текста — это
+      # ~5 минут очереди впустую. Список один в один повторяется у push ниже.
+      # Обязательных status-check'ов в ruleset «Protect main» нет, поэтому
+      # PR без прогона мержится как обычно — только без галочек.
+      - '**.md'
+      - 'docs/**'
+      - '.claude/**'
+      - '.github/CODEOWNERS'
+      - 'LICENSE'
+      - 'infra-diagram.html'
   push:
     branches: [main]
     # Тот же фильтр для merge в main: иначе deploy ниже перезапустил бы
-    # основной видеосервис при обновлении только независимого бота.
+    # основной видеосервис при обновлении только независимого бота — или
+    # при правке одной документации. Мерж docs-only PR не трогает прод
+    # вообще: ни пересборки, ни паузы HLS. Коммиты с докой доедут на сервер
+    # вместе со следующей кодовой выкаткой (deploy.sh делает git merge
+    # origin/main), а его проверка diff'а смотрит только на infra/mediamtx/ и
+    # docker-compose.yml, так что накопившиеся docs-коммиты ей безразличны.
     paths-ignore:
       - 'services/telegram-github-issues-bot/**'
       - '.github/workflows/telegram-github-issues-bot.yml'
+      - '**.md'
+      - 'docs/**'
+      - '.claude/**'
+      - '.github/CODEOWNERS'
+      - 'LICENSE'
+      - 'infra-diagram.html'
   # Ручной запуск. Нужен не для удобства: push и pull_request зависят от
   # доставки событий, а workflow_dispatch дёргается прямым вызовом API — это
   # запасной путь, когда доставка событий у GitHub деградирует (проверено на
