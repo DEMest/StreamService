@@ -425,8 +425,9 @@ Additional skills are available on request in `.claude/skills/`:
   `.claude/**`, `CODEOWNERS`, `LICENSE` and `infra-diagram.html` on both
   `pull_request` and `push`, so a PR touching only those gets no checks and
   `gh pr checks --watch` has nothing to wait for — merge it right away. Its
-  merge does not deploy either: nothing in that list reaches a build or an
-  image, and the commits land on the server with the next code release. A PR
+  merge does not deploy either: nothing in that list is read by the build or
+  at runtime, and the commits land on the server with the next code release.
+  `deploy.sh` ignores `.md` in its MediaMTX-restart diff for the same reason. A PR
   that mixes code and docs runs the full pipeline as before. The ruleset has
   no required status checks on purpose — adding one would block these PRs.
 - **Hard stop 1 — red CI.** Never merge something broken. Stop and report.
@@ -457,7 +458,8 @@ which reaches this server over Tailscale and runs `infra/deploy/deploy.sh`.
 What that means for how you work:
 
 - **A merge is a production release.** There is no separate "deploy" step you
-  or the user perform afterwards.
+  or the user perform afterwards. The one exception is a docs-only merge,
+  which runs neither CI nor deploy — see Git flow above.
 - The deploy rebuilds and restarts **`api` and `web`, with `--no-deps`**.
   MediaMTX is left alone by default, so live ingest, the FFmpeg ABR ladder and
   recording all continue uninterrupted across a deploy.
