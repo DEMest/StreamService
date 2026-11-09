@@ -201,8 +201,13 @@ fi
 # насовсем. Теперь diff смотрим всегда.
 RESTART_MEDIAMTX=0
 if [ -n "$DEPLOYED_SHA" ]; then
+  # Markdown исключён намеренно: ci.yml не деплоит docs-only мержи, так что
+  # README в infra/mediamtx/ доехал бы сюда только со следующей кодовой
+  # выкаткой — и без этого исключения перезапустил бы mediamtx (или оборвал
+  # выкатку под эфиром) из-за правки текста.
   if git diff --name-only "$DEPLOYED_SHA" "$TARGET_SHA" \
-       | grep -qE '^infra/mediamtx/|^docker-compose\.yml$'; then
+       | grep -E '^infra/mediamtx/|^docker-compose\.yml$' \
+       | grep -qvE '\.md$'; then
     if [ "$LIVE_COUNT" -eq 0 ] && [ "$LIVE_PROBE_OK" = "1" ]; then
       RESTART_MEDIAMTX=1
       log "diff трогает mediamtx, эфиров нет — перезапустим его вместе с остальным"
