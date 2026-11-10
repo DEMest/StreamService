@@ -1,0 +1,17 @@
+# Один сертификат на все четыре имени (как сейчас: один lineage с SAN),
+# выпускается cert-manager по HTTP-01 через Traefik. Заменяет acme-responder и
+# renew-certs.sh. Требует ClusterIssuer из k8s/cluster/cluster-issuer.yaml.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: liga-live-tls
+spec:
+  secretName: liga-live-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - liga-live.ru
+    - www.liga-live.ru
+    - admin.liga-live.ru
+    - ads.liga-live.ru

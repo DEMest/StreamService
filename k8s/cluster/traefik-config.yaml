@@ -1,0 +1,27 @@
+# Настройка встроенного Traefik в k3s. Применяется ОДИН раз на кластер, не
+# через оверлеи (kustomize переписал бы namespace на streamservice, а Traefik
+# живёт в kube-system):
+#   kubectl apply -f k8s/cluster/traefik-config.yaml
+#
+# Добавляет entrypoint `minio` на :9443 с TLS. Сейчас на проде presigned-ссылки
+# архива ходят на liga-live.ru:9443 (S3_PUBLIC_ENDPOINT), и менять этот адрес
+# без пересмотра подписи SigV4 нельзя.
+#
+# Не проверено на реальном кластере. Имена полей — по values-схеме helm-чарта
+# Traefik; перед боевым применением сверить с версией чарта в k3s.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    ports:
+      minio:
+        port: 9443
+        exposedPort: 9443
+        protocol: TCP
+        expose:
+          default: true
+        tls:
+          enabled: true

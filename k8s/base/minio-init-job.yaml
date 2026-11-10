@@ -1,0 +1,50 @@
+# Создаёт приватный бакет архива, если его ещё нет. API бакеты сам не создаёт
+# (в s3.service.ts нет CreateBucket), а в compose это делалось руками.
+# Идемпотентно: `mc mb --ignore-existing`.
+#
+# Публичный бакет streamservice-public (демо-ролик лендинга) намеренно НЕ
+# создаётся: его политика и заливка описаны в .env.example и делаются вручную.
+#
+# Job неизменяем: при изменении spec его нужно удалить перед apply
+# (kubectl -n streamservice delete job minio-init).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init
+  labels:
+    app.kubernetes.io/name: minio-init
+    app.kubernetes.io/part-of: streamservice
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio-init
+        app.kubernetes.io/part-of: streamservice
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          # Образ без оболочки: alias задаётся переменной MC_HOST_local, команда
+          # без sh. Пока MinIO не поднялся, mc падает, Job перезапускается сам.
+          image: cgr.dev/chainguard/minio-client:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MINIO_USER
+              valueFrom:
+                secretKeyRef:
+                  name: streamservice-secrets
+                  key: S3_ACCESS_KEY_ID
+            - name: MINIO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: streamservice-secrets
+                  key: S3_SECRET_ACCESS_KEY
+            - name: S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: streamservice-config
+                  key: S3_BUCKET
+            - name: MC_HOST_local
+              value: "http://$(MINIO_USER):$(MINIO_PASSWORD)@minio:9000"
+          args: ["mb", "--ignore-existing", "local/$(S3_BUCKET)"]
