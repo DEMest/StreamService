@@ -1,11 +1,13 @@
 import json
 import os
+import re
 import requests
 import sys
 
 DASHBOARD_IDS = [
     1860,  # Node Exporter
-    14282  # cAdvisor Exporter
+    14282, # cAdvisor Exporter
+    19062, # NodeJS Applications Dashboard
 ]
 OUTPUT_DIR = "/etc/grafana/provisioning/dashboards"
 PROMETHEUS_NAME = "Prometheus"
@@ -29,8 +31,8 @@ for db_id in DASHBOARD_IDS:
         response.raise_for_status()
 
         raw_text = response.text
-        raw_text = raw_text.replace('"${DS_PROMETHEUS}"', f'"{PROMETHEUS_NAME}"')
-        raw_text = raw_text.replace("${DS_PROMETHEUS}", PROMETHEUS_NAME)
+        raw_text = re.sub(r'"\${DS_[A-Z_]+}"', f'"{PROMETHEUS_NAME}"', raw_text)
+        raw_text = re.sub(r'\${DS_[A-Z_]+}', PROMETHEUS_NAME, raw_text)
 
         dashboard_data = json.loads(raw_text)
 

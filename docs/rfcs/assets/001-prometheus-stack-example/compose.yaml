@@ -93,6 +93,20 @@ services:
         limits:
           memory: 256M
           cpus: "0.5"
+  app:
+    build:
+      context: ./app/
+      dockerfile: Dockerfile
+      target: production
+    container_name: app
+    ports:
+      - 8080:8080
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
 
 volumes:
   prometheus_data:
