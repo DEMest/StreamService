@@ -8,11 +8,17 @@ on:
     paths:
       - 'services/telegram-github-issues-bot/**'
       - '.github/workflows/telegram-github-issues-bot.yml'
+      # paths и paths-ignore в одном событии не сочетаются, поэтому
+      # документация бота исключается отрицанием: README не влияет на образ.
+      - '!services/telegram-github-issues-bot/**.md'
   push:
     branches: [main]
     paths:
       - 'services/telegram-github-issues-bot/**'
       - '.github/workflows/telegram-github-issues-bot.yml'
+      # paths и paths-ignore в одном событии не сочетаются, поэтому
+      # документация бота исключается отрицанием: README не влияет на образ.
+      - '!services/telegram-github-issues-bot/**.md'
   workflow_dispatch:
 
 concurrency:
