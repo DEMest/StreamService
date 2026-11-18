@@ -161,11 +161,15 @@
 ### Сбор метрик и визуализация
 Для работы мониторинга вводятся отдельные контейнеры с Prometheus, Node Exporter, cAdvisor и Grafana. Поток данных будет следующим:
 ```mermaid
-flowchart RL
-	prom[Prometheus] --сбор метрик--> app[NestJS приложение]
-	prom --сбор метрик--> nodeExp[Node Exporter]
-	prom --сбор метрик--> cAdv[cAdvisor]
-	grafana[Grafana] ----> prom
+flowchart LR
+	nodeExp[Node Exporter] --метрики--> prom[Prometheus]
+	cAdv[cAdvisor] --метрики--> prom
+	app[NestJS приложение] --метрики--> prom
+	app --сырые логи--> vector[Vector]
+	ffmpeg[FFmpeg] --сырые логи--> vector
+	vector --распаршенные логи--> clickH[ClickHouse]
+	prom --> grafana[Grafana]
+	clickH --> grafana
 ```
 
 Метрики Prometheus получает от агентов по запросу и хранит внутри себя. Grafana лишь вытаскивает из него эти данные и визуализирует
