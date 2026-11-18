@@ -139,11 +139,9 @@
 	- Container Memory Usage (RSS / Cache)
 	- OOMKilled (Out of Memory Killed)
 - Обработка видеопотоков
-	- HTTP Status Codes By Content Type
 	- Transcoding Speed / Real-Time Factor (RTF)
 	- Ingest Packet Drop / Jitter
 - Расширение системы через CDN и тестирование
-	- Cache Hit Ratio(эмуляция)
 	- Concurrent Users (CCU) по регионам / ASN (провайдерам)
 	- Peak Concurrent Users (PCU) / Peak Online
 
