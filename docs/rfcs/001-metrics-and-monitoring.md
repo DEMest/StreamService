@@ -174,3 +174,19 @@ flowchart RL
 - [Node Exporter Full](https://grafana.com/grafana/dashboards/1860-node-exporter-full/)
 - [Cadvisor exporter](https://grafana.com/grafana/dashboards/14282-cadvisor-exporter/)
 - [NodeJS Application Dashboard](https://grafana.com/grafana/dashboards/11159-nodejs-application-dashboard/)
+
+### Метрики NestJS приложения
+Сбор общих метрик о состоянии приложения прост. Для этого необходимо установить библиотеки `@prometheus-io/client` и `@willsoto/nestjs-prometheus` и добавить его модуль(по умолчанию работает на `/metrics`):
+```js
+import { Module } from '@nestjs/common';
+import { PrometheusModule } from '@willsoto/nestjs-prometheus';
+
+@Module({
+  imports: [PrometheusModule.register({})],
+})
+export class AppModule {}
+```
+
+Собирать Peak Concurrent Users (PCU) / Peak Online можно прямо из приложения через телеметрию(QoE) с помощью Gauge-метрики(при подключении увеличить, при потере соединения - уменьшить). Потерю соединения можно определять по таймауту heartbeat веб-сокета
+
+Такой же механизм можно использовать для сбора Concurrent Users (CCU) по регионам / ASN (провайдерам). Сами данные о регионе и провайдере можно получать на уровне Nginx и передавать в http-заголовке
