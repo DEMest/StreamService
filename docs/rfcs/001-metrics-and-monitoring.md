@@ -163,8 +163,10 @@
 ```mermaid
 flowchart LR
 	nodeExp[Node Exporter] --метрики--> prom[Prometheus]
+	mtx[MediaMTX] --метрики--> prom
 	cAdv[cAdvisor] --метрики--> prom
-	app[NestJS приложение] --метрики--> prom
+	nginx[Nginx] --регион и провайдер--> app[NestJS приложение]
+	app --метрики--> prom
 	app --сырые логи--> vector[Vector]
 	ffmpeg[FFmpeg] --сырые логи--> vector
 	vector --распаршенные логи--> clickH[ClickHouse]
