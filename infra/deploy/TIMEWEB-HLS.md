@@ -7,9 +7,9 @@
 Добавить A-запись `hls-origin.liga-live.ru` на HostKey. Шаблон вставляется отдельным файлом в `conf.d` внешнего `edge-nginx`, в контексте `http`. Заменить `cdn-test/test-live` на фактические slug выделенной тестовой организации и публичного стрима. Зона `hls_cache` уже объявлена в существующем конфиге edge-nginx.
 
 ```nginx
-map $status:$uri $cdn_pilot_cache_control {
+map $status:$uri:$http_range $cdn_pilot_cache_control {
   default "no-store";
-  ~^200:.*\.ts$ "public, max-age=0, s-maxage=5";
+  ~^200:.*\.ts:$ "public, max-age=0, s-maxage=5";
 }
 
 server {
@@ -40,6 +40,8 @@ server {
   proxy_set_header Authorization "";
   proxy_set_header Cookie "";
   proxy_set_header Origin "";
+  proxy_set_header Range $http_range;
+  proxy_set_header If-Range $http_if_range;
   proxy_hide_header Access-Control-Allow-Origin;
   proxy_hide_header Cache-Control;
   proxy_hide_header Expires;
