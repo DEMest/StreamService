@@ -91,18 +91,8 @@ jobs:
       - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
 
-      # Схема лежит в корне репозитория; путь прописан в apps/api/package.json
-      # ("prisma": { "schema": "../../prisma/schema.prisma" }).
-      # Без generate нет типов @prisma/client — не соберётся ни nest, ни jest.
-      - name: Генерация клиента Prisma
-        run: pnpm --filter api exec prisma generate
-
-      # nest build прогоняет tsc — отдельная проверка типов не нужна.
-      - name: Сборка (она же проверка типов)
-        run: pnpm --filter api build
-
-      - name: Тесты
-        run: pnpm --filter api test
+      - name: Генерация Prisma, сборка и тесты
+        run: pnpm check:api
 
   web:
     name: Web — типы и сборка
@@ -118,15 +108,9 @@ jobs:
       - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
 
-      # Отдельный проход tsc: next build проверяет только то, что достижимо
-      # из страниц, а tsc — весь src, включая пока не подключённые компоненты.
-      - name: Проверка типов
-        run: pnpm --filter web exec tsc --noEmit
-
-      # NEXT_PUBLIC_* не задаём намеренно: в сборке должны работать дефолты из
-      # кода. Если сборка без них падает — это баг, и его надо видеть здесь.
-      - name: Сборка
-        run: pnpm --filter web build
+      # NEXT_PUBLIC_* намеренно не задаём, сборка проверяет дефолты из кода.
+      - name: Проверка типов и сборка
+        run: pnpm check:web
 
   # ─────────────────────────────────────────────────────────────────────────
   # Выкатка на прод. Идёт только после зелёных api и web, и только на push в
