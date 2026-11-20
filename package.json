@@ -8,7 +8,7 @@
     "dev:api": "pnpm --filter api dev",
     "build:web": "pnpm --filter web build",
     "build:api": "pnpm --filter api build",
-    "check:api": "pnpm --filter api exec prisma generate && pnpm build:api && pnpm --filter api test",
+    "check:api": "pnpm --filter api exec prisma generate && pnpm build:api && pnpm --filter api test --runInBand",
     "check:web": "pnpm --filter web exec tsc --noEmit && pnpm build:web"
   },
   "engines": {
