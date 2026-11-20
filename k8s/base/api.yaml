@@ -1,0 +1,111 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/part-of: streamservice
+spec:
+  selector:
+    app.kubernetes.io/name: api
+  ports:
+    - name: http
+      port: 3001
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/part-of: streamservice
+spec:
+  # Ровно один под. Socket.io держит комнаты чата в памяти, cron-задачи
+  # (склейка записей, SEO, метрики) не рассчитаны на параллельный запуск, а
+  # миграции Prisma идут на старте. Масштабирование — отдельная задача.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: api
+        app.kubernetes.io/part-of: streamservice
+    spec:
+      # В compose это depends_on: service_healthy. В кластере порядка запуска
+      # нет, поэтому ждём зависимости сами, иначе api падает на миграции.
+      initContainers:
+        - name: wait-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - until pg_isready -h postgres -p 5432 -U stream -d streamservice; do echo "postgres ещё не готов"; sleep 2; done
+        - name: wait-minio
+          image: postgres:16-alpine  # тот же образ, что у wait-postgres: wget есть в busybox alpine, лишний образ не нужен
+          command:
+            - sh
+            - -c
+            - until wget -q --spider http://minio:9000/minio/health/ready; do echo "minio ещё не готов"; sleep 2; done
+      containers:
+        - name: api
+          image: streamservice-api
+          ports:
+            - name: http
+              containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: streamservice-config
+            - secretRef:
+                name: streamservice-secrets
+          env:
+            # $(POSTGRES_PASSWORD) раскрывается только из переменных, объявленных
+            # в этом же списке env выше, поэтому пароль берём явно.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: streamservice-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: postgresql://stream:$(POSTGRES_PASSWORD)@postgres:5432/streamservice
+          volumeMounts:
+            - name: recordings
+              mountPath: /recordings
+            - name: hls
+              mountPath: /hls
+          # CMD образа: prisma migrate deploy → seed → node. Старт может быть
+          # долгим при тяжёлой миграции, поэтому startupProbe с запасом (до 5 мин).
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+      volumes:
+        - name: recordings
+          persistentVolumeClaim:
+            claimName: recordings-data
+        - name: hls
+          persistentVolumeClaim:
+            claimName: hls-data
