@@ -153,9 +153,7 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      # Скрипт лежит в репозитории и уже обновлён на сервере шагом git pull
-      # внутри самого скрипта. Здесь мы его только запускаем — вся логика
-      # (проверка эфира, --no-deps, health-gate, откат, prune) там.
+      # На сервере запускаем скрипт из того же коммита, который проверил CI.
       - name: Запуск infra/deploy/deploy.sh на сервере
         # Форс доступен только через ручной запуск: на push инпутов нет и сюда
         # придёт 0. Значение подставляет bash раннера до вызова ssh.
@@ -165,12 +163,19 @@ jobs:
           # нужна ссылка на прогон — пробрасываем явно.
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          DEPLOY_SHA: ${{ github.sha }}
         run: |
           ssh -i ~/.ssh/deploy_key \
               -o StrictHostKeyChecking=yes \
               -o ConnectTimeout=10 \
               "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-              "cd '${{ secrets.DEPLOY_PATH }}' && git fetch origin main --quiet && git checkout main --quiet && git merge --ff-only origin/main --quiet && FORCE_MEDIAMTX=$FORCE_MEDIAMTX GITHUB_RUN_ID=$GITHUB_RUN_ID GITHUB_REPOSITORY=$GITHUB_REPOSITORY bash infra/deploy/deploy.sh"
+              "cd '${{ secrets.DEPLOY_PATH }}' &&
+               git fetch origin main --quiet &&
+               git merge-base --is-ancestor '$DEPLOY_SHA' origin/main &&
+               git checkout main --quiet &&
+               git merge --ff-only '$DEPLOY_SHA' --quiet &&
+               test \"\$(git rev-parse HEAD)\" = '$DEPLOY_SHA' &&
+               DEPLOY_SHA='$DEPLOY_SHA' FORCE_MEDIAMTX=$FORCE_MEDIAMTX GITHUB_RUN_ID=$GITHUB_RUN_ID GITHUB_REPOSITORY=$GITHUB_REPOSITORY bash infra/deploy/deploy.sh"
 
       - name: Убрать ключ
         if: always()
