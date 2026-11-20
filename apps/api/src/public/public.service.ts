@@ -267,7 +267,19 @@ export class PublicService {
     }
 
     const prefix = mediaUrlPrefix(orgSlug, streamSlug, stream);
-    return { hlsUrl: `${prefix}/live/hls/master.m3u8`, feedMode: stream.feedMode as 'single' | 'composite' };
+    let hlsUrl = `${prefix}/live/hls/master.m3u8`;
+    const cdnOrigin = process.env.LIVE_HLS_CDN_ORIGIN?.trim();
+    const cdnStream = process.env.LIVE_HLS_CDN_STREAM?.trim();
+
+    if (stream.isPublic && streamSlug && cdnStream === `${orgSlug}/${streamSlug}`
+      && cdnOrigin && URL.canParse(cdnOrigin)) {
+      const url = new URL(cdnOrigin);
+      if (url.protocol === 'https:' && (cdnOrigin === url.origin || cdnOrigin === `${url.origin}/`)) {
+        hlsUrl = url.origin + hlsUrl;
+      }
+    }
+
+    return { hlsUrl, feedMode: stream.feedMode as 'single' | 'composite' };
   }
 
   /**
