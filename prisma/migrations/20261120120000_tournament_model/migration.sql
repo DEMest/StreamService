@@ -12,14 +12,16 @@ CREATE TABLE "Event" (
     "birthYearFrom" INTEGER,
     "birthYearTo" INTEGER,
     "level" TEXT NOT NULL,
-    "startsAt" TIMESTAMP(3) NOT NULL,
-    "endsAt" TIMESTAMP(3) NOT NULL,
+    "startsOn" DATE NOT NULL,
+    "endsOn" DATE NOT NULL,
+    "timeZone" TEXT,
     "city" TEXT,
     "address" TEXT,
     "lat" DOUBLE PRECISION,
     "lng" DOUBLE PRECISION,
     "regionCode" TEXT,
     "posterPath" TEXT,
+    "publishedAt" TIMESTAMP(3),
     "startedAt" TIMESTAMP(3),
     "endedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -59,11 +61,11 @@ CREATE TABLE "Bout" (
     "id" TEXT NOT NULL,
     "eventId" TEXT NOT NULL,
     "venueId" TEXT NOT NULL,
-    "redAthleteId" TEXT NOT NULL,
-    "blueAthleteId" TEXT NOT NULL,
+    "redAthleteId" TEXT,
+    "blueAthleteId" TEXT,
     "scheduledAt" TIMESTAMP(3),
+    "sequence" INTEGER,
     "weightClass" TEXT,
-    "status" TEXT NOT NULL DEFAULT 'waiting',
     "startedAt" TIMESTAMP(3),
     "endedAt" TIMESTAMP(3),
     "redScore" INTEGER NOT NULL DEFAULT 0,
@@ -88,10 +90,10 @@ CREATE UNIQUE INDEX "Venue_eventId_number_key" ON "Venue"("eventId", "number");
 CREATE UNIQUE INDEX "Athlete_orgId_identityKey_key" ON "Athlete"("orgId", "identityKey");
 
 -- CreateIndex
-CREATE INDEX "Bout_eventId_status_scheduledAt_idx" ON "Bout"("eventId", "status", "scheduledAt");
+CREATE INDEX "Bout_eventId_scheduledAt_idx" ON "Bout"("eventId", "scheduledAt");
 
 -- CreateIndex
-CREATE INDEX "Bout_venueId_scheduledAt_idx" ON "Bout"("venueId", "scheduledAt");
+CREATE INDEX "Bout_venueId_sequence_idx" ON "Bout"("venueId", "sequence");
 
 -- CreateIndex
 CREATE INDEX "Bout_redAthleteId_idx" ON "Bout"("redAthleteId");
@@ -121,8 +123,8 @@ ALTER TABLE "Bout" ADD CONSTRAINT "Bout_eventId_fkey" FOREIGN KEY ("eventId") RE
 ALTER TABLE "Bout" ADD CONSTRAINT "Bout_venueId_fkey" FOREIGN KEY ("venueId") REFERENCES "Venue"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Bout" ADD CONSTRAINT "Bout_redAthleteId_fkey" FOREIGN KEY ("redAthleteId") REFERENCES "Athlete"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+ALTER TABLE "Bout" ADD CONSTRAINT "Bout_redAthleteId_fkey" FOREIGN KEY ("redAthleteId") REFERENCES "Athlete"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Bout" ADD CONSTRAINT "Bout_blueAthleteId_fkey" FOREIGN KEY ("blueAthleteId") REFERENCES "Athlete"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+ALTER TABLE "Bout" ADD CONSTRAINT "Bout_blueAthleteId_fkey" FOREIGN KEY ("blueAthleteId") REFERENCES "Athlete"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 

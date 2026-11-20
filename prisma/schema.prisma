@@ -284,7 +284,9 @@ model AdEvent {
 
 /// Турнир (событие). Принадлежит организации так же, как Stream: `/v1/org/*`
 /// фильтрует по `orgId`, чужой турнир отдаётся как 404.
-/// Ни одно поле не знает про борьбу (SRS INV-2): вид спорта — данные.
+/// Вид спорта — данные, а не код (SRS INV-2). Оговорка: `Bout` описывает
+/// поединок двух сторон, то есть единоборства; командному виду понадобится
+/// своя сущность встречи, а турнир, площадки и спортсмены останутся этими.
 model Event {
   id            String       @id @default(cuid())
   orgId         String
@@ -299,10 +301,15 @@ model Event {
   /// 'international' | 'regional' | 'local'. Ставит организатор; от уровня
   /// зависит цвет точки на карте.
   level         String
-  /// Даты по афише. Когда турнир начался и закончился на самом деле —
-  /// `startedAt` / `endedAt`.
-  startsAt      DateTime
-  endsAt        DateTime
+  /// Даты по афише — календарные дни в месте проведения, а не моменты
+  /// времени: «14–15 декабря» одинаково для зрителя из любого пояса.
+  /// Наружу отдаются как 'YYYY-MM-DD'. Когда турнир начался и закончился на
+  /// самом деле — `startedAt` / `endedAt`.
+  startsOn      DateTime     @db.Date
+  endsOn        DateTime     @db.Date
+  /// Пояс места проведения в формате IANA ('Asia/Novosibirsk'). Нужен, чтобы
+  /// знать, когда день `endsOn` кончился там, а не в UTC. NULL — не указан.
+  timeZone      String?
   city          String?
   address       String?
   lat           Float?
@@ -311,7 +318,12 @@ model Event {
   /// питает фильтр «Регион» в ленте и на карте.
   regionCode    String?
   /// S3-ключ афиши. NULL — карточка турнира собирается из названия, дат и места.
+  /// Каскад от организации строку удалит, а объект в S3 — нет: чистить его
+  /// нужно до удаления строки, как архив в `deleteRecordingsForStreams`.
   posterPath    String?
+  /// NULL — черновик: турнир заводится в несколько шагов и до публикации не
+  /// виден ни в ленте, ни на карте, ни по прямой ссылке.
+  publishedAt   DateTime?
   /// NULL у `startedAt` — турнир ещё не начался; NULL у `endedAt` при
   /// заполненном `startedAt` — идёт сейчас.
   startedAt     DateTime?
@@ -328,6 +340,8 @@ model Event {
 /// свой поток (`streamId`, `quad` = NULL), четверть общего кадра (`streamId` +
 /// `quad`) и «без видео — только табло» (`streamId` = NULL).
 /// Сервер четверть не вырезает (SRS INV-1): `quad` уходит клиенту, кадрирует плеер.
+/// База не проверяет, что поток принадлежит той же организации, что и турнир:
+/// это обязанность сервиса, иначе в ленту попадёт чужой эфир.
 model Venue {
   id       String  @id @default(cuid())
   eventId  String
@@ -360,12 +374,14 @@ model Athlete {
   firstName   String
   school      String?
   birthYear   Int?
-  /// S3-ключ фото. NULL — клиент рисует инициалы.
+  /// S3-ключ фото. NULL — клиент рисует инициалы. Как и афишу турнира, объект
+  /// в S3 каскад не удаляет.
   photoPath   String?
   /// Ключ, по которому одного человека узнают в разных турнирах организации.
   /// Считается ТОЛЬКО функцией `athleteIdentityKey` (apps/api/src/event/
   /// athlete-identity.ts) — руками и в SQL его не собирать: разъехавшись с
-  /// функцией, ключ заведёт человеку вторую страницу.
+  /// функцией, ключ заведёт человеку вторую страницу. Правка фамилии, имени,
+  /// школы или года без пересчёта ключа — то же расхождение.
   identityKey String
   createdAt   DateTime     @default(now())
   // Relations
@@ -378,25 +394,42 @@ model Athlete {
 /// Схватка. Строка появляется, когда схватка встаёт в расписание, а не когда
 /// пришло видео: одна схватка — ровно одна карточка в ленте, и счёт, эфир
 /// ковра, запись и лучшие моменты приклеиваются к ней.
+///
+/// Статус не хранится: его выводит `boutStatus` (apps/api/src/event/
+/// bout-status.ts) из `startedAt` / `endedAt`. По этим же двум полям режется
+/// запись схватки, и второе поле со статусом рано или поздно разошлось бы с ними.
+///
+/// База не проверяет, что ковёр принадлежит тому же турниру (`eventId` у
+/// схватки продублирован ради запросов ленты), что спортсмены — из той же
+/// организации и что красный не совпадает с синим. Это обязанность сервиса.
 model Bout {
   id            String    @id @default(cuid())
   eventId       String
   event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  /// NoAction, а не Cascade: удаление ковра не должно молча стирать его
-  /// схватки. И не Restrict: он проверяется сразу и ломал бы каскад от
-  /// турнира, NoAction — в конце запроса, когда схватки уже удалены.
+  /// Ковёр со схватками удалить нельзя: сначала схватки переносят или удаляют.
+  /// Каскаду от турнира это не мешает: ковры и схватки он удаляет сам, и к
+  /// моменту проверки схваток уже нет.
   venueId       String
   venue         Venue     @relation(fields: [venueId], references: [id], onDelete: NoAction)
-  redAthleteId  String
-  redAthlete    Athlete   @relation("BoutRed", fields: [redAthleteId], references: [id], onDelete: NoAction)
-  blueAthleteId String
-  blueAthlete   Athlete   @relation("BoutBlue", fields: [blueAthleteId], references: [id], onDelete: NoAction)
-  /// Время по расписанию. NULL — порядок на ковре известен, время нет.
+  /// Угол может быть пустым: схватку следующего круга заводят раньше, чем
+  /// известен участник. SetNull, а не запрет удаления: запрет ломал удаление
+  /// организации в зависимости от порядка, в котором в базе созданы внешние
+  /// ключи (после восстановления из дампа он другой). Удаление спортсмена
+  /// оставляет схватку со счётом и пустым углом, а не стирает её.
+  redAthleteId  String?
+  redAthlete    Athlete?  @relation("BoutRed", fields: [redAthleteId], references: [id], onDelete: SetNull)
+  blueAthleteId String?
+  blueAthlete   Athlete?  @relation("BoutBlue", fields: [blueAthleteId], references: [id], onDelete: SetNull)
+  /// Время по расписанию. Часто неизвестно: в расписании турнира есть только
+  /// очередь на ковре — тогда порядок задаёт `sequence`.
   scheduledAt   DateTime?
+  /// Номер схватки в очереди своего ковра: 1, 2, 3… Хранится явно: у строк
+  /// одного импорта одинаковый `createdAt`, и порядок списка иначе не
+  /// восстановить. NULL — порядок не задан.
+  sequence      Int?
   weightClass   String?
-  /// 'waiting' | 'live' | 'finished'
-  status        String    @default("waiting")
-  /// Фактические границы схватки. По ним же вырезается запись из эфира ковра.
+  /// Фактические границы схватки. Из них выводится статус, по ним же
+  /// вырезается запись из эфира ковра.
   startedAt     DateTime?
   endedAt       DateTime?
   redScore      Int       @default(0)
@@ -410,8 +443,8 @@ model Bout {
   createdAt     DateTime  @default(now())
 
   @@unique([eventId, externalId])
-  @@index([eventId, status, scheduledAt])
-  @@index([venueId, scheduledAt])
+  @@index([eventId, scheduledAt])
+  @@index([venueId, sequence])
   @@index([redAthleteId])
   @@index([blueAthleteId])
 }

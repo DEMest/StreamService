@@ -16,10 +16,23 @@ describe('athleteIdentityKey', () => {
     );
   });
 
-  it('лишние пробелы внутри названия школы схлопываются', () => {
-    expect(athleteIdentityKey({ ...IVANOV, school: 'Школа   №3' })).toBe(
-      athleteIdentityKey({ ...IVANOV, school: 'школа №3' }),
-    );
+  it('название школы: пробелы, кавычки и пробел после «№» не различаются', () => {
+    const key = athleteIdentityKey({ ...IVANOV, school: 'СШОР №3 «Барс»' });
+    expect(athleteIdentityKey({ ...IVANOV, school: 'сшор   № 3  "Барс"' })).toBe(key);
+    expect(athleteIdentityKey({ ...IVANOV, school: 'СШОР №3 Барс' })).toBe(key);
+    expect(athleteIdentityKey({ ...IVANOV, school: 'СШОР №3 “Барс”' })).toBe(key);
+  });
+
+  it('двойная фамилия: вид тире и пробелы вокруг дефиса не различаются', () => {
+    const key = athleteIdentityKey({ lastName: 'Петров-Водкин', firstName: 'Кузьма' });
+    expect(athleteIdentityKey({ lastName: 'Петров - Водкин', firstName: 'Кузьма' })).toBe(key);
+    expect(athleteIdentityKey({ lastName: 'Петров\u2013Водкин', firstName: 'Кузьма' })).toBe(key);
+    expect(athleteIdentityKey({ lastName: 'Петров \u2014 Водкин', firstName: 'Кузьма' })).toBe(key);
+  });
+
+  it('невидимые символы из таблиц не меняют ключ', () => {
+    expect(athleteIdentityKey({ ...IVANOV, lastName: 'Ива\u200Bнов\uFEFF' })).toBe(athleteIdentityKey(IVANOV));
+    expect(athleteIdentityKey({ ...IVANOV, firstName: 'И\u00ADван' })).toBe(athleteIdentityKey(IVANOV));
   });
 
   it('однофамильцы из разных школ и разных годов — разные люди', () => {
@@ -27,6 +40,10 @@ describe('athleteIdentityKey', () => {
     expect(athleteIdentityKey({ ...IVANOV, school: 'Динамо' })).not.toBe(key);
     expect(athleteIdentityKey({ ...IVANOV, birthYear: 2013 })).not.toBe(key);
     expect(athleteIdentityKey({ ...IVANOV, firstName: 'Илья' })).not.toBe(key);
+  });
+
+  it('латинская буква-двойник даёт другой ключ: склейка хуже дубля', () => {
+    expect(athleteIdentityKey({ ...IVANOV, lastName: 'Иванoв' })).not.toBe(athleteIdentityKey(IVANOV));
   });
 
   it('неуказанные год и школа — часть ключа, а не «подходит любой»', () => {
@@ -43,5 +60,11 @@ describe('athleteIdentityKey', () => {
     expect(athleteIdentityKey({ lastName: 'Иванов', firstName: 'Иван', school: '2012' })).not.toBe(
       athleteIdentityKey({ lastName: 'Иванов', firstName: 'Иван', birthYear: 2012 }),
     );
+  });
+
+  it('без фамилии ключа нет: безымянные не должны схлопнуться в одного', () => {
+    expect(() => athleteIdentityKey({ lastName: '', firstName: 'Иван' })).toThrow('нет фамилии');
+    expect(() => athleteIdentityKey({ lastName: ' \u200B ', firstName: '' })).toThrow('нет фамилии');
+    expect(() => athleteIdentityKey({ lastName: 'Иванов', firstName: '' })).not.toThrow();
   });
 });
