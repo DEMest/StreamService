@@ -2,6 +2,9 @@
 set -e
 
 HLS_DIR="/hls/$MTX_PATH"
+# FFmpeg начинает нумерацию с нуля на каждом publish. Уникальный префикс
+# позволяет CDN хранить сегменты, не смешивая два подключения стримера.
+PUBLISH_ID=$(cat /proc/sys/kernel/random/uuid)
 
 # HLS_LQ_ENABLED=true (default) — пишем HD-copy + LQ-rendition (4K → 540p через libx264, ~7 cores).
 # HLS_LQ_ENABLED=false — только HD-copy (~1 core). Использовать на слабых стендах и в dev.
@@ -57,7 +60,7 @@ if [ "$HLS_LQ_ENABLED" = "true" ]; then
     -map 0:v -map 0:a -c:v copy -c:a aac \
       -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 40 \
       -hls_flags delete_segments+temp_file \
-      -hls_segment_filename "$HLS_DIR/hd/seg%05d.ts" \
+      -hls_segment_filename "$HLS_DIR/hd/seg-$PUBLISH_ID-%05d.ts" \
       "$HLS_DIR/hd/index.m3u8" \
     -map "[v720]" -map 0:a \
       -c:v libx264 -preset veryfast -crf 25 -maxrate 3000k -bufsize 6000k \
@@ -65,7 +68,7 @@ if [ "$HLS_LQ_ENABLED" = "true" ]; then
       -c:a aac -b:a 128k \
       -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 40 \
       -hls_flags delete_segments+temp_file \
-      -hls_segment_filename "$HLS_DIR/p720/seg%05d.ts" \
+      -hls_segment_filename "$HLS_DIR/p720/seg-$PUBLISH_ID-%05d.ts" \
       "$HLS_DIR/p720/index.m3u8" \
     -map "[v480]" -map 0:a \
       -c:v libx264 -preset veryfast -crf 26 -maxrate 1400k -bufsize 2800k \
@@ -73,7 +76,7 @@ if [ "$HLS_LQ_ENABLED" = "true" ]; then
       -c:a aac -b:a 96k \
       -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 40 \
       -hls_flags delete_segments+temp_file \
-      -hls_segment_filename "$HLS_DIR/p480/seg%05d.ts" \
+      -hls_segment_filename "$HLS_DIR/p480/seg-$PUBLISH_ID-%05d.ts" \
       "$HLS_DIR/p480/index.m3u8" \
     -map "[v240]" -map 0:a \
       -c:v libx264 -preset veryfast -crf 28 -maxrate 500k -bufsize 1000k \
@@ -81,7 +84,7 @@ if [ "$HLS_LQ_ENABLED" = "true" ]; then
       -c:a aac -b:a 64k \
       -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 40 \
       -hls_flags delete_segments+temp_file \
-      -hls_segment_filename "$HLS_DIR/p240/seg%05d.ts" \
+      -hls_segment_filename "$HLS_DIR/p240/seg-$PUBLISH_ID-%05d.ts" \
       "$HLS_DIR/p240/index.m3u8"
 else
   exec ffmpeg \
@@ -92,6 +95,6 @@ else
     -map 0:v -map 0:a -c:v copy -c:a aac \
       -f hls -hls_time 2 -hls_init_time 1 -hls_list_size 40 \
       -hls_flags delete_segments+temp_file \
-      -hls_segment_filename "$HLS_DIR/hd/seg%05d.ts" \
+      -hls_segment_filename "$HLS_DIR/hd/seg-$PUBLISH_ID-%05d.ts" \
       "$HLS_DIR/hd/index.m3u8"
 fi
