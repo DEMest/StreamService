@@ -67,4 +67,16 @@ describe('athleteIdentityKey', () => {
     expect(() => athleteIdentityKey({ lastName: ' \u200B ', firstName: '' })).toThrow('нет фамилии');
     expect(() => athleteIdentityKey({ lastName: 'Иванов', firstName: '' })).not.toThrow();
   });
+
+  it('прочерк, точка и «?» вместо фамилии — тоже «нет фамилии»', () => {
+    for (const placeholder of ['-', '—', '?', '.', '123']) {
+      expect(() => athleteIdentityKey({ lastName: placeholder, firstName: 'Иван' })).toThrow('нет фамилии');
+    }
+  });
+
+  it('число из ячейки таблицы вместо строки не роняет функцию', () => {
+    const fromSheet = { lastName: 'Иванов', firstName: 'Иван', school: 3 as unknown as string };
+    expect(athleteIdentityKey(fromSheet)).toBe(athleteIdentityKey({ ...fromSheet, school: '3' }));
+    expect(() => athleteIdentityKey({ lastName: 42 as unknown as string, firstName: 'Иван' })).toThrow('нет фамилии');
+  });
 });

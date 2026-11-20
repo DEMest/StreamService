@@ -41,7 +41,8 @@ const DASHES = /[\u2010-\u2015\u2212]/g;
 const QUOTES = /[«»"“”„‟'‘’`]/g;
 
 function normalize(value: string | null | undefined): string {
-  return (value ?? '')
+  // String(): из ячейки таблицы вместо строки приезжает и число («Школа» = 3).
+  return String(value ?? '')
     .normalize('NFC')
     .replace(INVISIBLE, '')
     .toLocaleLowerCase('ru-RU')
@@ -59,9 +60,10 @@ function normalize(value: string | null | undefined): string {
 
 export function athleteIdentityKey(athlete: AthleteIdentity): string {
   const lastName = normalize(athlete.lastName);
-  if (!lastName) {
+  if (!/\p{L}/u.test(lastName)) {
     // Без фамилии ключ у всех одинаковый: безымянные спортсмены организации
-    // схлопнулись бы в одну строку со всеми схватками друг друга.
+    // схлопнулись бы в одну строку со всеми схватками друг друга. Прочерк,
+    // точка или «?» в ячейке — тоже «нет фамилии», поэтому нужна хотя бы буква.
     throw new Error('athleteIdentityKey: у спортсмена нет фамилии');
   }
   return [
