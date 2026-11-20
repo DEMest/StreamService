@@ -25,10 +25,11 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
-          # Образ без оболочки: alias задаётся переменной MC_HOST_local, команда
-          # без sh. Пока MinIO не поднялся, mc падает, Job перезапускается сам.
-          image: cgr.dev/chainguard/minio-client:latest
+          # Используем mc из того же образа, что и сервер. Пока MinIO запускается,
+          # Job повторяет попытку создать бакет.
+          image: streamservice-minio
           imagePullPolicy: IfNotPresent
+          command: ["/usr/bin/mc"]
           env:
             - name: MINIO_USER
               valueFrom:

@@ -45,11 +45,10 @@ docker build -t streamservice-mediamtx:dev ./infra/mediamtx
 # 3. Загрузить образы в кластер (из реестра они не тянутся).
 k3d image import streamservice-api:dev streamservice-web:dev streamservice-mediamtx:dev -c stream
 
-# 3a. Образы MinIO берутся с cgr.dev (Chainguard), Docker Hub и quay.io их больше
-# не публикуют. Скачать и загрузить так же, как свои:
-docker pull cgr.dev/chainguard/minio:latest
-docker pull cgr.dev/chainguard/minio-client:latest
-k3d image import cgr.dev/chainguard/minio:latest cgr.dev/chainguard/minio-client:latest -c stream
+# 3a. Подготовить используемый в Compose образ MinIO, содержащий /usr/bin/mc.
+# На машине с копией образа:
+docker tag minio/minio:latest streamservice-minio:dev
+k3d image import streamservice-minio:dev -c stream
 
 # 4. Применить.
 kubectl apply -k k8s/overlays/local
@@ -73,6 +72,13 @@ kubectl -n streamservice get pods -w
 
 Логи: `kubectl -n streamservice logs deploy/api`, `deploy/mediamtx`, `deploy/web`.
 Убрать всё: `k3d cluster delete stream`.
+
+На отдельном стенде k3s v1.35.2 проверены запуск текущего приложения,
+`/health`, доступ через Traefik, входящие SRT и RTMP и сохранение записи в MinIO.
+Плейлист готового архива открылся через API. Обновление и откат Web
+восстанавливают `200`, при непрерывной проверке через Ingress на переключении
+наблюдался краткий `502`. Перед боевым запуском нужно проверить маршрутизацию
+во время замены пода.
 
 ### Если что-то не стартует
 
@@ -127,13 +133,12 @@ Job'ом. **Прод-оверлей на реальном кластере не 
 - `robots.txt` на `admin.` и `ads.` (заменён заголовком `X-Robots-Tag`);
 - `Access-Control-Allow-Origin: *` на HLS-маршрутах.
 
-- **Образ MinIO.** `minio/minio` убран с Docker Hub и quay.io (октябрь 2025).
-  Сейчас в манифестах временный бесплатный образ Chainguard
-  (`cgr.dev/chainguard/minio:latest` и `minio-client`, без выбора тега).
-  В `docker-compose.yml` на проде скорее всего `minio/minio:latest`: пока образ
-  закеширован на сервере, всё работает, но обновить его или поднять на чистой
-  машине нельзя. Нужно решить: форк с образами, закреплённая сборка или другое
-  S3-хранилище (Garage, SeaweedFS). Образ `mediamtx` тоже стоит закрепить по тегу.
+- **Образ MinIO.** Загрузка `cgr.dev/chainguard/minio` и `minio-client` на стенде
+  вернула `403`. Локальный оверлей принимает тот же образ MinIO, что и Compose.
+  Если на машине его нет, перенесите проверенный образ через `docker save`
+  и `docker load`. На стенде проверен образ
+  `minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e`.
+  Для production нужен доступный из кластера реестр с закреплённым образом.
 
 Остаётся выбрать: способ выкатки (ArgoCD или `kubectl` из CI) и реестр образов,
 хранение секретов, размеры томов, перенос данных (Postgres, записи, MinIO) и

@@ -15,6 +15,8 @@ images:
     newTag: dev
   - name: streamservice-mediamtx
     newTag: dev
+  - name: streamservice-minio
+    newTag: dev
 
 # ТОЛЬКО для локального стенда. Значения нарочито игрушечные и совпадают с
 # дефолтами docker-compose.yml. MEDIAMTX_API_PASS обязан совпадать с паролем

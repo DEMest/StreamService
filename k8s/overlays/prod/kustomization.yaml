@@ -28,6 +28,9 @@ images:
   - name: streamservice-mediamtx
     newName: ghcr.io/demest/streamservice-mediamtx
     newTag: REPLACE_WITH_TAG
+  - name: streamservice-minio
+    newName: ghcr.io/demest/streamservice-minio
+    newTag: REPLACE_WITH_TAG
 
 patches:
   # Базовый Ingress без хоста здесь не нужен: ниже боевые, с TLS и поддоменами.
