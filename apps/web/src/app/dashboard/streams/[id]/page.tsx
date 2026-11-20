@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { RecordingControl, type RecordingMode } from '@/components/dashboard/RecordingControl';
 import { StreamStats } from '@/components/dashboard/StreamStats';
+import { StreamAccessControl } from '@/components/dashboard/StreamAccessControl';
 import { ImageCropModal } from '@/components/ImageCropModal';
 import {
   Broadcast,
@@ -163,6 +164,11 @@ export default function StreamDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream-detail', id] }),
   });
 
+  const rotatePreviewKey = useMutation({
+    mutationFn: () => api.post(`/v1/org/streams/${id}/rotate-preview-key`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['org-stream-detail', id] }),
+  });
+
   const patchRecording = useMutation({
     mutationFn: (patch: { enabled?: boolean; mode?: RecordingMode }) =>
       api.patch(`/v1/org/streams/${id}/recording`, patch),
@@ -271,10 +277,14 @@ export default function StreamDetailPage() {
   const orgSlug = profile?.slug ?? '';
   const streamSlug = stream?.slug ?? '';
 
-  const broadcastPreviewUrl = (bid: string) => {
-    const keyPart = stream && !stream.isPublic && stream.previewKey ? `key=${stream.previewKey}&` : '';
-    return `${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/public/orgs/${orgSlug}/streams/${streamSlug}/broadcasts/${bid}/preview?${keyPart}t=${previewBump}`;
-  };
+  // У приватного стрима всё публичное (страница, превью) открывается только
+  // с ключом — без него студия сама упёрлась бы в «Трансляция закрыта».
+  const viewKey = stream && !stream.isPublic && stream.previewKey ? stream.previewKey : null;
+  const keyPart = viewKey ? `key=${viewKey}&` : '';
+  const watchHref = `/watch/${orgSlug}/${streamSlug}${viewKey ? `?key=${viewKey}` : ''}`;
+
+  const broadcastPreviewUrl = (bid: string) =>
+    `${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/public/orgs/${orgSlug}/streams/${streamSlug}/broadcasts/${bid}/preview?${keyPart}t=${previewBump}`;
 
   // Адрес показываем только когда известны И хост, И порт: строка с пустым
   // портом (`srt://host:?streamid=…`) выглядит рабочей, копируется одной
@@ -343,7 +353,7 @@ export default function StreamDetailPage() {
           </div>
           {orgSlug && streamSlug && (
             <Link
-              href={`/watch/${orgSlug}/${streamSlug}`}
+              href={watchHref}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded-md transition-all active:scale-[0.98] no-underline"
             >
               Смотреть
@@ -628,29 +638,22 @@ export default function StreamDetailPage() {
               />
             </div>
 
-            <div className="flex gap-4 flex-wrap items-center">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={stream.isPublic}
-                  onChange={(e) => updateStream.mutate({ isPublic: e.target.checked })}
-                  className="accent-brand w-4 h-4 cursor-pointer"
-                />
-                <span className="text-zinc-300 text-sm">Публичная трансляция</span>
-              </label>
-
-              {!stream.isPublic && stream.previewKey && orgSlug && streamSlug && (
-                <button
-                  onClick={() =>
-                    copyText(
-                      `${window.location.origin}/watch/${orgSlug}/${streamSlug}?key=${stream.previewKey}`,
-                    )
-                  }
-                  className="flex items-center gap-1 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs rounded-lg transition-all active:scale-[0.98] cursor-pointer"
-                >
-                  <Copy size={12} /> Скопировать ссылку для зрителей
-                </button>
-              )}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-zinc-500">Доступ</label>
+              <StreamAccessControl
+                isPublic={stream.isPublic}
+                isLive={stream.isLive}
+                privateLink={
+                  viewKey && orgSlug && streamSlug && typeof window !== 'undefined'
+                    ? `${window.location.origin}${watchHref}`
+                    : null
+                }
+                onChange={(isPublic) => updateStream.mutate({ isPublic })}
+                onRotate={() => rotatePreviewKey.mutate()}
+                pending={updateStream.isPending}
+                rotatePending={rotatePreviewKey.isPending}
+                onCopy={copyText}
+              />
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -721,7 +724,7 @@ export default function StreamDetailPage() {
             {stream.previewImagePath ? (
               <div className="flex items-center gap-4">
                 <img
-                  src={`${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/public/orgs/${orgSlug}/streams/${streamSlug}/thumbnail?t=${previewBump}`}
+                  src={`${process.env.NEXT_PUBLIC_API_URL ?? '/api'}/v1/public/orgs/${orgSlug}/streams/${streamSlug}/thumbnail?${keyPart}t=${previewBump}`}
                   alt="Текущее превью"
                   className="w-40 aspect-video object-cover rounded-lg border border-zinc-700"
                 />

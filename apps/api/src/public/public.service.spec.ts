@@ -43,6 +43,34 @@ describe('PublicService', () => {
   });
 
   describe('getStreamUrl', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each([
+      ['выбранный публичный эфир', 'pilot', 'live', true, 'https://cdn.example.com/', 'https://cdn.example.com'],
+      ['другой эфир', 'pilot', 'other', true, 'https://cdn.example.com', ''],
+      ['приватный эфир', 'pilot', 'live', false, 'https://cdn.example.com', ''],
+      ['CDN выключен', 'pilot', 'live', true, '', ''],
+      ['CDN настроен с путём', 'pilot', 'live', true, 'https://cdn.example.com/extra', ''],
+      ['CDN настроен без HTTPS', 'pilot', 'live', true, 'http://cdn.example.com', ''],
+    ] as const)('%s получает ожидаемый HLS-адрес', async (_name, org, slug, isPublic, origin, expectedOrigin) => {
+      jest.replaceProperty(process, 'env', {
+        ...process.env,
+        LIVE_HLS_CDN_ORIGIN: origin,
+        LIVE_HLS_CDN_STREAM: 'pilot/live',
+      });
+      mockPrisma.stream.findFirst.mockResolvedValueOnce({
+        isLive: true,
+        isPublic,
+        previewKey: isPublic ? null : 'preview',
+        feedMode: 'single',
+      });
+
+      const { hlsUrl } = await service.getStreamUrl(org, slug, 'preview');
+      const route = `/api/v1/public/orgs/${org}/streams/${slug}`;
+      const accessPath = isPublic ? route : `${route}/private/preview`;
+      expect(hlsUrl).toBe(`${expectedOrigin}${accessPath}/live/hls/master.m3u8`);
+    });
+
     it('returns { hlsUrl, feedMode } for a live public Stream', async () => {
       mockPrisma.stream.findFirst.mockResolvedValueOnce({
         isLive: true,
@@ -98,8 +126,10 @@ describe('PublicService', () => {
         feedMode: 'single',
       });
       const result = await service.getStreamUrl('myorg', 'main', 'secret-key');
+      // Ключ — в пути, а не в query: относительные адреса вложенных плейлистов
+      // и сегментов резолвятся против master.m3u8 и наследуют его.
       expect(result).toEqual({
-        hlsUrl: '/api/v1/public/orgs/myorg/streams/main/live/hls/master.m3u8',
+        hlsUrl: '/api/v1/public/orgs/myorg/streams/main/private/secret-key/live/hls/master.m3u8',
         feedMode: 'single',
       });
     });
@@ -130,9 +160,21 @@ describe('PublicService', () => {
 
       const result = await service.getStreamUrl('club1', 'foo', 'secret');
       expect(result).toEqual({
-        hlsUrl: '/api/v1/public/orgs/club1/streams/foo/live/hls/master.m3u8',
+        hlsUrl: '/api/v1/public/orgs/club1/streams/foo/private/secret/live/hls/master.m3u8',
         feedMode: 'single',
       });
+    });
+
+    it('публичный Stream со старым ключом в ссылке получает обычный адрес', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValueOnce({
+        isLive: true,
+        isPublic: true,
+        previewKey: null,
+        feedMode: 'composite',
+      });
+
+      const result = await service.getStreamUrl('club1', 'foo', 'stale-key');
+      expect(result.hlsUrl).toBe('/api/v1/public/orgs/club1/streams/foo/live/hls/master.m3u8');
     });
   });
 
@@ -509,6 +551,17 @@ describe('PublicService', () => {
       expect(result[0].hasPreview).toBe(true);
       expect(result[1].hasPreview).toBe(false);
       expect((result[0] as any).previewImagePath).toBeUndefined();
+      expect(result[0].hlsUrl).toBe('/api/v1/public/orgs/org1/streams/foo/broadcasts/b1/recording/hls/master.m3u8');
+    });
+
+    it('приватный Stream + верный ключ → адрес записи с ключом в пути', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValueOnce({ id: 's-foo', isPublic: false, previewKey: 'secret' });
+      mockPrisma.broadcast.findMany.mockResolvedValueOnce([
+        { id: 'b1', title: null, description: null, startedAt: new Date(), endedAt: new Date(), previewImagePath: null, recordings: [] },
+      ]);
+
+      const result = await service.getOrgBroadcasts('org1', 'foo', 'secret');
+      expect(result[0].hlsUrl).toBe('/api/v1/public/orgs/org1/streams/foo/private/secret/broadcasts/b1/recording/hls/master.m3u8');
     });
 
     it('throws 404 when Stream not found', async () => {
@@ -591,6 +644,8 @@ describe('PublicService', () => {
         isLive: true,
         previewMode: 'cam1',
         previewImagePath: null,
+        isPublic: true,
+        previewKey: null,
       });
       mockThumbnail.getSnapshot.mockResolvedValueOnce(Buffer.from('jpg2'));
 
@@ -607,9 +662,23 @@ describe('PublicService', () => {
       );
     });
 
+    it('приватный live-Stream: кадр эфира только с ключом', async () => {
+      const row = { isLive: true, previewMode: 'multicam', previewImagePath: null, isPublic: false, previewKey: 'secret' };
+      mockPrisma.stream.findFirst.mockResolvedValue(row);
+      mockThumbnail.getSnapshot.mockResolvedValue(Buffer.from('frame'));
+
+      await expect(service.getThumbnail('org1', 'foo')).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.getThumbnail('org1', 'foo', 'wrong')).rejects.toBeInstanceOf(NotFoundException);
+      expect(mockThumbnail.getSnapshot).not.toHaveBeenCalled();
+
+      const ok = await service.getThumbnail('org1', 'foo', 'secret');
+      expect(ok.buffer).toEqual(Buffer.from('frame'));
+    });
+
     it('serves offline preview from S3 by stored key', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({
         isLive: false, previewMode: 'multicam', previewImagePath: 'images/stream/st-1.jpg',
+        isPublic: true, previewKey: null,
       });
       mockImages.serve.mockResolvedValue(Buffer.from('jpeg'));
       const r = await service.getThumbnail('club1', 'main');
@@ -620,6 +689,7 @@ describe('PublicService', () => {
     it('404 when S3 object is missing', async () => {
       mockPrisma.stream.findFirst.mockResolvedValue({
         isLive: false, previewMode: 'multicam', previewImagePath: 'images/stream/st-1.jpg',
+        isPublic: true, previewKey: null,
       });
       mockImages.serve.mockResolvedValue(null);
       await expect(service.getThumbnail('club1', 'main')).rejects.toBeInstanceOf(NotFoundException);

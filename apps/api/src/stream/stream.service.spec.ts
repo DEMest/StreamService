@@ -8,6 +8,7 @@ import { ImageService } from '../storage/image.service';
 import { StatsService } from '../stats/stats.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { SeoPingService } from '../seo/seo-ping.service';
+import { LiveAccessCache } from '../recording/live-access-cache';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 const mockPrisma = {
@@ -44,8 +45,9 @@ const mockRecording = {
 const mockChatService = { clearMessagesByStream: jest.fn() };
 const mockImages = { upload: jest.fn(), delete: jest.fn(), serve: jest.fn() };
 const mockStats = { getSnapshot: jest.fn() };
-const mockChatGateway = { getViewers: jest.fn().mockReturnValue(0) };
+const mockChatGateway = { getViewers: jest.fn().mockReturnValue(0), accessChanged: jest.fn() };
 const mockSeoPing = { streamStateChanged: jest.fn() };
+const mockLiveAccess = { invalidate: jest.fn() };
 
 describe('StreamService', () => {
   let service: StreamService;
@@ -65,6 +67,7 @@ describe('StreamService', () => {
         { provide: StatsService, useValue: mockStats },
         { provide: ChatGateway, useValue: mockChatGateway },
         { provide: SeoPingService, useValue: mockSeoPing },
+        { provide: LiveAccessCache, useValue: mockLiveAccess },
       ],
     }).compile();
     service = module.get(StreamService);
@@ -124,33 +127,6 @@ describe('StreamService', () => {
       expect(mockMediamtx.replaceStreamPaths).toHaveBeenCalledWith(
         'club', 'tournament', expect.any(String), false,
       );
-    });
-  });
-
-  describe('updateSettings', () => {
-    it('updates editable fields and generates previewKey when isPublic=false', async () => {
-      mockPrisma.stream.findUnique.mockResolvedValue({ id: 's1', previewKey: null });
-      mockPrisma.stream.update.mockResolvedValue({
-        id: 's1', isPublic: false, previewKey: 'genkey', previewMode: 'cam1',
-      });
-      const r = await service.updateSettings('s1', { isPublic: false, previewMode: 'cam1' });
-      expect(mockPrisma.stream.update).toHaveBeenCalledWith(expect.objectContaining({
-        where: { id: 's1' },
-        data: expect.objectContaining({
-          isPublic: false,
-          previewMode: 'cam1',
-          previewKey: expect.any(String),
-        }),
-      }));
-      expect(r.previewKey).toBeDefined();
-    });
-
-    it('clears previewKey when isPublic=true', async () => {
-      mockPrisma.stream.update.mockResolvedValue({ id: 's1', isPublic: true, previewKey: null });
-      await service.updateSettings('s1', { isPublic: true });
-      expect(mockPrisma.stream.update).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({ isPublic: true, previewKey: null }),
-      }));
     });
   });
 
@@ -617,6 +593,89 @@ describe('StreamService', () => {
       await expect(service.updateConfig('org-1', 'st-1', { feedMode: 'foo' as any }))
         .rejects.toBeInstanceOf(BadRequestException);
       expect(mockPrisma.stream.update).not.toHaveBeenCalled();
+    });
+
+    describe('режим доступа', () => {
+      it('закрытие выпускает новый previewKey, сбрасывает кэш live HLS и отключает зрителей', async () => {
+        mockPrisma.stream.findFirst.mockResolvedValue(baseRow);
+        mockPrisma.stream.update.mockResolvedValue({ ...baseRow, isPublic: false, previewKey: 'x' });
+
+        await service.updateConfig('org-1', 'st-1', { isPublic: false });
+
+        const data = mockPrisma.stream.update.mock.calls[0][0].data;
+        expect(data.isPublic).toBe(false);
+        expect(data.previewKey).toMatch(/^[0-9a-f]{64}$/);
+        expect(mockLiveAccess.invalidate).toHaveBeenCalled();
+        expect(mockChatGateway.accessChanged).toHaveBeenCalledWith('st-1', true);
+      });
+
+      it('ключ, оставшийся от прошлой приватной сессии, не переиспользуется', async () => {
+        mockPrisma.stream.findFirst.mockResolvedValue({ ...baseRow, previewKey: 'stale' });
+        mockPrisma.stream.update.mockResolvedValue({ ...baseRow, isPublic: false });
+
+        await service.updateConfig('org-1', 'st-1', { isPublic: false });
+
+        const data = mockPrisma.stream.update.mock.calls[0][0].data;
+        expect(data.previewKey).not.toBe('stale');
+        expect(data.previewKey).toMatch(/^[0-9a-f]{64}$/);
+      });
+
+      it('повторное «приватная» у приватного стрима ссылку не меняет и никого не отключает', async () => {
+        mockPrisma.stream.findFirst.mockResolvedValue({ ...baseRow, isPublic: false, previewKey: 'keep' });
+        mockPrisma.stream.update.mockResolvedValue({ ...baseRow, isPublic: false, previewKey: 'keep' });
+
+        await service.updateConfig('org-1', 'st-1', { isPublic: false });
+
+        expect(mockPrisma.stream.update.mock.calls[0][0].data.previewKey).toBeUndefined();
+        expect(mockLiveAccess.invalidate).not.toHaveBeenCalled();
+        expect(mockChatGateway.accessChanged).not.toHaveBeenCalled();
+      });
+
+      it('открытие обнуляет ключ и сообщает зрителям, не выгоняя их', async () => {
+        mockPrisma.stream.findFirst.mockResolvedValue({ ...baseRow, isPublic: false, previewKey: 'k1' });
+        mockPrisma.stream.update.mockResolvedValue({ ...baseRow, isPublic: true, previewKey: null });
+
+        await service.updateConfig('org-1', 'st-1', { isPublic: true });
+
+        const data = mockPrisma.stream.update.mock.calls[0][0].data;
+        expect(data).toEqual(expect.objectContaining({ isPublic: true, previewKey: null }));
+        expect(mockLiveAccess.invalidate).toHaveBeenCalled();
+        expect(mockChatGateway.accessChanged).toHaveBeenCalledWith('st-1', false);
+      });
+    });
+  });
+
+  describe('rotatePreviewKeyForOrg', () => {
+    const privateRow = {
+      id: 'st-1', orgId: 'org-1', slug: 'court', isPublic: false, previewKey: 'old',
+      org: { slug: 'club' },
+    };
+
+    it('выпускает новый ключ, гасит старый адрес и отключает его зрителей', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(privateRow);
+      mockPrisma.stream.update.mockResolvedValue({ ...privateRow, previewKey: 'new' });
+
+      await service.rotatePreviewKeyForOrg('org-1', 'st-1');
+
+      const data = mockPrisma.stream.update.mock.calls[0][0].data;
+      expect(data.previewKey).toMatch(/^[0-9a-f]{64}$/);
+      expect(mockLiveAccess.invalidate).toHaveBeenCalled();
+      expect(mockChatGateway.accessChanged).toHaveBeenCalledWith('st-1', true);
+      // Ссылка зрителя — не ингест: энкодер не должен переподключаться.
+      expect(mockMediamtx.replaceStreamPaths).not.toHaveBeenCalled();
+    });
+
+    it('у публичного стрима ссылки нет — 400', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({ ...privateRow, isPublic: true, previewKey: null });
+
+      await expect(service.rotatePreviewKeyForOrg('org-1', 'st-1')).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockPrisma.stream.update).not.toHaveBeenCalled();
+    });
+
+    it('чужой стрим — 404', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue(null);
+
+      await expect(service.rotatePreviewKeyForOrg('org-1', 'st-x')).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 

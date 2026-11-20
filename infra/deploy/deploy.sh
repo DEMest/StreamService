@@ -201,8 +201,13 @@ fi
 # насовсем. Теперь diff смотрим всегда.
 RESTART_MEDIAMTX=0
 if [ -n "$DEPLOYED_SHA" ]; then
+  # Markdown исключён намеренно: ci.yml не деплоит docs-only мержи, так что
+  # README в infra/mediamtx/ доехал бы сюда только со следующей кодовой
+  # выкаткой — и без этого исключения перезапустил бы mediamtx (или оборвал
+  # выкатку под эфиром) из-за правки текста.
   if git diff --name-only "$DEPLOYED_SHA" "$TARGET_SHA" \
-       | grep -qE '^infra/mediamtx/|^docker-compose\.yml$'; then
+       | grep -E '^infra/mediamtx/|^docker-compose\.yml$' \
+       | grep -qvE '\.md$'; then
     if [ "$LIVE_COUNT" -eq 0 ] && [ "$LIVE_PROBE_OK" = "1" ]; then
       RESTART_MEDIAMTX=1
       log "diff трогает mediamtx, эфиров нет — перезапустим его вместе с остальным"
@@ -396,7 +401,11 @@ printf '%s\n' "$TARGET_SHA" > "$STATE"
 
 log "готово: $(git rev-parse --short "$TARGET_SHA") выкачен"
 
-notify "[liga-live] Выкачено: $(git log -1 --format=%s "$TARGET_SHA" | cut -c1-60)" \
+# Обрезает сам git, по символам: `cut -c` режет по байтам, разрывал
+# кириллическую букву пополам, и notify.py падал на битом UTF-8 — письмо
+# о выкатке не уходило примерно у каждой второй русской темы. sed убирает
+# пробелы, которыми %<(N,trunc) добивает короткую тему до N.
+notify "[liga-live] Выкачено: $(git log -1 --format='%<(60,trunc)%s' "$TARGET_SHA" | sed 's/ *$//')" \
 "Выкатка прошла и проверки пройдены.
 
 Коммит:    $(git rev-parse --short "$TARGET_SHA") — $(git log -1 --format=%s "$TARGET_SHA")

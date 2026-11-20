@@ -19,6 +19,22 @@ export class MediamtxWebhookController {
       query?: string;
     },
   ) {
+    // Смотрят эфир только через HLS, который отдаёт API: там проверяется
+    // приватность, там лимиты nginx. Прямое чтение из MediaMTX по открытым
+    // наружу ингест-портам (`rtmp://<хост>:1935/live/<org>/<stream>`,
+    // `srt://…?streamid=read:…`) обходило бы и то, и другое — сырой поток
+    // любого эфира, приватного в том числе, без ключа.
+    //
+    // Единственный законный читатель — FFmpeg из on-ready.sh, он тянет
+    // `rtsp://localhost:8554` внутри контейнера mediamtx. RTSP на хост не
+    // опубликован (см. ports в docker-compose.yml), поэтому RTSP-чтение здесь
+    // по определению внутреннее.
+    if (body.action === 'read' || body.action === 'playback') {
+      if (body.action === 'read' && body.protocol === 'rtsp') return { ok: true };
+      this.logger.warn(`Read rejected: ${body.protocol} "${body.path}" from ${body.ip}`);
+      throw new UnauthorizedException('Reading is not allowed');
+    }
+
     if (body.action !== 'publish') return { ok: true };
 
     if (body.protocol === 'srt') return { ok: true };

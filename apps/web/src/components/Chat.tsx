@@ -16,12 +16,19 @@ interface Props {
    * одной орги.
    */
   streamSlug?: string;
+  /** Ключ приватной ссылки (`?key=`): без него сервер не пустит в комнату закрытого стрима. */
+  previewKey?: string;
   onViewersChange?: (count: number) => void;
+  /**
+   * Организация сменила режим доступа (открыла, закрыла, сменила ссылку) —
+   * странице пора перезапросить, пускают ли её и по какому адресу эфир.
+   */
+  onAccessChanged?: () => void;
   authorName?: string;
   authLoading?: boolean;
 }
 
-export function Chat({ orgSlug, streamSlug, onViewersChange, authorName, authLoading }: Props) {
+export function Chat({ orgSlug, streamSlug, previewKey, onViewersChange, onAccessChanged, authorName, authLoading }: Props) {
   const [nickname, setNickname] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -31,7 +38,11 @@ export function Chat({ orgSlug, streamSlug, onViewersChange, authorName, authLoa
   const pendingContentRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const onViewersRef = useRef(onViewersChange);
-  useEffect(() => { onViewersRef.current = onViewersChange; });
+  const onAccessChangedRef = useRef(onAccessChanged);
+  useEffect(() => {
+    onViewersRef.current = onViewersChange;
+    onAccessChangedRef.current = onAccessChanged;
+  });
 
   useEffect(() => {
     if (authorName) { setNickname(authorName); return; }
@@ -43,7 +54,7 @@ export function Chat({ orgSlug, streamSlug, onViewersChange, authorName, authLoa
     const socket = getSocket();
 
     function join() {
-      socket.emit('join', { orgSlug, streamSlug: streamSlug ?? '' });
+      socket.emit('join', { orgSlug, streamSlug: streamSlug ?? '', key: previewKey });
     }
 
     join();
@@ -64,12 +75,14 @@ export function Chat({ orgSlug, streamSlug, onViewersChange, authorName, authLoa
     const onTtl = (mins: number) => { if (typeof mins === 'number' && mins > 0) setTtlMinutes(mins); };
     const onEnabled = (enabled: boolean) => setChatEnabled(enabled !== false);
     const onCleared = () => setMessages([]);
+    const onAccess = () => onAccessChangedRef.current?.();
     socket.on('history', onHistory);
     socket.on('message', onMessage);
     socket.on('viewers', onViewers);
     socket.on('chat_ttl', onTtl);
     socket.on('chat_enabled', onEnabled);
     socket.on('chat_cleared', onCleared);
+    socket.on('access_changed', onAccess);
     return () => {
       socket.off('connect', join);
       socket.off('history', onHistory);
@@ -78,8 +91,9 @@ export function Chat({ orgSlug, streamSlug, onViewersChange, authorName, authLoa
       socket.off('chat_ttl', onTtl);
       socket.off('chat_enabled', onEnabled);
       socket.off('chat_cleared', onCleared);
+      socket.off('access_changed', onAccess);
     };
-  }, [orgSlug, streamSlug]);
+  }, [orgSlug, streamSlug, previewKey]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 

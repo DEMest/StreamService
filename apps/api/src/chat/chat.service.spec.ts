@@ -31,9 +31,16 @@ describe('ChatService — per-Stream chat', () => {
 
   describe('resolveStreamId', () => {
     it('returns streamId when Stream found', async () => {
-      mockPrisma.stream.findFirst.mockResolvedValue({ id: 'sA' });
+      mockPrisma.stream.findFirst.mockResolvedValue({ id: 'sA', isPublic: true, previewKey: null });
       const streamId = await service.resolveStreamId('club', 'mat-a');
       expect(streamId).toBe('sA');
+    });
+
+    it('приватный Stream: без ключа или с чужим — null, с верным — streamId', async () => {
+      mockPrisma.stream.findFirst.mockResolvedValue({ id: 'sP', isPublic: false, previewKey: 'k1' });
+      expect(await service.resolveStreamId('club', 'mat-a')).toBeNull();
+      expect(await service.resolveStreamId('club', 'mat-a', 'k2')).toBeNull();
+      expect(await service.resolveStreamId('club', 'mat-a', 'k1')).toBe('sP');
     });
 
     it('returns null when org/stream not found', async () => {

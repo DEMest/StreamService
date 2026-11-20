@@ -11,12 +11,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MediamtxService } from '../mediamtx/mediamtx.service';
 import { RecordingService } from '../recording/recording.service';
 import { toRecordingSummary } from '../recording/recording-summary';
+import { LiveAccessCache } from '../recording/live-access-cache';
 import { StatsService } from '../stats/stats.service';
 import { StreamStatsSnapshot } from '../stats/stats.types';
 import { ChatService } from '../chat/chat.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { ImageService } from '../storage/image.service';
 import { SeoPingService } from '../seo/seo-ping.service';
+import { newPreviewKey } from './stream-access';
 import { randomBytes } from 'crypto';
 
 const VALID_PREVIEW_MODES = ['multicam', 'cam1', 'cam2', 'cam3', 'cam4'];
@@ -176,6 +178,7 @@ export class StreamService {
     private stats: StatsService,
     private chatGateway: ChatGateway,
     private seoPing: SeoPingService,
+    private liveAccess: LiveAccessCache,
   ) {}
 
   /**
@@ -295,39 +298,6 @@ export class StreamService {
     });
     await this.mediamtx.replaceStreamPaths(stream.org.slug, stream.slug, ingestKey, stream.recordingEnabled);
     return updated;
-  }
-
-  async updateSettings(
-    streamId: string,
-    data: {
-      name?: string;
-      description?: string;
-      isPublic?: boolean;
-      previewMode?: string;
-    },
-  ) {
-    const updateData: Record<string, any> = { ...data };
-
-    if (data.isPublic === false) {
-      const cur = await this.prisma.stream.findUnique({
-        where: { id: streamId },
-        select: { previewKey: true },
-      });
-      if (!cur?.previewKey) {
-        updateData.previewKey = randomBytes(32).toString('hex');
-      }
-    } else if (data.isPublic === true) {
-      updateData.previewKey = null;
-    }
-
-    return this.prisma.stream.update({
-      where: { id: streamId },
-      data: updateData,
-      select: {
-        id: true, name: true, description: true, isPublic: true, previewKey: true,
-        isLive: true, previewMode: true,
-      },
-    });
   }
 
   async startBroadcast(streamId: string) {
@@ -854,8 +824,10 @@ export class StreamService {
    * PATCH /v1/org/streams/:id — обновление конфигурации Stream'а.
    *
    * Поддерживает: name, description, previewMode, feedMode, isPublic.
-   * При isPublic=false генерирует previewKey если его ещё нет.
-   * При isPublic=true обнуляет previewKey.
+   * Закрытие (isPublic: true → false) всегда выпускает НОВЫЙ previewKey:
+   * ссылка из прошлой приватной сессии не должна открывать следующую.
+   * Повторный isPublic=false у уже приватного ключ не трогает.
+   * При isPublic=true previewKey обнуляется — приватный адрес гаснет.
    */
   async updateConfig(orgId: string, streamId: string, body: UpdateStreamConfigInput) {
     const current = await this.loadForOrg(orgId, streamId);
@@ -876,8 +848,8 @@ export class StreamService {
     if (body.feedMode !== undefined) updateData.feedMode = body.feedMode;
 
     if (body.isPublic === false) {
-      if (!current.previewKey) {
-        updateData.previewKey = randomBytes(32).toString('hex');
+      if (current.isPublic || !current.previewKey) {
+        updateData.previewKey = newPreviewKey();
       }
       updateData.isPublic = false;
     } else if (body.isPublic === true) {
@@ -891,7 +863,40 @@ export class StreamService {
       select: { ...STREAM_DTO_FIELDS, ingestKey: true },
     });
 
+    if (body.isPublic !== undefined && body.isPublic !== current.isPublic) {
+      this.onAccessChanged(streamId, !body.isPublic);
+    }
+
     return this.toDto(updated);
+  }
+
+  /**
+   * POST /v1/org/streams/:id/rotate-preview-key — новая ссылка для зрителей
+   * приватного Stream'а. Старая ссылка гаснет сразу, её зрители отключаются.
+   * У публичного Stream'а ссылки нет — 400.
+   */
+  async rotatePreviewKeyForOrg(orgId: string, streamId: string) {
+    const current = await this.loadForOrg(orgId, streamId);
+    if (current.isPublic) {
+      throw new BadRequestException('Ссылка с ключом есть только у приватной трансляции');
+    }
+    const updated = await this.prisma.stream.update({
+      where: { id: streamId },
+      data: { previewKey: newPreviewKey() },
+      select: { ...STREAM_DTO_FIELDS, ingestKey: true },
+    });
+    this.onAccessChanged(streamId, true);
+    return this.toDto(updated);
+  }
+
+  /**
+   * Режим доступа сменился — гасим всё, что помнит прежний: кэш доступа
+   * live HLS (иначе старый адрес жил бы ещё до 5 секунд) и комнату чата
+   * (`revoke` — доступ сузился, текущих зрителей отключаем).
+   */
+  private onAccessChanged(streamId: string, revoke: boolean) {
+    this.liveAccess.invalidate();
+    this.chatGateway.accessChanged(streamId, revoke);
   }
 
   /**

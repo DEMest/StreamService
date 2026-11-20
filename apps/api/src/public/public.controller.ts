@@ -117,7 +117,7 @@ export class PublicController {
     const buffer = await this.pub.getBroadcastPreview(orgSlug, streamSlug, broadcastId, key);
     res.set({
       'Content-Type': 'image/jpeg',
-      'Cache-Control': 'public, max-age=300',
+      'Cache-Control': `${key ? 'private' : 'public'}, max-age=300`,
     });
     res.send(buffer);
   }
@@ -133,21 +133,24 @@ export class PublicController {
     const buffer = await this.pub.getBroadcastPreview(orgSlug, '', broadcastId, key);
     res.set({
       'Content-Type': 'image/jpeg',
-      'Cache-Control': 'public, max-age=300',
+      'Cache-Control': `${key ? 'private' : 'public'}, max-age=300`,
     });
     res.send(buffer);
   }
 
+  /** Превью Stream'а; для приватного — ?key=<previewKey>. */
   @Get('orgs/:orgSlug/streams/:streamSlug/thumbnail')
   async getThumbnail(
     @Param('orgSlug') orgSlug: string,
     @Param('streamSlug') streamSlug: string,
+    @Query('key') key: string | undefined,
     @Res() res: Response,
   ) {
-    const { buffer, maxAge } = await this.pub.getThumbnail(orgSlug, streamSlug);
+    const { buffer, maxAge } = await this.pub.getThumbnail(orgSlug, streamSlug, key);
     res.set({
       'Content-Type': 'image/jpeg',
-      'Cache-Control': `public, max-age=${maxAge}`,
+      // Кадр закрытого эфира не должен оседать в общих кэшах по пути.
+      'Cache-Control': `${key ? 'private' : 'public'}, max-age=${maxAge}`,
     });
     res.send(buffer);
   }

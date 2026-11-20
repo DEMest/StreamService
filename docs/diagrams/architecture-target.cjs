@@ -171,13 +171,13 @@ function build(L) {
     }),
     L.box({
       x: 760, y: 640, w: 210, h: 140, kind: 'changed',
-      title: 'api-core (NestJS)',
+      title: 'web-api + mobile-api',
       lines: [
-        'auth, org, stream, каталог,',
-        'admin, ads, SEO-правила',
-        'без HLS-раздачи и cron',
+        'web-api: сайт, admin, ads, SEO',
+        'mobile-api: приложение, Bearer,',
+        'push-токены, версии контракта',
+        'общий пакет: схема и правила',
         'stateless → N реплик (HPA)',
-        'Bearer JWT для мобильных',
       ],
     }),
     L.box({
@@ -195,7 +195,7 @@ function build(L) {
       x: 1240, y: 640, w: 210, h: 140, kind: 'app',
       title: 'web (Next.js) + PWA',
       lines: [
-        'SSR, /api/* → api-core',
+        'SSR, /api/* → web-api',
         'плеер hls.js + <canvas>',
         'N реплик',
         'PWA + Web Push — шаг 0',
@@ -257,7 +257,7 @@ function build(L) {
     L.box({
       x: 1540, y: 400, w: 150, h: 160, kind: 'changed',
       title: 'Ingress (nginx)',
-      lines: ['TLS, cert-manager', '/ → web', '/api → api-core', '/socket.io → chat', 'limit_req, WAF-lite', 'хосты admin., ads.'],
+      lines: ['TLS, cert-manager', '/ → web', '/api → web-api', '/m → mobile-api', '/socket.io → chat', 'limit_req, WAF-lite', 'хосты admin., ads.'],
     }),
     L.box({
       x: 2005, y: 180, w: 260, h: 150, kind: 'edge',
@@ -266,20 +266,20 @@ function build(L) {
     }),
     L.box({
       x: 2005, y: 360, w: 260, h: 190, kind: 'new',
-      title: 'Мобильные приложения',
+      title: 'Приложение (iOS / Android)',
       lines: [
-        'iOS / Android (React Native',
-        'или Flutter), тот же API',
-        'нативный HLS: AVPlayer /',
-        'ExoPlayer; кроп квадранта —',
-        'трансформация view',
+        'Swift (SwiftUI) / Kotlin',
+        '(Compose), через mobile-api',
+        'AVPlayer / Media3 ExoPlayer;',
+        'кроп квадранта — view',
+        'зритель и организатор,',
         'push: «эфир начался»',
       ],
     }),
     L.box({
       x: 2005, y: 580, w: 260, h: 170, kind: 'new',
-      title: 'Приложение организации',
-      lines: ['студия: старт/стоп, статистика', 'эфира, ротация ключа,', 'уведомления об инцидентах'],
+      title: 'Студия в приложении',
+      lines: ['у аккаунта-организатора:', 'старт/стоп, статистика эфира,', 'ротация ключа, инциденты', 'захват камер и NDI —', 'открытый вопрос'],
     }),
     L.box({
       x: 1770, y: 840, w: 500, h: 140, kind: 'ext',
@@ -302,7 +302,7 @@ function build(L) {
       lines: [
         '1. API больше не отдаёт HLS: пакетировщик пишет сегменты в origin-хранилище, зрителям раздаёт CDN.   2. Монолит → ядро + сервисы на шине событий (ingest-control, archive-worker, notifier, chat-gateway, ai-commentary).',
         '3. Один хост и Compose → кластер с пулами media / app; медиа-поды не рестартуют под эфиром (правило deploy.sh переезжает в PDB).   4. Наблюдаемость: метрики, логи, ошибки, UI по подам и узлам.',
-        '5. Мобильные приложения и PWA работают через тот же api-core (Bearer JWT, push).   6. AI-комментатор читает копию p480 и пишет в чат / отдельную аудиодорожку — основной фид по-прежнему никто не трогает.',
+        '5. Сайт ходит в web-api, приложение (Swift, Kotlin) — в mobile-api; база, хранилище и правила общие.   6. AI-комментатор читает копию p480 и пишет в чат / отдельную аудиодорожку — основной фид по-прежнему никто не трогает.',
       ],
     }),
   );

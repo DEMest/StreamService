@@ -91,6 +91,8 @@ services:
       DATABASE_URL: postgresql://stream:${POSTGRES_PASSWORD:-streampass}@postgres:5432/streamservice
       JWT_SECRET: ${JWT_SECRET:-changeme-in-production}
       CORS_ORIGIN: ${CORS_ORIGIN:-}
+      LIVE_HLS_CDN_ORIGIN: ${LIVE_HLS_CDN_ORIGIN:-}
+      LIVE_HLS_CDN_STREAM: ${LIVE_HLS_CDN_STREAM:-}
       MEDIAMTX_API_URL: http://mediamtx:9997
       MEDIAMTX_API_USER: ${MEDIAMTX_API_USER:-api}
       MEDIAMTX_API_PASS: ${MEDIAMTX_API_PASS:-mediamtxpass}
