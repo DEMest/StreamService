@@ -35,6 +35,8 @@ model Organization {
   // Relations
   streams        Stream[]
   messages       ChatMessage[]
+  events         Event[]
+  athletes       Athlete[]
 }
 
 model Stream {
@@ -60,6 +62,7 @@ model Stream {
   // Relations
   broadcasts         Broadcast[]
   chatMessages       ChatMessage[]
+  venues             Venue[]
 
   @@unique([orgId, slug])
 }
@@ -277,4 +280,138 @@ model AdEvent {
   createdAt DateTime @default(now())
 
   @@index([adId, kind])
+}
+
+/// Турнир (событие). Принадлежит организации так же, как Stream: `/v1/org/*`
+/// фильтрует по `orgId`, чужой турнир отдаётся как 404.
+/// Ни одно поле не знает про борьбу (SRS INV-2): вид спорта — данные.
+model Event {
+  id            String       @id @default(cuid())
+  orgId         String
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  title         String
+  /// Вид спорта строкой. Справочника нет намеренно: словарь значений появится
+  /// вместе с созданием турнира в «Студии», а не раньше него.
+  sport         String
+  /// Годы рождения участников, границы включительно. NULL — не указаны.
+  birthYearFrom Int?
+  birthYearTo   Int?
+  /// 'international' | 'regional' | 'local'. Ставит организатор; от уровня
+  /// зависит цвет точки на карте.
+  level         String
+  /// Даты по афише. Когда турнир начался и закончился на самом деле —
+  /// `startedAt` / `endedAt`.
+  startsAt      DateTime
+  endsAt        DateTime
+  city          String?
+  address       String?
+  lat           Float?
+  lng           Float?
+  /// Код субъекта РФ (для зарубежных событий — страны). Один и тот же код
+  /// питает фильтр «Регион» в ленте и на карте.
+  regionCode    String?
+  /// S3-ключ афиши. NULL — карточка турнира собирается из названия, дат и места.
+  posterPath    String?
+  /// NULL у `startedAt` — турнир ещё не начался; NULL у `endedAt` при
+  /// заполненном `startedAt` — идёт сейчас.
+  startedAt     DateTime?
+  endedAt       DateTime?
+  createdAt     DateTime     @default(now())
+  // Relations
+  venues        Venue[]
+  bouts         Bout[]
+
+  @@index([orgId])
+}
+
+/// Площадка (ковёр) турнира и её источник видео. Вариантов три:
+/// свой поток (`streamId`, `quad` = NULL), четверть общего кадра (`streamId` +
+/// `quad`) и «без видео — только табло» (`streamId` = NULL).
+/// Сервер четверть не вырезает (SRS INV-1): `quad` уходит клиенту, кадрирует плеер.
+model Venue {
+  id       String  @id @default(cuid())
+  eventId  String
+  event    Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  /// Номер ковра, который видит зритель: «Ковёр 2».
+  number   Int
+  name     String?
+  /// Удалённый поток не уносит площадку с её схватками: ковёр остаётся
+  /// «без видео». `quad` при пустом `streamId` ничего не значит.
+  streamId String?
+  stream   Stream? @relation(fields: [streamId], references: [id], onDelete: SetNull)
+  /// 1–4 — четверть композитного кадра в том же порядке, что `cam1`–`cam4` у
+  /// плеера (карта `QUAD` в MatPlayer.tsx): 1 и 2 — верхний ряд, 3 и 4 — нижний.
+  quad     Int?
+  // Relations
+  bouts    Bout[]
+
+  @@unique([eventId, number])
+  @@index([streamId])
+}
+
+/// Спортсмен. Пока у участников нет своих аккаунтов, это карточка-заглушка
+/// уровня организации: один человек — одна строка на все её турниры, иначе
+/// страница спортсмена не собрала бы «все его схватки».
+model Athlete {
+  id          String       @id @default(cuid())
+  orgId       String
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lastName    String
+  firstName   String
+  school      String?
+  birthYear   Int?
+  /// S3-ключ фото. NULL — клиент рисует инициалы.
+  photoPath   String?
+  /// Ключ, по которому одного человека узнают в разных турнирах организации.
+  /// Считается ТОЛЬКО функцией `athleteIdentityKey` (apps/api/src/event/
+  /// athlete-identity.ts) — руками и в SQL его не собирать: разъехавшись с
+  /// функцией, ключ заведёт человеку вторую страницу.
+  identityKey String
+  createdAt   DateTime     @default(now())
+  // Relations
+  redBouts    Bout[]       @relation("BoutRed")
+  blueBouts   Bout[]       @relation("BoutBlue")
+
+  @@unique([orgId, identityKey])
+}
+
+/// Схватка. Строка появляется, когда схватка встаёт в расписание, а не когда
+/// пришло видео: одна схватка — ровно одна карточка в ленте, и счёт, эфир
+/// ковра, запись и лучшие моменты приклеиваются к ней.
+model Bout {
+  id            String    @id @default(cuid())
+  eventId       String
+  event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  /// NoAction, а не Cascade: удаление ковра не должно молча стирать его
+  /// схватки. И не Restrict: он проверяется сразу и ломал бы каскад от
+  /// турнира, NoAction — в конце запроса, когда схватки уже удалены.
+  venueId       String
+  venue         Venue     @relation(fields: [venueId], references: [id], onDelete: NoAction)
+  redAthleteId  String
+  redAthlete    Athlete   @relation("BoutRed", fields: [redAthleteId], references: [id], onDelete: NoAction)
+  blueAthleteId String
+  blueAthlete   Athlete   @relation("BoutBlue", fields: [blueAthleteId], references: [id], onDelete: NoAction)
+  /// Время по расписанию. NULL — порядок на ковре известен, время нет.
+  scheduledAt   DateTime?
+  weightClass   String?
+  /// 'waiting' | 'live' | 'finished'
+  status        String    @default("waiting")
+  /// Фактические границы схватки. По ним же вырезается запись из эфира ковра.
+  startedAt     DateTime?
+  endedAt       DateTime?
+  redScore      Int       @default(0)
+  blueScore     Int       @default(0)
+  /// 'red' | 'blue'. NULL — схватка не завершена или победитель не назван.
+  winner        String?
+  /// Номер схватки в программе секретаря. Связывает пришедшие из неё данные с
+  /// карточкой и не даёт повторной посылке завести вторую. NULL — схватка
+  /// заведена руками; NULL'ы уникальности не мешают.
+  externalId    String?
+  createdAt     DateTime  @default(now())
+
+  @@unique([eventId, externalId])
+  @@index([eventId, status, scheduledAt])
+  @@index([venueId, scheduledAt])
+  @@index([redAthleteId])
+  @@index([blueAthleteId])
 }
