@@ -91,18 +91,8 @@ jobs:
       - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
 
-      # Схема лежит в корне репозитория; путь прописан в apps/api/package.json
-      # ("prisma": { "schema": "../../prisma/schema.prisma" }).
-      # Без generate нет типов @prisma/client — не соберётся ни nest, ни jest.
-      - name: Генерация клиента Prisma
-        run: pnpm --filter api exec prisma generate
-
-      # nest build прогоняет tsc — отдельная проверка типов не нужна.
-      - name: Сборка (она же проверка типов)
-        run: pnpm --filter api build
-
-      - name: Тесты
-        run: pnpm --filter api test
+      - name: Генерация Prisma, сборка и тесты
+        run: pnpm check:api
 
   web:
     name: Web — типы и сборка
@@ -118,15 +108,9 @@ jobs:
       - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
 
-      # Отдельный проход tsc: next build проверяет только то, что достижимо
-      # из страниц, а tsc — весь src, включая пока не подключённые компоненты.
-      - name: Проверка типов
-        run: pnpm --filter web exec tsc --noEmit
-
-      # NEXT_PUBLIC_* не задаём намеренно: в сборке должны работать дефолты из
-      # кода. Если сборка без них падает — это баг, и его надо видеть здесь.
-      - name: Сборка
-        run: pnpm --filter web build
+      # NEXT_PUBLIC_* намеренно не задаём, сборка проверяет дефолты из кода.
+      - name: Проверка типов и сборка
+        run: pnpm check:web
 
   # ─────────────────────────────────────────────────────────────────────────
   # Выкатка на прод. Идёт только после зелёных api и web, и только на push в
@@ -169,9 +153,7 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      # Скрипт лежит в репозитории и уже обновлён на сервере шагом git pull
-      # внутри самого скрипта. Здесь мы его только запускаем — вся логика
-      # (проверка эфира, --no-deps, health-gate, откат, prune) там.
+      # На сервере запускаем скрипт из того же коммита, который проверил CI.
       - name: Запуск infra/deploy/deploy.sh на сервере
         # Форс доступен только через ручной запуск: на push инпутов нет и сюда
         # придёт 0. Значение подставляет bash раннера до вызова ssh.
@@ -181,12 +163,19 @@ jobs:
           # нужна ссылка на прогон — пробрасываем явно.
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          DEPLOY_SHA: ${{ github.sha }}
         run: |
           ssh -i ~/.ssh/deploy_key \
               -o StrictHostKeyChecking=yes \
               -o ConnectTimeout=10 \
               "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-              "cd '${{ secrets.DEPLOY_PATH }}' && git fetch origin main --quiet && git checkout main --quiet && git merge --ff-only origin/main --quiet && FORCE_MEDIAMTX=$FORCE_MEDIAMTX GITHUB_RUN_ID=$GITHUB_RUN_ID GITHUB_REPOSITORY=$GITHUB_REPOSITORY bash infra/deploy/deploy.sh"
+              "cd '${{ secrets.DEPLOY_PATH }}' &&
+               git fetch origin main --quiet &&
+               git merge-base --is-ancestor '$DEPLOY_SHA' origin/main &&
+               git checkout main --quiet &&
+               git merge --ff-only '$DEPLOY_SHA' --quiet &&
+               test \"\$(git rev-parse HEAD)\" = '$DEPLOY_SHA' &&
+               DEPLOY_SHA='$DEPLOY_SHA' FORCE_MEDIAMTX=$FORCE_MEDIAMTX GITHUB_RUN_ID=$GITHUB_RUN_ID GITHUB_REPOSITORY=$GITHUB_REPOSITORY bash infra/deploy/deploy.sh"
 
       - name: Убрать ключ
         if: always()

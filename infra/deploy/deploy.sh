@@ -23,6 +23,7 @@
 set -euo pipefail
 
 REPO="${REPO:-/home/rootuser/StreamService}"
+DEPLOY_SHA="${DEPLOY_SHA:-}"
 SERVICES="api web"          # собираем и метим для отката
 APP_SERVICES="api web"      # поднимаем обычным up; mediamtx идёт отдельно и раньше
 HEALTH_URL="${HEALTH_URL:-https://liga-live.ru/api/v1/org/ingest-config}"
@@ -179,9 +180,19 @@ STATE="infra/deploy/.deployed"
 DEPLOYED_SHA=$(cat "$STATE" 2>/dev/null || true)
 
 git fetch origin main --quiet
+target_ref=origin/main
+if [ -n "$DEPLOY_SHA" ]; then
+  if ! [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]] || ! git merge-base --is-ancestor "$DEPLOY_SHA" origin/main; then
+    fail "Коммит выкатки должен быть полным SHA из истории origin/main."
+  fi
+  target_ref="$DEPLOY_SHA"
+fi
 git checkout main --quiet
-git merge --ff-only origin/main --quiet
+git merge --ff-only "$target_ref" --quiet
 TARGET_SHA=$(git rev-parse HEAD)
+if [ -n "$DEPLOY_SHA" ] && [ "$TARGET_SHA" != "$DEPLOY_SHA" ]; then
+  fail "Проверенный коммит $DEPLOY_SHA уже позади текущего checkout. Выкатка отменена."
+fi
 
 if [ "$DEPLOYED_SHA" = "$TARGET_SHA" ]; then
   log "$(git rev-parse --short HEAD) уже выкачен — делать нечего"
