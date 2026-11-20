@@ -512,6 +512,7 @@ const MatPlayer = forwardRef<MatPlayerHandle, Props>((props, ref) => {
     <div className="relative w-full h-full bg-black">
       <video
         ref={primaryVideoRef}
+        crossOrigin={!isArchive && streamUrls[0]?.startsWith('https://') ? 'anonymous' : undefined}
         autoPlay
         playsInline
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, pointerEvents: 'none' }}

@@ -43,6 +43,34 @@ describe('PublicService', () => {
   });
 
   describe('getStreamUrl', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each([
+      ['выбранный публичный эфир', 'pilot', 'live', true, 'https://cdn.example.com/', 'https://cdn.example.com'],
+      ['другой эфир', 'pilot', 'other', true, 'https://cdn.example.com', ''],
+      ['приватный эфир', 'pilot', 'live', false, 'https://cdn.example.com', ''],
+      ['CDN выключен', 'pilot', 'live', true, '', ''],
+      ['CDN настроен с путём', 'pilot', 'live', true, 'https://cdn.example.com/extra', ''],
+      ['CDN настроен без HTTPS', 'pilot', 'live', true, 'http://cdn.example.com', ''],
+    ] as const)('%s получает ожидаемый HLS-адрес', async (_name, org, slug, isPublic, origin, expectedOrigin) => {
+      jest.replaceProperty(process, 'env', {
+        ...process.env,
+        LIVE_HLS_CDN_ORIGIN: origin,
+        LIVE_HLS_CDN_STREAM: 'pilot/live',
+      });
+      mockPrisma.stream.findFirst.mockResolvedValueOnce({
+        isLive: true,
+        isPublic,
+        previewKey: isPublic ? null : 'preview',
+        feedMode: 'single',
+      });
+
+      const { hlsUrl } = await service.getStreamUrl(org, slug, 'preview');
+      const route = `/api/v1/public/orgs/${org}/streams/${slug}`;
+      const accessPath = isPublic ? route : `${route}/private/preview`;
+      expect(hlsUrl).toBe(`${expectedOrigin}${accessPath}/live/hls/master.m3u8`);
+    });
+
     it('returns { hlsUrl, feedMode } for a live public Stream', async () => {
       mockPrisma.stream.findFirst.mockResolvedValueOnce({
         isLive: true,
