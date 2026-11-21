@@ -101,8 +101,14 @@ jobs:
       - name: Сборка (она же проверка типов)
         run: pnpm --filter api build
 
+      # Число воркеров задано явно. Jest берёт os.availableParallelism() − 1, а
+      # в Node 20 внутри контейнера это ядра хоста (80), а не квота раннера
+      # (infra/ci-runner: 8 CPU, 8 ГБ). Выходил воркер на каждый тестовый файл
+      # по ~0,5 ГБ: прогон шёл 8–9 минут вместо ~2, а когда файлов стало 51,
+      # раннер задохнулся и GitHub потерял с ним связь («runner lost
+      # communication»). 6 воркеров — ~3 ГБ и запас по CPU для самого раннера.
       - name: Тесты
-        run: pnpm --filter api test
+        run: pnpm --filter api test --maxWorkers=6
 
   web:
     name: Web — типы и сборка
