@@ -1,0 +1,293 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/v1/public/search": {
+      "get": {
+        "operationId": "searchFind",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Строка поиска. Короче двух символов — пустой результат; длиннее 100 — обрезается.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Client-Version",
+            "required": false,
+            "description": "Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResultsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — `q` передан не строкой.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Поиск по организациям, стримам и записям эфиров",
+        "tags": [
+          "search"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Лига Лайв API",
+    "description": "Контракт API для сайта и приложений. В `/v1` поля только добавляются; клиент пропускает незнакомые поля и значения перечислений. Ошибки — `ApiErrorDto`, ветвиться по `code`. Списки — порциями с курсором. Время — UTC в ISO 8601, календарные дни — строки `YYYY-MM-DD`. Правила: docs/api-contract.md в репозитории.",
+    "version": "1",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "schemas": {
+      "SearchOrgHitDto": {
+        "type": "object",
+        "properties": {
+          "orgSlug": {
+            "type": "string"
+          },
+          "orgName": {
+            "type": "string"
+          },
+          "hasImage": {
+            "type": "boolean",
+            "description": "Есть картинка организации."
+          },
+          "liveCount": {
+            "type": "integer",
+            "description": "Сколько публичных стримов организации сейчас в эфире."
+          }
+        },
+        "required": [
+          "orgSlug",
+          "orgName",
+          "hasImage",
+          "liveCount"
+        ]
+      },
+      "SearchStreamHitDto": {
+        "type": "object",
+        "properties": {
+          "orgSlug": {
+            "type": "string"
+          },
+          "orgName": {
+            "type": "string"
+          },
+          "streamSlug": {
+            "type": "string"
+          },
+          "streamName": {
+            "type": "string",
+            "description": "Название стрима; у безымянного — название организации."
+          },
+          "isLive": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "orgSlug",
+          "orgName",
+          "streamSlug",
+          "streamName",
+          "isLive"
+        ]
+      },
+      "RecordingSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "Состояние записи: `processing`, `ready`, `failed`."
+          },
+          "fileSize": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Размер `download.mp4`, байты."
+          },
+          "duration": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Длительность, целые секунды."
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "fileSize",
+          "duration"
+        ]
+      },
+      "SearchBroadcastHitDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "hasPreview": {
+            "type": "boolean",
+            "description": "Есть стоп-кадр записи."
+          },
+          "recording": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RecordingSummaryDto"
+              }
+            ]
+          },
+          "orgSlug": {
+            "type": "string"
+          },
+          "orgName": {
+            "type": "string"
+          },
+          "streamSlug": {
+            "type": "string"
+          },
+          "streamName": {
+            "type": "string",
+            "description": "Название стрима; у безымянного — название организации."
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "startedAt",
+          "endedAt",
+          "hasPreview",
+          "recording",
+          "orgSlug",
+          "orgName",
+          "streamSlug",
+          "streamName"
+        ]
+      },
+      "SearchResultsDto": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Запрос после обрезки пробелов и длины — то, что искали на самом деле."
+          },
+          "organizations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchOrgHitDto"
+            }
+          },
+          "streams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchStreamHitDto"
+            }
+          },
+          "broadcasts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchBroadcastHitDto"
+            }
+          }
+        },
+        "required": [
+          "query",
+          "organizations",
+          "streams",
+          "broadcasts"
+        ]
+      },
+      "ApiFieldErrorDto": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "Путь к полю запроса: `limit`, `venues.0.quad`",
+            "example": "limit"
+          },
+          "messages": {
+            "example": [
+              "limit must not be greater than 100"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "field",
+          "messages"
+        ]
+      },
+      "ApiErrorDto": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "example": 404
+          },
+          "code": {
+            "type": "string",
+            "description": "Машинный код ошибки, SCREAMING_SNAKE_CASE. Конкретный (`EVENT_NOT_FOUND`) или общий по статусу (`NOT_FOUND`). Незнакомый код клиент обрабатывает по `statusCode`.",
+            "example": "NOT_FOUND"
+          },
+          "message": {
+            "type": "string",
+            "description": "Текст для человека. Не для разбора кодом.",
+            "example": "Турнир не найден"
+          },
+          "fields": {
+            "description": "Ошибки по полям — только у `VALIDATION_FAILED`.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiFieldErrorDto"
+            }
+          }
+        },
+        "required": [
+          "statusCode",
+          "code",
+          "message"
+        ]
+      }
+    }
+  }
+}

@@ -118,6 +118,15 @@ jobs:
       - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
 
+      # Типы сайта генерируются из контракта API (docs/api-contract.md). Что
+      # сам apps/api/openapi.json совпадает с кодом, проверяет тест в джобе
+      # api; здесь — что типы сайта собраны из этого файла, а не отстали.
+      - name: Типы сайта совпадают с контрактом API
+        run: |
+          pnpm --filter web api-types
+          git diff --exit-code -- apps/web/src/lib/api-schema.ts \
+            || { echo "::error::apps/web/src/lib/api-schema.ts отстал от apps/api/openapi.json — запустите pnpm api:contract"; exit 1; }
+
       # Отдельный проход tsc: next build проверяет только то, что достижимо
       # из страниц, а tsc — весь src, включая пока не подключённые компоненты.
       - name: Проверка типов

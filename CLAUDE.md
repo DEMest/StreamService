@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Monorepo**: pnpm workspaces (`pnpm-workspace.yaml` → `apps/*`)
 - **Frontend** (`apps/web`): Next.js 14 (App Router) + TypeScript + hls.js + React Query + Socket.io client
 - **Backend** (`apps/api`): NestJS 10 + TypeScript + Prisma + JWT auth + Socket.io + `@nestjs/schedule` (cron)
+- **API contract**: `class-validator` DTOs + `@nestjs/swagger` → OpenAPI, from which the site's types are generated (`openapi-typescript`). Rules: `docs/api-contract.md`
 - **Database**: PostgreSQL (via Prisma, schema at repo root `/prisma/schema.prisma`)
 - **Media server**: MediaMTX (Docker) — SRT/RTMP in → FFmpeg-generated HLS on disk → served by the API
 - **Media tooling**: FFmpeg / ffprobe (HLS generation, recording post-processing, downloads), `sharp` (thumbnails)
@@ -49,11 +50,17 @@ pnpm prisma:migrate-data:populate-streams   # backfill default Stream rows for e
 pnpm prisma:migrate-data:chat-to-stream     # migrate ChatMessage.orgId → streamId
 ```
 
+### API contract
+```bash
+pnpm api:contract     # regenerate apps/api/openapi.json + apps/web/src/lib/api-schema.ts after changing a described endpoint
+```
+Both files are committed and never edited by hand. A stale `openapi.json` fails `common/api/openapi.spec.ts`; stale site types fail the web CI job.
+
 ### Tests (from `apps/api`, Jest + ts-jest, `rootDir: src`)
 ```bash
 pnpm test                                   # run all *.spec.ts
-pnpm test -- --testPathPatterns=stream      # run a single test file by name (jest 30: plural)
-pnpm test -- --watch                        # watch mode
+pnpm test --testPathPatterns=stream         # run a single test file by name (jest 30: plural; pnpm 10 passes a literal `--` through, so no `--`)
+pnpm test --watch                           # watch mode
 ```
 There is no wired lint script; tests are backend-only (no frontend test suite).
 
@@ -214,7 +221,38 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 | `seo` | `/v1/public/seo/{sitemap,page-meta}` | none |
 | `capacity` | `/v1/admin/capacity` (ёмкость сервера), `/v1/public/qoe` (телеметрия плеера) | superadmin JWT / none |
 | `chat` | WebSocket `/chat` namespace | none |
+| `common/api` | `GET /v1/openapi.json` (контракт API) | none |
 | `storage`, `stats`, `thumbnail`, `contact`, `feedback`, `notify`, `mediamtx` (control-API client), `prisma` | (internal services, no routes of their own) | — |
+
+**Контракт API** (`common/api/`, правила — `docs/api-contract.md`). У API два
+клиента, сайт и приложения, а версию приложения из стора нельзя обновить
+принудительно. Поэтому:
+- **Новый эндпоинт пишется по правилам контракта:** `@ApiTags` на контроллере,
+  запрос и ответ — классы (class-validator + `@ApiProperty`), сервис
+  возвращает тот же класс-ответ, ошибки — `ApiException` с машинным кодом,
+  списки — порциями с курсором (`CursorQueryDto`, `CursorPage`,
+  `toCursorPage`). Пилот — `search/`. Контроллер без тега в контракт не
+  попадает, и `openapi.spec.ts` падает. Исключения — `LEGACY_CONTROLLERS`
+  (старые, список только сокращается) и `NOT_FOR_CLIENTS` (вебхук MediaMTX,
+  `/health`).
+- **Ошибки — один формат на весь HTTP:** `{ statusCode, code, message, fields? }`
+  (`ApiExceptionFilter`). Клиент ветвится по `code`, а не по тексту. Старые
+  тела не урезаны: фильтр только добавляет `code` и строковый `message`.
+  Запись ответа, «заголовки уже ушли» посреди отдачи HLS и лог остаются за
+  штатным `BaseExceptionFilter`. Не переписывайте это своей отправкой ответа:
+  этот же процесс раздаёт live HLS.
+- **Глобальный `ValidationPipe`** (`whitelist` + `transform`) трогает только
+  параметры с типом-классом. Старые тела-интерфейсы и `@Query('x')` в рантайме
+  — `Object`/`String`, пайп их пропускает, и поведение не меняется. WebSocket
+  глобальные пайпы и фильтры не получает вовсе.
+- **В `/v1` поля только добавляются;** клиент пропускает незнакомые поля и
+  значения. Ломающее изменение — новый эндпоинт. Приложение называет себя
+  заголовком `X-Client-Version` (`ios/1.4.0`).
+- **`configureApi`** — одна точка настройки и для `main.ts`, и для тестов.
+  Документ собирается на старте, и сбой сборки не роняет API (503 на
+  `/v1/openapi.json` и лог): тот же процесс отдаёт HLS.
+- **Сайт берёт типы из контракта** (`ApiSchemas['…']` из `@/lib/api`), а не
+  пишет свои. Ошибка запроса на сайте — `ApiRequestError` с `code`.
 
 **Auth tokens & cookies** (`auth.controller.ts`):
 - JWT payload: `{ sub, role: 'superadmin'|'org_admin'|'ad_manager', orgId?, orgSlug? }`.
