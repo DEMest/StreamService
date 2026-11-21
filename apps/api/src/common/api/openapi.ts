@@ -16,16 +16,32 @@ export const OPENAPI_PATH = '/v1/openapi.json';
 
 /**
  * Заголовок, в котором приложение называет себя: `ios/1.4.0`, `android/1.4.0`.
- * Сайт его не шлёт. Нужен, чтобы при изменении контракта знать, какие версии
- * из сторов ещё ходят в API (выпущенное приложение обновить принудительно
- * нельзя).
+ * Сайт его не шлёт. Выпущенное приложение обновить принудительно нельзя, и
+ * этот заголовок — способ узнать, какие версии из сторов ещё ходят в API.
+ * Сейчас сервер его не читает и не пишет в лог: правило заложено в контракт
+ * до первой сборки, а учёт версий появится отдельной задачей.
  */
 export const CLIENT_VERSION_HEADER = 'X-Client-Version';
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
 
 /**
- * В контракт попадают только эндпоинты контроллеров с `@ApiTags`.
+ * Маршруты, которые не входят в публичный контракт, даже если описаны по
+ * правилам. Документ открыт без авторизации, а это API админки (на основном
+ * домене nginx отдаёт на него 404) и служебные адреса MediaMTX — приложениям
+ * они не нужны. Тот же список освобождает их контроллеры от `@ApiTags` в
+ * `openapi.spec.ts`.
+ */
+export const NON_CONTRACT_PREFIXES = ['/v1/admin', '/v1/internal'] as const;
+
+export function isNonContractPath(path: string): boolean {
+  const normalized = '/' + path.replace(/^\/+/, '');
+  return NON_CONTRACT_PREFIXES.some((p) => normalized === p || normalized.startsWith(p + '/'));
+}
+
+/**
+ * В контракт попадают только эндпоинты контроллеров с `@ApiTags` и вне
+ * `NON_CONTRACT_PREFIXES`.
  *
  * Старые контроллеры описаны интерфейсами, которых в рантайме нет: в документе
  * они выглядели бы эндпоинтами без тела и без ответа, и сгенерированные по ним
@@ -36,6 +52,7 @@ const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch'
 export function onlyContractOperations(doc: OpenAPIObject): OpenAPIObject {
   const paths: OpenAPIObject['paths'] = {};
   for (const [path, item] of Object.entries(doc.paths)) {
+    if (isNonContractPath(path)) continue;
     const kept = { ...item };
     let hasOperations = false;
     for (const method of HTTP_METHODS) {

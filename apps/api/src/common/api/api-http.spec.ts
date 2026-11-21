@@ -67,7 +67,7 @@ class LegacyAndNewController {
 
   @Get('list')
   list(@Query() q: ListQueryDto) {
-    return { limit: q.limit ?? null, limitType: typeof q.limit, keys: Object.keys(q).sort() };
+    return { limit: q.limit, limitType: typeof q.limit, keys: Object.keys(q).sort() };
   }
 
   @Post('legacy')
@@ -119,6 +119,17 @@ class TaggedController {
   }
 }
 
+/** Описан по правилам, но под служебным префиксом — в публичный документ не идёт. */
+@ApiTags('admin-things')
+@Controller('v1/admin/things')
+class AdminThingsController {
+  @Get()
+  @ApiOkResponse({ type: ThingDto })
+  get(): ThingDto {
+    return { name: 'secret' };
+  }
+}
+
 describe('HTTP-слой API: ошибки, валидация, OpenAPI', () => {
   let app: INestApplication;
   let base: string;
@@ -126,7 +137,7 @@ describe('HTTP-слой API: ошибки, валидация, OpenAPI', () => {
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      controllers: [LegacyAndNewController, TaggedController],
+      controllers: [LegacyAndNewController, TaggedController, AdminThingsController],
     }).compile();
     app = moduleRef.createNestApplication({ logger: false });
     configureApi(app);
@@ -209,6 +220,10 @@ describe('HTTP-слой API: ошибки, валидация, OpenAPI', () => {
       const ok = await fetch(`${base}/t/list?limit=20&state=live&junk=1`);
       expect(await ok.json()).toEqual({ limit: 20, limitType: 'number', keys: ['limit', 'state'] });
 
+      // Без limit — умолчание из CursorQueryDto, а не undefined.
+      const dflt = await fetch(`${base}/t/list`);
+      expect(await dflt.json()).toEqual({ limit: 20, limitType: 'number', keys: ['limit'] });
+
       const bad = await fetch(`${base}/t/list?limit=1000`);
       expect(bad.status).toBe(400);
       expect((await bad.json()).fields).toEqual([
@@ -229,7 +244,7 @@ describe('HTTP-слой API: ошибки, валидация, OpenAPI', () => {
   });
 
   describe(OPENAPI_PATH, () => {
-    it('отдаёт контракт: только контроллеры с @ApiTags', async () => {
+    it('отдаёт контракт: только контроллеры с @ApiTags и не из /v1/admin', async () => {
       const res = await fetch(base + OPENAPI_PATH);
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('application/json');

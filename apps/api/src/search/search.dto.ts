@@ -8,9 +8,16 @@ import { RecordingSummaryDto } from '../recording/recording-summary';
  * возвращает на самом деле, не могут разойтись без ошибки компиляции.
  */
 
+/** Короче двух символов запрос не имеет смысла: выдаст пол-базы. */
+export const MIN_SEARCH_QUERY_LENGTH = 2;
+/** Защита от запроса-простыни, который превратится в тяжёлый LIKE. */
+export const MAX_SEARCH_QUERY_LENGTH = 100;
+
 export class SearchQueryDto {
   @ApiPropertyOptional({
-    description: 'Строка поиска. Короче двух символов — пустой результат; длиннее 100 — обрезается.',
+    description:
+      `Строка поиска. Короче ${MIN_SEARCH_QUERY_LENGTH} символов — пустой результат; ` +
+      `длиннее ${MAX_SEARCH_QUERY_LENGTH} — обрезается.`,
   })
   @IsOptional()
   @IsString()

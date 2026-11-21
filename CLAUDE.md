@@ -224,35 +224,31 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 | `common/api` | `GET /v1/openapi.json` (контракт API) | none |
 | `storage`, `stats`, `thumbnail`, `contact`, `feedback`, `notify`, `mediamtx` (control-API client), `prisma` | (internal services, no routes of their own) | — |
 
-**Контракт API** (`common/api/`, правила — `docs/api-contract.md`). У API два
-клиента, сайт и приложения, а версию приложения из стора нельзя обновить
-принудительно. Поэтому:
-- **Новый эндпоинт пишется по правилам контракта:** `@ApiTags` на контроллере,
-  запрос и ответ — классы (class-validator + `@ApiProperty`), сервис
-  возвращает тот же класс-ответ, ошибки — `ApiException` с машинным кодом,
-  списки — порциями с курсором (`CursorQueryDto`, `CursorPage`,
-  `toCursorPage`). Пилот — `search/`. Контроллер без тега в контракт не
-  попадает, и `openapi.spec.ts` падает. Исключения — `LEGACY_CONTROLLERS`
-  (старые, список только сокращается) и `NOT_FOR_CLIENTS` (вебхук MediaMTX,
-  `/health`).
-- **Ошибки — один формат на весь HTTP:** `{ statusCode, code, message, fields? }`
-  (`ApiExceptionFilter`). Клиент ветвится по `code`, а не по тексту. Старые
-  тела не урезаны: фильтр только добавляет `code` и строковый `message`.
-  Запись ответа, «заголовки уже ушли» посреди отдачи HLS и лог остаются за
-  штатным `BaseExceptionFilter`. Не переписывайте это своей отправкой ответа:
-  этот же процесс раздаёт live HLS.
-- **Глобальный `ValidationPipe`** (`whitelist` + `transform`) трогает только
-  параметры с типом-классом. Старые тела-интерфейсы и `@Query('x')` в рантайме
-  — `Object`/`String`, пайп их пропускает, и поведение не меняется. WebSocket
+**Контракт API** (`common/api/`, правила — `docs/api-contract.md`, их не
+дублируем здесь). У API два клиента, сайт и приложения, а версию приложения из
+стора нельзя обновить принудительно. Что важно не сломать:
+- **Новый эндпоинт пишется по правилам контракта** (пилот — `search/`). Тест
+  `openapi.spec.ts` падает на контроллере без `@ApiTags` и на эндпоинте, у
+  которого ответ или тело не описаны классом. Вне контракта: `/v1/admin` и
+  `/v1/internal` по префиксу (`NON_CONTRACT_PREFIXES`, документ открыт всем),
+  старые контроллеры из `LEGACY_CONTROLLERS` (список только сокращается) и
+  `/health`.
+- **`ApiExceptionFilter` только подменяет тело ошибки** (`{ statusCode, code,
+  message, fields? }`). Запись ответа, «заголовки уже ушли» посреди отдачи HLS
+  и лог остаются за штатным `BaseExceptionFilter`. Не переписывайте это своей
+  отправкой ответа: этот же процесс раздаёт live HLS. Ответы, которые
+  обработчик пишет сам через `@Res()` (раздача HLS в `RecordingController`),
+  фильтр не видит, и `code` в них нет.
+- **Глобальный `ValidationPipe`** (`whitelist` + `transform`) валидирует только
+  параметры с типом-классом. Старые тела-интерфейсы в рантайме — `Object`, их
+  он не трогает. Но `transform` превратит новый `@Query('x') x?: number` без
+  значения в `NaN`, поэтому параметры описываются классом. WebSocket
   глобальные пайпы и фильтры не получает вовсе.
-- **В `/v1` поля только добавляются;** клиент пропускает незнакомые поля и
-  значения. Ломающее изменение — новый эндпоинт. Приложение называет себя
-  заголовком `X-Client-Version` (`ios/1.4.0`).
-- **`configureApi`** — одна точка настройки и для `main.ts`, и для тестов.
-  Документ собирается на старте, и сбой сборки не роняет API (503 на
-  `/v1/openapi.json` и лог): тот же процесс отдаёт HLS.
+- **Документ собирается на старте, и сбой сборки не роняет API** (503 на
+  `/v1/openapi.json` и лог). `configureApi` — одна точка настройки и для
+  `main.ts`, и для тестов.
 - **Сайт берёт типы из контракта** (`ApiSchemas['…']` из `@/lib/api`), а не
-  пишет свои. Ошибка запроса на сайте — `ApiRequestError` с `code`.
+  пишет свои. После правки описанного эндпоинта — `pnpm api:contract`.
 
 **Auth tokens & cookies** (`auth.controller.ts`):
 - JWT payload: `{ sub, role: 'superadmin'|'org_admin'|'ad_manager', orgId?, orgSlug? }`.

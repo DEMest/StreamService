@@ -70,17 +70,39 @@ export class ApiException extends HttpException {
 }
 
 /**
- * Общий код по статусу: 404 → `NOT_FOUND`, 500 → `INTERNAL_SERVER_ERROR`.
- * Берётся из стандартных названий статусов Node, поэтому одинаков для любого
- * статуса, а не только для тех, что кто-то не забыл вписать в таблицу.
+ * Общие коды по статусу — явной таблицей, а не из фраз `http.STATUS_CODES`.
+ * Фразы Node меняет вслед за RFC (413 уже «Content Too Large», 422 —
+ * «Unprocessable Content»), а код в `/v1` переименовывать нельзя.
+ * Здесь все статусы, которые бросают встроенные исключения Nest и сам API.
  */
+const CODE_BY_STATUS: Readonly<Record<number, string>> = {
+  400: 'BAD_REQUEST',
+  401: 'UNAUTHORIZED',
+  403: 'FORBIDDEN',
+  404: 'NOT_FOUND',
+  405: 'METHOD_NOT_ALLOWED',
+  406: 'NOT_ACCEPTABLE',
+  408: 'REQUEST_TIMEOUT',
+  409: 'CONFLICT',
+  410: 'GONE',
+  412: 'PRECONDITION_FAILED',
+  413: 'PAYLOAD_TOO_LARGE',
+  415: 'UNSUPPORTED_MEDIA_TYPE',
+  416: 'RANGE_NOT_SATISFIABLE',
+  421: 'MISDIRECTED_REQUEST',
+  422: 'UNPROCESSABLE_ENTITY',
+  429: 'TOO_MANY_REQUESTS',
+  500: 'INTERNAL_SERVER_ERROR',
+  501: 'NOT_IMPLEMENTED',
+  502: 'BAD_GATEWAY',
+  503: 'SERVICE_UNAVAILABLE',
+  504: 'GATEWAY_TIMEOUT',
+  505: 'HTTP_VERSION_NOT_SUPPORTED',
+};
+
+/** Общий код по статусу: 404 → `NOT_FOUND`; статуса нет в таблице — `HTTP_<n>`. */
 export function errorCodeForStatus(status: number): string {
-  const name = STATUS_CODES[status];
-  if (!name) return `HTTP_${status}`;
-  return name
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+  return CODE_BY_STATUS[status] ?? `HTTP_${status}`;
 }
 
 function normalizeMessage(raw: unknown, status: number): string {

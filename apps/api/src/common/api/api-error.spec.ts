@@ -9,15 +9,17 @@ describe('errorCodeForStatus', () => {
     [404, 'NOT_FOUND'],
     [409, 'CONFLICT'],
     [413, 'PAYLOAD_TOO_LARGE'],
+    [416, 'RANGE_NOT_SATISFIABLE'],
+    [422, 'UNPROCESSABLE_ENTITY'],
     [429, 'TOO_MANY_REQUESTS'],
     [500, 'INTERNAL_SERVER_ERROR'],
     [503, 'SERVICE_UNAVAILABLE'],
-    [418, 'I_M_A_TEAPOT'],
   ])('%i → %s', (status, code) => {
     expect(errorCodeForStatus(status)).toBe(code);
   });
 
-  it('у статуса без названия — HTTP_<n>', () => {
+  it('статуса нет в таблице — HTTP_<n>, а не фраза из Node', () => {
+    expect(errorCodeForStatus(418)).toBe('HTTP_418');
     expect(errorCodeForStatus(499)).toBe('HTTP_499');
   });
 });

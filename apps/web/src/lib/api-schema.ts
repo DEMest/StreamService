@@ -114,7 +114,7 @@ export interface operations {
     searchFind: {
         parameters: {
             query?: {
-                /** @description Строка поиска. Короче двух символов — пустой результат; длиннее 100 — обрезается. */
+                /** @description Строка поиска. Короче 2 символов — пустой результат; длиннее 100 — обрезается. */
                 q?: string;
             };
             header?: {

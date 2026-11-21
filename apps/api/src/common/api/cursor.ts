@@ -26,6 +26,7 @@ export class CursorQueryDto {
   cursor?: string;
 
   @ApiPropertyOptional({
+    type: 'integer',
     description: 'Сколько элементов в порции.',
     minimum: 1,
     maximum: MAX_PAGE_LIMIT,
@@ -36,7 +37,10 @@ export class CursorQueryDto {
   @IsInt()
   @Min(1)
   @Max(MAX_PAGE_LIMIT)
-  limit?: number;
+  // Умолчание — здесь, а не `q.limit ?? 20` в каждом эндпоинте: забытое `??`
+  // дало бы `take: NaN` и 500. ValidationPipe (transform) создаёт экземпляр
+  // класса, поэтому инициализатор срабатывает и для запроса без `limit`.
+  limit: number = DEFAULT_PAGE_LIMIT;
 }
 
 /**
