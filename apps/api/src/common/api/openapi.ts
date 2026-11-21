@@ -63,7 +63,48 @@ export function onlyContractOperations(doc: OpenAPIObject): OpenAPIObject {
     }
     if (hasOperations) paths[path] = kept;
   }
-  return { ...doc, paths };
+  return withReachableSchemas({ ...doc, paths }, ALWAYS_PUBLISHED_SCHEMAS);
+}
+
+/** Схемы, которые нужны клиентам, даже если на них пока не ссылается ни один путь. */
+const ALWAYS_PUBLISHED_SCHEMAS = [ApiErrorDto.name];
+
+const SCHEMA_REF_PREFIX = '#/components/schemas/';
+
+/**
+ * Оставляет в `components.schemas` только схемы, достижимые по `$ref` из
+ * оставшихся путей (и `keep`). Swagger кладёт туда схемы всех описанных
+ * классов, в том числе DTO отброшенных маршрутов: без этой чистки класс-ответ
+ * админки утёк бы в открытый документ и в типы сайта, хотя самого пути там нет.
+ * Порядок схем сохраняется — от него зависит побайтное сравнение файла.
+ */
+export function withReachableSchemas(doc: OpenAPIObject, keep: string[] = []): OpenAPIObject {
+  const schemas = doc.components?.schemas ?? {};
+  const reachable = new Set<string>();
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === '$ref' && typeof value === 'string' && value.startsWith(SCHEMA_REF_PREFIX)) {
+        mark(value.slice(SCHEMA_REF_PREFIX.length));
+      } else {
+        visit(value);
+      }
+    }
+  };
+  const mark = (name: string): void => {
+    if (reachable.has(name)) return;
+    reachable.add(name);
+    visit(schemas[name]);
+  };
+
+  visit(doc.paths);
+  keep.forEach(mark);
+  const kept = Object.fromEntries(Object.entries(schemas).filter(([name]) => reachable.has(name)));
+  return { ...doc, components: { ...doc.components, schemas: kept } };
 }
 
 /** `SearchController.find` → `searchFind`: читаемые имена методов в клиентах. */

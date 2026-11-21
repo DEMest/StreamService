@@ -119,14 +119,22 @@ class TaggedController {
   }
 }
 
-/** Описан по правилам, но под служебным префиксом — в публичный документ не идёт. */
+class AdminSecretDto {
+  @ApiProperty()
+  internalNote: string;
+}
+
+/**
+ * Описан по правилам, но под служебным префиксом — в публичный документ не
+ * идёт ни путь, ни схема его ответа.
+ */
 @ApiTags('admin-things')
 @Controller('v1/admin/things')
 class AdminThingsController {
   @Get()
-  @ApiOkResponse({ type: ThingDto })
-  get(): ThingDto {
-    return { name: 'secret' };
+  @ApiOkResponse({ type: AdminSecretDto })
+  get(): AdminSecretDto {
+    return { internalNote: 'secret' };
   }
 }
 
@@ -252,6 +260,8 @@ describe('HTTP-слой API: ошибки, валидация, OpenAPI', () => {
       expect(Object.keys(doc.paths)).toEqual(['/tagged']);
       expect(doc.components.schemas).toHaveProperty('ThingDto');
       expect(doc.components.schemas).toHaveProperty('ApiErrorDto');
+      expect(doc.components.schemas).toHaveProperty('ApiFieldErrorDto');
+      expect(doc.components.schemas).not.toHaveProperty('AdminSecretDto');
     });
   });
 });
