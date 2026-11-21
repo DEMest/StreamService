@@ -1,4 +1,31 @@
+import type { components } from './api-schema';
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '/api';
+
+/**
+ * Типы запросов и ответов из контракта API (`apps/api/openapi.json`), а не
+ * свои копии. Файл `api-schema.ts` генерируется: `pnpm api:contract`.
+ * Эндпоинт, которого здесь нет, ещё не описан по правилам контракта
+ * (docs/api-contract.md) — его тип пока пишется по старинке.
+ */
+export type ApiSchemas = components['schemas'];
+
+/**
+ * Ошибка запроса в едином формате API (`ApiErrorDto`). `message` — для
+ * человека, `code` — для логики (`VALIDATION_FAILED`, `NOT_FOUND`…). `code`
+ * пуст, когда ответ пришёл не от API: страница ошибки прокси при выкатке.
+ */
+export class ApiRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | undefined,
+    message: string,
+    readonly fields?: ApiSchemas['ApiFieldErrorDto'][],
+  ) {
+    super(message);
+    this.name = 'ApiRequestError';
+  }
+}
 
 /**
  * Shared promise — пока идёт /refresh, все остальные 401-обработчики ждут
@@ -142,10 +169,15 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    const error = await res
+    const error: Partial<ApiSchemas['ApiErrorDto']> = await res
       .json()
       .catch(() => ({ message: res.statusText }));
-    throw new Error(error.message ?? 'Request failed');
+    throw new ApiRequestError(
+      res.status,
+      typeof error.code === 'string' ? error.code : undefined,
+      error.message ?? 'Request failed',
+      error.fields,
+    );
   }
   return res.json();
 }

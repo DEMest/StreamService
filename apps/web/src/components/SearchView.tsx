@@ -5,25 +5,13 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { MagnifyingGlass, Broadcast, TelevisionSimple, Buildings, FilmSlate } from '@phosphor-icons/react';
-import { api } from '@/lib/api';
+import { api, type ApiSchemas } from '@/lib/api';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { fadeUp, staggerContainer, cardFadeUp } from '@/lib/motion';
 
-interface SearchResults {
-  query: string;
-  organizations: Array<{ orgSlug: string; orgName: string; hasImage: boolean; liveCount: number }>;
-  streams: Array<{ orgSlug: string; orgName: string; streamSlug: string; streamName: string; isLive: boolean }>;
-  broadcasts: Array<{
-    id: string;
-    title: string;
-    startedAt: string;
-    orgSlug: string;
-    orgName: string;
-    streamSlug: string;
-    streamName: string;
-  }>;
-}
+/** Ответ `GET /v1/public/search` — из контракта API, а не своя копия. */
+type SearchResults = ApiSchemas['SearchResultsDto'];
 
 /** Пауза перед запросом: печатающий человек делает 3–5 нажатий в секунду. */
 const DEBOUNCE_MS = 300;
