@@ -166,7 +166,7 @@ flowchart LR
 	nginx[Nginx] --регион и провайдер--> app[NestJS приложение]
 	app --метрики--> prom
 	app --сырые логи--> vector[Vector]
-	ffmpeg[FFmpeg] --сырые логи--> vector
+	ffmpeg[FFmpeg] --сырые логи--> app
 	vector --распаршенные логи--> clickH[ClickHouse]
 	prom --> grafana[Grafana]
 	clickH --> grafana
