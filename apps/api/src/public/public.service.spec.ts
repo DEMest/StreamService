@@ -47,6 +47,7 @@ describe('PublicService', () => {
 
     it.each([
       ['выбранный публичный эфир', 'pilot', 'live', true, 'https://cdn.example.com/', 'https://cdn.example.com'],
+      ['второй выбранный публичный эфир', 'sports', 'court', true, 'https://cdn.example.com', 'https://cdn.example.com'],
       ['другой эфир', 'pilot', 'other', true, 'https://cdn.example.com', ''],
       ['приватный эфир', 'pilot', 'live', false, 'https://cdn.example.com', ''],
       ['CDN выключен', 'pilot', 'live', true, '', ''],
@@ -56,7 +57,7 @@ describe('PublicService', () => {
       jest.replaceProperty(process, 'env', {
         ...process.env,
         LIVE_HLS_CDN_ORIGIN: origin,
-        LIVE_HLS_CDN_STREAM: 'pilot/live',
+        LIVE_HLS_CDN_STREAM: 'pilot/live, sports/court',
       });
       mockPrisma.stream.findFirst.mockResolvedValueOnce({
         isLive: true,
