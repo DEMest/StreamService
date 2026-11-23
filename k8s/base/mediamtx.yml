@@ -1,5 +1,7 @@
 api: true
 apiAddress: :9997
+metrics: true
+metricsAddress: :9998
 
 hls: false
 
@@ -14,6 +16,7 @@ authMethod: http
 authHTTPAddress: http://api:3001/v1/internal/mediamtx/auth
 authHTTPExclude:
   - action: api
+  - action: metrics
 
 authInternalUsers:
   - user: api

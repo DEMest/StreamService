@@ -269,9 +269,9 @@ export class PublicService {
     const prefix = mediaUrlPrefix(orgSlug, streamSlug, stream);
     let hlsUrl = `${prefix}/live/hls/master.m3u8`;
     const cdnOrigin = process.env.LIVE_HLS_CDN_ORIGIN?.trim();
-    const cdnStream = process.env.LIVE_HLS_CDN_STREAM?.trim();
+    const cdnStreams = process.env.LIVE_HLS_CDN_STREAM?.split(',').map((entry) => entry.trim());
 
-    if (stream.isPublic && streamSlug && cdnStream === `${orgSlug}/${streamSlug}`
+    if (stream.isPublic && streamSlug && cdnStreams?.includes(`${orgSlug}/${streamSlug}`)
       && cdnOrigin && URL.canParse(cdnOrigin)) {
       const url = new URL(cdnOrigin);
       if (url.protocol === 'https:' && (cdnOrigin === url.origin || cdnOrigin === `${url.origin}/`)) {

@@ -2,6 +2,9 @@ apiVersion: v1
 kind: Service
 metadata:
   name: web
+  annotations:
+    traefik.ingress.kubernetes.io/service.nativelb: "true"
+    traefik.ingress.kubernetes.io/service.serverstransport: streamservice-web-drain@kubernetescrd
   labels:
     app.kubernetes.io/name: web
     app.kubernetes.io/part-of: streamservice
@@ -21,7 +24,13 @@ metadata:
     app.kubernetes.io/name: web
     app.kubernetes.io/part-of: streamservice
 spec:
-  replicas: 1
+  replicas: 2
+  minReadySeconds: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: web
@@ -31,6 +40,17 @@ spec:
         app.kubernetes.io/name: web
         app.kubernetes.io/part-of: streamservice
     spec:
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        - name: publish-static
+          image: streamservice-web
+          command: ["/bin/sh", "/etc/web-assets/publish.sh"]
+          volumeMounts:
+            - name: web-assets
+              mountPath: /srv/web-assets
+            - name: web-assets-config
+              mountPath: /etc/web-assets
+              readOnly: true
       containers:
         - name: web
           # Образ собирается с build-arg'ами (NEXT_PUBLIC_*, API_UPSTREAM,
@@ -67,8 +87,14 @@ spec:
             httpGet:
               path: /
               port: http
-            periodSeconds: 10
+            periodSeconds: 3
             timeoutSeconds: 5
+          lifecycle:
+            preStop:
+              exec:
+                # Оставляем HTTP-процесс доступным, пока Traefik убирает
+                # завершающийся под из списка endpoint'ов.
+                command: ["sleep", "10"]
           livenessProbe:
             tcpSocket:
               port: http
@@ -79,3 +105,19 @@ spec:
             requests:
               cpu: 100m
               memory: 256Mi
+      volumes:
+        - name: web-assets
+          persistentVolumeClaim:
+            claimName: web-assets
+        - name: web-assets-config
+          configMap:
+            name: web-assets-config
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: web-drain
+spec:
+  # При замене пода открываем новое соединение через Service вместо
+  # повторного использования соединения к завершающемуся поду.
+  maxIdleConnsPerHost: -1

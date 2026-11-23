@@ -1,0 +1,13 @@
+groups:
+  - name: streamservice
+    rules:
+      - alert: StreamServiceProbeFailed
+        expr: probe_success{job="service-health"} == 0 or up{job="service-health"} == 0
+        for: 2m
+        annotations:
+          summary: "Нет успешной проверки {{ $labels.instance }}"
+      - alert: MediaMTXMetricsUnavailable
+        expr: up{job="mediamtx"} == 0
+        for: 2m
+        annotations:
+          summary: "Prometheus не получает метрики MediaMTX"

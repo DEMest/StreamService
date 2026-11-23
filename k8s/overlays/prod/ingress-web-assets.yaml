@@ -1,0 +1,32 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-assets
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: streamservice-security-headers@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "110"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - liga-live.ru
+        - admin.liga-live.ru
+        - ads.liga-live.ru
+      secretName: liga-live-tls
+  rules:
+    - host: liga-live.ru
+      http: &assets
+        paths:
+          - path: /_next/static
+            pathType: Prefix
+            backend:
+              service:
+                name: web-assets
+                port:
+                  name: http
+    - host: admin.liga-live.ru
+      http: *assets
+    - host: ads.liga-live.ru
+      http: *assets

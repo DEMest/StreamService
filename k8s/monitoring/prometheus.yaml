@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: streamservice-prometheus
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streamservice-prometheus
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: streamservice-prometheus
+  template:
+    metadata:
+      labels:
+        app: streamservice-prometheus
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 65534
+      containers:
+        - name: prometheus
+          image: quay.io/prometheus/prometheus:v3.13.5
+          args:
+            - --config.file=/etc/streamservice-monitoring/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=14d
+            - --storage.tsdb.retention.size=1GB
+          ports:
+            - name: http
+              containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/streamservice-monitoring
+              readOnly: true
+            - name: history
+              mountPath: /prometheus
+        - name: blackbox
+          image: quay.io/prometheus/blackbox-exporter:v0.29.1
+          args:
+            - --config.file=/etc/streamservice-monitoring/blackbox.yml
+            - --web.listen-address=127.0.0.1:9115
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/streamservice-monitoring
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: streamservice-monitoring
+        - name: history
+          persistentVolumeClaim:
+            claimName: streamservice-prometheus

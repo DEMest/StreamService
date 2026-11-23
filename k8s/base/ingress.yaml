@@ -24,6 +24,13 @@ spec:
                 name: api
                 port:
                   name: http
+          - path: /_next/static
+            pathType: Prefix
+            backend:
+              service:
+                name: web-assets
+                port:
+                  name: http
           - path: /
             pathType: Prefix
             backend:

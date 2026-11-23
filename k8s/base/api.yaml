@@ -51,6 +51,12 @@ spec:
             - sh
             - -c
             - until wget -q --spider http://minio:9000/minio/health/ready; do echo "minio ещё не готов"; sleep 2; done
+        - name: wait-mediamtx
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -ec
+            - until wget -T 3 -qO /dev/null http://mediamtx:9997/v3/config/paths/list; do sleep 2; done
       containers:
         - name: api
           image: streamservice-api
