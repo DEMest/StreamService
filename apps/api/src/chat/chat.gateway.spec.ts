@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { JwtService } from '@nestjs/jwt';
 import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
 
@@ -6,12 +7,21 @@ import { ChatService } from './chat.service';
  * Lightweight Socket-like stub. Записывает все emit'ы, join'ы и to(room).emit'ы
  * в массивы, чтобы тесты могли проверить что отправили клиенту и в какую комнату.
  */
-function makeSocket(id: string) {
+function makeSocket(
+  id: string,
+  opts: { auth?: Record<string, unknown>; authorization?: string } = {},
+) {
   const emitted: { event: string; payload: any }[] = [];
   const joinedRooms: string[] = [];
   const toEmits: { room: string; event: string; payload: any }[] = [];
   return {
     id,
+    data: {} as Record<string, unknown>,
+    handshake: {
+      auth: opts.auth ?? {},
+      headers: opts.authorization ? { authorization: opts.authorization } : {},
+    },
+    disconnect: jest.fn(),
     join: jest.fn((room: string) => {
       joinedRooms.push(room);
     }),
@@ -41,6 +51,7 @@ describe('ChatGateway — per-Stream rooms', () => {
     listMessages: jest.Mock;
     isChatEnabled: jest.Mock;
   };
+  let jwt: { verifyAsync: jest.Mock };
 
   beforeEach(async () => {
     chat = {
@@ -51,13 +62,43 @@ describe('ChatGateway — per-Stream rooms', () => {
         .mockResolvedValue({ messages: [], ttlMinutes: 180, chatEnabled: true }),
       isChatEnabled: jest.fn().mockResolvedValue(true),
     };
+    jwt = { verifyAsync: jest.fn() };
     const module = await Test.createTestingModule({
-      providers: [ChatGateway, { provide: ChatService, useValue: chat }],
+      providers: [
+        ChatGateway,
+        { provide: ChatService, useValue: chat },
+        { provide: JwtService, useValue: jwt },
+      ],
     }).compile();
     gateway = module.get(ChatGateway);
     gateway.server = {
       to: jest.fn((_room: string) => ({ emit: jest.fn() })),
     } as any;
+  });
+
+  describe('handleConnection — optional Bearer', () => {
+    it('без токена оставляет сокет анонимным', async () => {
+      const sock = makeSocket('anon');
+      await gateway.handleConnection(sock as any);
+      expect(sock.data.user).toBeUndefined();
+      expect(sock.disconnect).not.toHaveBeenCalled();
+    });
+
+    it('валидный auth.token кладёт user в socket.data', async () => {
+      jwt.verifyAsync.mockResolvedValue({ sub: 'u1', role: 'org_admin', type: 'access' });
+      const sock = makeSocket('authed', { auth: { token: 'access-jwt' } });
+      await gateway.handleConnection(sock as any);
+      expect(jwt.verifyAsync).toHaveBeenCalledWith('access-jwt');
+      expect(sock.data.user).toEqual({ sub: 'u1', role: 'org_admin', type: 'access' });
+    });
+
+    it('битый токен — остаётся анонимом, без disconnect', async () => {
+      jwt.verifyAsync.mockRejectedValue(new Error('bad'));
+      const sock = makeSocket('bad', { authorization: 'Bearer nope' });
+      await gateway.handleConnection(sock as any);
+      expect(sock.data.user).toBeUndefined();
+      expect(sock.disconnect).not.toHaveBeenCalled();
+    });
   });
 
   describe('handleJoin — room key derived from resolved streamId', () => {
