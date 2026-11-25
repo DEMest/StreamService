@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { Request, Response, CookieOptions } from 'express';
+import { APP_CLIENT_HEADER, APP_CLIENT_VALUE } from './access-token';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser } from './current-user.decorator';
@@ -47,6 +48,43 @@ function pickOrgId(result: { orgId?: string }): string | null {
   return 'orgId' in result && result.orgId ? result.orgId : null;
 }
 
+/**
+ * Когда класть access/refresh в JSON (NFR-34/NFR-60):
+ * - login: только с `X-Client: app` — иначе XSS на сайте читал бы 90-дневный
+ *   refresh из ответа, хотя cookie HttpOnly;
+ * - refresh: также если токен пришёл из body (мобильный без cookie jar) —
+ *   отдельный заголовок на каждый refresh не нужен.
+ */
+function wantsBodyTokens(req: Request, refreshFromBody = false): boolean {
+  if (refreshFromBody) return true;
+  const raw = req.headers[APP_CLIENT_HEADER];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return typeof value === 'string' && value.trim().toLowerCase() === APP_CLIENT_VALUE;
+}
+
+function sessionBody(
+  result: {
+    accessToken: string;
+    refreshToken: string;
+    role: string;
+    login: string;
+    orgId?: string;
+  },
+  includeTokens: boolean,
+) {
+  const base = {
+    role: result.role,
+    login: result.login,
+    orgId: pickOrgId(result),
+  };
+  if (!includeTokens) return base;
+  return {
+    ...base,
+    accessToken: result.accessToken,
+    refreshToken: result.refreshToken,
+  };
+}
+
 @Controller('v1/auth')
 export class AuthController {
   constructor(private auth: AuthService) {}
@@ -54,33 +92,37 @@ export class AuthController {
   @Post('login')
   @HttpCode(200)
   async login(
+    @Req() req: Request,
     @Body() body: { login: string; password: string },
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.auth.login(body.login, body.password);
     res.cookie(ACCESS_COOKIE, result.accessToken, accessCookieOpts());
     res.cookie(REFRESH_COOKIE, result.refreshToken, refreshCookieOpts());
-    return { role: result.role, login: result.login, orgId: pickOrgId(result) };
+    return sessionBody(result, wantsBodyTokens(req));
   }
 
   /**
-   * POST /v1/auth/refresh — читает refresh-cookie, выдаёт новую пару
-   * (rotation: новый refresh тоже, чтобы сессия скользила). Не требует
-   * access-токена. При невалидном/протухшем refresh — 401, фронт редиректит
-   * на /login.
+   * POST /v1/auth/refresh — cookie refresh_token или body.refreshToken
+   * (мобильный клиент без cookie jar). Rotation: новая пара access+refresh.
+   * Без валидного refresh — 401.
    */
   @Post('refresh')
   @HttpCode(200)
   async refresh(
     @Req() req: Request,
+    @Body() body: { refreshToken?: string },
     @Res({ passthrough: true }) res: Response,
   ) {
-    const raw = (req.cookies?.[REFRESH_COOKIE] as string | undefined) ?? '';
+    const fromCookie = (req.cookies?.[REFRESH_COOKIE] as string | undefined) ?? '';
+    const fromBody = typeof body?.refreshToken === 'string' ? body.refreshToken.trim() : '';
+    // Cookie первым: сайт шлёт оба канала только случайно; мобильный — только body.
+    const raw = fromCookie || fromBody;
     if (!raw) throw new UnauthorizedException('No refresh token');
     const result = await this.auth.refresh(raw);
     res.cookie(ACCESS_COOKIE, result.accessToken, accessCookieOpts());
     res.cookie(REFRESH_COOKIE, result.refreshToken, refreshCookieOpts());
-    return { role: result.role, login: result.login, orgId: pickOrgId(result) };
+    return sessionBody(result, wantsBodyTokens(req, Boolean(fromBody) && !fromCookie));
   }
 
   @Post('logout')

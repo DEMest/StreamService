@@ -9,13 +9,20 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
+import { extractSocketAccessToken } from '../auth/access-token';
+import type { JwtPayload } from '../auth/auth.service';
 import { ChatService, chatRoomKey } from './chat.service';
 
 /**
  * Room ключ = `stream:<streamId>`, резолвится один раз в handleJoin и
  * стабилен на весь сеанс сокета (переключение стрима — только при повторном
  * `join` от клиента, не автоматически).
+ *
+ * Токен на connect необязателен: публичный чат смотрят без входа. Если
+ * клиент передал access JWT (`handshake.auth.token` или Authorization),
+ * кладём payload в `socket.data.user` и шлём `auth` (NFR-34).
  */
 @WebSocketGateway({ cors: { origin: '*' }, namespace: '/chat' })
 export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
@@ -31,14 +38,35 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   // Растёт на каждом отзыве доступа (accessChanged с revoke) — см. handleJoin.
   private accessEpoch = 0;
 
-  constructor(private chat: ChatService) {}
+  constructor(
+    private chat: ChatService,
+    private jwt: JwtService,
+  ) {}
 
   afterInit() {
     this.logger.log('Chat WebSocket gateway initialized');
   }
 
-  handleConnection(client: Socket) {
+  async handleConnection(client: Socket) {
     this.logger.log(`Socket connected: ${client.id}`);
+    const token = extractSocketAccessToken(client.handshake);
+    if (!token) return;
+    try {
+      const payload = await this.jwt.verifyAsync<JwtPayload>(token);
+      // Refresh / битый access не рвём сокет: чат публичный, зритель
+      // остаётся анонимом. Иначе протухший mobile access отрезал бы чат.
+      if (payload.type === 'refresh') return;
+      client.data.user = payload;
+      client.emit('auth', {
+        authenticated: true,
+        sub: payload.sub,
+        role: payload.role,
+        orgId: payload.orgId ?? null,
+        orgSlug: payload.orgSlug ?? null,
+      });
+    } catch {
+      // ignore — anonymous chat
+    }
   }
 
   handleDisconnect(client: Socket) {
