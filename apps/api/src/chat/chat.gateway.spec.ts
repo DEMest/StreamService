@@ -84,12 +84,21 @@ describe('ChatGateway — per-Stream rooms', () => {
       expect(sock.disconnect).not.toHaveBeenCalled();
     });
 
-    it('валидный auth.token кладёт user в socket.data', async () => {
-      jwt.verifyAsync.mockResolvedValue({ sub: 'u1', role: 'org_admin', type: 'access' });
+    it('валидный auth.token кладёт user и шлёт auth', async () => {
+      jwt.verifyAsync.mockResolvedValue({
+        sub: 'u1', role: 'org_admin', type: 'access', orgId: 'org-1', orgSlug: 'club',
+      });
       const sock = makeSocket('authed', { auth: { token: 'access-jwt' } });
       await gateway.handleConnection(sock as any);
       expect(jwt.verifyAsync).toHaveBeenCalledWith('access-jwt');
-      expect(sock.data.user).toEqual({ sub: 'u1', role: 'org_admin', type: 'access' });
+      expect(sock.data.user).toMatchObject({ sub: 'u1', role: 'org_admin' });
+      expect(sock._emitted.find((e) => e.event === 'auth')?.payload).toEqual({
+        authenticated: true,
+        sub: 'u1',
+        role: 'org_admin',
+        orgId: 'org-1',
+        orgSlug: 'club',
+      });
     });
 
     it('битый токен — остаётся анонимом, без disconnect', async () => {

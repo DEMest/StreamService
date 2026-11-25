@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { Request, Response, CookieOptions } from 'express';
+import { APP_CLIENT_HEADER, APP_CLIENT_VALUE } from './access-token';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser } from './current-user.decorator';
@@ -48,15 +49,17 @@ function pickOrgId(result: { orgId?: string }): string | null {
 }
 
 /**
- * Мобильный клиент (NFR-34/NFR-60) запрашивает токены в JSON заголовком
- * `X-Client: app`. Без него ответ как раньше — только role/login/orgId:
- * иначе 90-дневный refresh оказывается в теле login/refresh и его может
- * украсть XSS, хотя cookie по-прежнему HttpOnly.
+ * Когда класть access/refresh в JSON (NFR-34/NFR-60):
+ * - login: только с `X-Client: app` — иначе XSS на сайте читал бы 90-дневный
+ *   refresh из ответа, хотя cookie HttpOnly;
+ * - refresh: также если токен пришёл из body (мобильный без cookie jar) —
+ *   отдельный заголовок на каждый refresh не нужен.
  */
-function wantsBodyTokens(req: Request): boolean {
-  const raw = req.headers['x-client'];
+function wantsBodyTokens(req: Request, refreshFromBody = false): boolean {
+  if (refreshFromBody) return true;
+  const raw = req.headers[APP_CLIENT_HEADER];
   const value = Array.isArray(raw) ? raw[0] : raw;
-  return typeof value === 'string' && value.trim().toLowerCase() === 'app';
+  return typeof value === 'string' && value.trim().toLowerCase() === APP_CLIENT_VALUE;
 }
 
 function sessionBody(
@@ -119,7 +122,7 @@ export class AuthController {
     const result = await this.auth.refresh(raw);
     res.cookie(ACCESS_COOKIE, result.accessToken, accessCookieOpts());
     res.cookie(REFRESH_COOKIE, result.refreshToken, refreshCookieOpts());
-    return sessionBody(result, wantsBodyTokens(req));
+    return sessionBody(result, wantsBodyTokens(req, Boolean(fromBody) && !fromCookie));
   }
 
   @Post('logout')

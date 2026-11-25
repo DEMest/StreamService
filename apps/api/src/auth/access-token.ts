@@ -1,3 +1,7 @@
+/** Заголовок, которым приложение просит access/refresh в JSON (login). */
+export const APP_CLIENT_HEADER = 'x-client';
+export const APP_CLIENT_VALUE = 'app';
+
 /**
  * Достаёт access JWT из HTTP-запроса: сначала Authorization Bearer
  * (мобильный клиент, NFR-34/NFR-60), иначе cookie access_token (сайт).

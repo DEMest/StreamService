@@ -22,7 +22,7 @@ import { ChatService, chatRoomKey } from './chat.service';
  *
  * Токен на connect необязателен: публичный чат смотрят без входа. Если
  * клиент передал access JWT (`handshake.auth.token` или Authorization),
- * кладём payload в `socket.data.user` (NFR-34) — для будущих закрытых WS.
+ * кладём payload в `socket.data.user` и шлём `auth` (NFR-34).
  */
 @WebSocketGateway({ cors: { origin: '*' }, namespace: '/chat' })
 export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
@@ -57,6 +57,13 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       // остаётся анонимом. Иначе протухший mobile access отрезал бы чат.
       if (payload.type === 'refresh') return;
       client.data.user = payload;
+      client.emit('auth', {
+        authenticated: true,
+        sub: payload.sub,
+        role: payload.role,
+        orgId: payload.orgId ?? null,
+        orgSlug: payload.orgSlug ?? null,
+      });
     } catch {
       // ignore — anonymous chat
     }

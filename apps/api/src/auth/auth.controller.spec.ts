@@ -69,7 +69,7 @@ describe('AuthController', () => {
     });
   });
 
-  it('refresh принимает refreshToken из body без cookie (приложение)', async () => {
+  it('refresh из body без X-Client всё равно отдаёт токены в JSON', async () => {
     auth.refresh.mockResolvedValue({
       accessToken: 'a2',
       refreshToken: 'r2',
@@ -77,12 +77,28 @@ describe('AuthController', () => {
       login: 'admin',
     });
     const body = await controller.refresh(
-      req({ 'x-client': 'app' }),
+      req(),
       { refreshToken: 'old-refresh' },
       res as any,
     );
     expect(auth.refresh).toHaveBeenCalledWith('old-refresh');
     expect(body).toMatchObject({ accessToken: 'a2', refreshToken: 'r2' });
+  });
+
+  it('refresh только из cookie без X-Client — токенов в body нет', async () => {
+    auth.refresh.mockResolvedValue({
+      accessToken: 'a3',
+      refreshToken: 'r3',
+      role: 'superadmin',
+      login: 'admin',
+    });
+    const body = await controller.refresh(
+      req({}, { refresh_token: 'from-cookie' }),
+      {},
+      res as any,
+    );
+    expect(body).toEqual({ role: 'superadmin', login: 'admin', orgId: null });
+    expect(body).not.toHaveProperty('accessToken');
   });
 
   it('refresh предпочитает cookie, если есть и cookie, и body', async () => {
