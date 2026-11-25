@@ -1,6 +1,8 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
+import { extractHttpAccessToken } from './access-token';
+import type { JwtPayload } from './auth.service';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -8,10 +10,10 @@ export class JwtAuthGuard implements CanActivate {
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<Request>();
-    const token = req.cookies?.['access_token'];
+    const token = extractHttpAccessToken(req);
     if (!token) throw new UnauthorizedException('Not authenticated');
     try {
-      const payload = await this.jwt.verifyAsync<{ type?: 'access' | 'refresh' }>(token);
+      const payload = await this.jwt.verifyAsync<JwtPayload>(token);
       // Refresh-токен не должен пускать на обычные endpoint'ы. type undefined
       // — legacy access (до миграции на пару access/refresh), считаем валидным.
       if (payload.type === 'refresh') {
