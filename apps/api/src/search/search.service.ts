@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { toRecordingSummary } from '../recording/recording-summary';
+import { MAX_SEARCH_QUERY_LENGTH, MIN_SEARCH_QUERY_LENGTH, SearchResultsDto } from './search.dto';
 
 /**
  * Поиск по публичной части сайта: организации, их стримы и записи эфиров.
@@ -10,55 +11,16 @@ import { toRecordingSummary } from '../recording/recording-summary';
  * находиться по названию — она доступна лишь по ссылке с previewKey.
  */
 
-/** Короче двух символов запрос не имеет смысла: выдаст пол-базы. */
-const MIN_QUERY_LENGTH = 2;
-/** Защита от запроса-простыни, который превратится в тяжёлый LIKE. */
-const MAX_QUERY_LENGTH = 100;
 /** Сколько результатов отдаём в каждой из трёх категорий. */
 const LIMIT_PER_GROUP = 10;
-
-export interface SearchOrgHit {
-  orgSlug: string;
-  orgName: string;
-  hasImage: boolean;
-  liveCount: number;
-}
-
-export interface SearchStreamHit {
-  orgSlug: string;
-  orgName: string;
-  streamSlug: string;
-  streamName: string;
-  isLive: boolean;
-}
-
-export interface SearchBroadcastHit {
-  id: string;
-  title: string;
-  startedAt: Date;
-  endedAt: Date | null;
-  hasPreview: boolean;
-  recording: ReturnType<typeof toRecordingSummary>;
-  orgSlug: string;
-  orgName: string;
-  streamSlug: string;
-  streamName: string;
-}
-
-export interface SearchResults {
-  query: string;
-  organizations: SearchOrgHit[];
-  streams: SearchStreamHit[];
-  broadcasts: SearchBroadcastHit[];
-}
 
 @Injectable()
 export class SearchService {
   constructor(private prisma: PrismaService) {}
 
-  async search(rawQuery: string): Promise<SearchResults> {
-    const query = rawQuery.trim().slice(0, MAX_QUERY_LENGTH);
-    if (query.length < MIN_QUERY_LENGTH) {
+  async search(rawQuery: string): Promise<SearchResultsDto> {
+    const query = rawQuery.trim().slice(0, MAX_SEARCH_QUERY_LENGTH);
+    if (query.length < MIN_SEARCH_QUERY_LENGTH) {
       return { query, organizations: [], streams: [], broadcasts: [] };
     }
 

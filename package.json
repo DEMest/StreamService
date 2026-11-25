@@ -9,7 +9,8 @@
     "build:web": "pnpm --filter web build",
     "build:api": "pnpm --filter api build",
     "check:api": "pnpm --filter api exec prisma generate && pnpm build:api && pnpm --filter api test --runInBand",
-    "check:web": "pnpm --filter web exec tsc --noEmit && pnpm build:web"
+    "check:web": "pnpm --filter web exec tsc --noEmit && pnpm build:web",
+    "api:contract": "pnpm --filter api openapi && pnpm --filter web api-types"
   },
   "engines": {
     "node": ">=20",

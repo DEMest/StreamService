@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Monorepo**: pnpm workspaces (`pnpm-workspace.yaml` → `apps/*`)
 - **Frontend** (`apps/web`): Next.js 14 (App Router) + TypeScript + hls.js + React Query + Socket.io client
 - **Backend** (`apps/api`): NestJS 10 + TypeScript + Prisma + JWT auth + Socket.io + `@nestjs/schedule` (cron)
+- **API contract**: `class-validator` DTOs + `@nestjs/swagger` → OpenAPI, from which the site's types are generated (`openapi-typescript`). Rules: `docs/api-contract.md`
 - **Database**: PostgreSQL (via Prisma, schema at repo root `/prisma/schema.prisma`)
 - **Media server**: MediaMTX (Docker) — SRT/RTMP in → FFmpeg-generated HLS on disk → served by the API
 - **Media tooling**: FFmpeg / ffprobe (HLS generation, recording post-processing, downloads), `sharp` (thumbnails)
@@ -49,11 +50,17 @@ pnpm prisma:migrate-data:populate-streams   # backfill default Stream rows for e
 pnpm prisma:migrate-data:chat-to-stream     # migrate ChatMessage.orgId → streamId
 ```
 
+### API contract
+```bash
+pnpm api:contract     # regenerate apps/api/openapi.json + apps/web/src/lib/api-schema.ts after changing a described endpoint
+```
+Both files are committed and never edited by hand. A stale `openapi.json` fails `common/api/openapi.spec.ts`; stale site types fail the web CI job.
+
 ### Tests (from `apps/api`, Jest + ts-jest, `rootDir: src`)
 ```bash
 pnpm test                                   # run all *.spec.ts
-pnpm test -- --testPathPatterns=stream      # run a single test file by name (jest 30: plural)
-pnpm test -- --watch                        # watch mode
+pnpm test --testPathPatterns=stream         # run a single test file by name (jest 30: plural; pnpm 10 passes a literal `--` through, so no `--`)
+pnpm test --watch                           # watch mode
 ```
 There is no wired lint script; tests are backend-only (no frontend test suite).
 
@@ -214,7 +221,35 @@ MediaMTX's built-in HLS server is **disabled** (`hls: false` in `infra/mediamtx/
 | `seo` | `/v1/public/seo/{sitemap,page-meta}` | none |
 | `capacity` | `/v1/admin/capacity` (ёмкость сервера), `/v1/public/qoe` (телеметрия плеера) | superadmin JWT / none |
 | `chat` | WebSocket `/chat` namespace | none |
+| `common/api` | `GET /v1/openapi.json` (контракт API) | none |
 | `storage`, `stats`, `thumbnail`, `contact`, `feedback`, `notify`, `mediamtx` (control-API client), `prisma` | (internal services, no routes of their own) | — |
+
+**Контракт API** (`common/api/`, правила — `docs/api-contract.md`, их не
+дублируем здесь). У API два клиента, сайт и приложения, а версию приложения из
+стора нельзя обновить принудительно. Что важно не сломать:
+- **Новый эндпоинт пишется по правилам контракта** (пилот — `search/`). Тест
+  `openapi.spec.ts` падает на контроллере без `@ApiTags`, на эндпоинте без
+  схемы успешного ответа и на теле не классом. Вне контракта: `/v1/admin` и
+  `/v1/internal` по префиксу (`NON_CONTRACT_PREFIXES`, документ открыт всем —
+  вместе с путями из документа уходят и схемы их DTO),
+  старые контроллеры из `LEGACY_CONTROLLERS` (список только сокращается) и
+  `/health`.
+- **`ApiExceptionFilter` только подменяет тело ошибки** (`{ statusCode, code,
+  message, fields? }`). Запись ответа, «заголовки уже ушли» посреди отдачи HLS
+  и лог остаются за штатным `BaseExceptionFilter`. Не переписывайте это своей
+  отправкой ответа: этот же процесс раздаёт live HLS. Ответы, которые
+  обработчик пишет сам через `@Res()` (раздача HLS в `RecordingController`),
+  фильтр не видит, и `code` в них нет.
+- **Глобальный `ValidationPipe`** (`whitelist` + `transform`) валидирует только
+  параметры с типом-классом. Старые тела-интерфейсы в рантайме — `Object`, их
+  он не трогает. Отдельные параметры старых `@Query('x')` и `@Param('x')`
+  сохраняют значения от Express. WebSocket глобальные пайпы и фильтры не
+  получает вовсе.
+- **Документ собирается на старте, и сбой сборки не роняет API** (503 на
+  `/v1/openapi.json` и лог). `configureApi` — одна точка настройки и для
+  `main.ts`, и для тестов.
+- **Сайт берёт типы из контракта** (`ApiSchemas['…']` из `@/lib/api`), а не
+  пишет свои. После правки описанного эндпоинта — `pnpm api:contract`.
 
 **Auth tokens & cookies** (`auth.controller.ts`):
 - JWT payload: `{ sub, role: 'superadmin'|'org_admin'|'ad_manager', orgId?, orgSlug? }`.
