@@ -19,7 +19,7 @@ export class RecordingSummaryDto {
   @ApiProperty({ description: 'Состояние записи: `processing`, `ready`, `failed`.' })
   status: string;
 
-  @ApiProperty({ type: 'integer', nullable: true, description: 'Размер `download.mp4`, байты.' })
+  @ApiProperty({ type: 'integer', format: 'int64', nullable: true, description: 'Размер `download.mp4`, байты.' })
   fileSize: number | null;
 
   @ApiProperty({ type: 'integer', nullable: true, description: 'Длительность, целые секунды.' })

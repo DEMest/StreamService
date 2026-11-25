@@ -14,6 +14,8 @@ describe('cursor', () => {
 
   it.each([
     ['мусор', '%%%'],
+    ['посторонние символы после позиции', encodeCursor({ id: 'r1', seq: 1 }) + '%%%'],
+    ['лишний padding', encodeCursor({ id: 'r1', seq: 1 }) + '='],
     ['не JSON', Buffer.from('not json').toString('base64url')],
     ['чужая форма', encodeCursor({ other: 1 })],
     ['пустой', ''],

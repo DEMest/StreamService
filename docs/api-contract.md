@@ -15,6 +15,10 @@ NFR-52; задача — #129.
 | Типы сайта, генерируются из описания | `apps/web/src/lib/api-schema.ts` |
 | Механика: ошибки, валидация, курсор, сборка документа | `apps/api/src/common/api/` |
 
+Для Swift и Kotlin задайте абсолютный базовый URL окружения при создании
+клиента. В production это `https://liga-live.ru/api`. В браузере относительный
+адрес `/api` разрешается на текущем домене.
+
 Обновить оба файла после правки эндпоинта:
 
 ```bash
@@ -50,7 +54,8 @@ pnpm api:contract
      тип не выводит.
    - Момент времени — `type: String, format: 'date-time'`.
    - Целое число — `type: 'integer'`. Без этого генераторы Swift и Kotlin
-     получат `Double`.
+     получат `Double`. Для размеров файлов и других 64-битных значений
+     укажите `format: 'int64'`, чтобы Kotlin сгенерировал `Long`.
 4. **Ошибки бросаются через `ApiException`:**
    `throw new ApiException(HttpStatus.NOT_FOUND, 'EVENT_NOT_FOUND', 'Турнир не найден')`.
    Описываются через `@ApiNotFoundResponse({ type: ApiErrorDto })` и аналоги.

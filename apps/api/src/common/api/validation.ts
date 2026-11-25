@@ -1,4 +1,4 @@
-import { HttpStatus, ValidationError, ValidationPipe } from '@nestjs/common';
+import { ArgumentMetadata, HttpStatus, ValidationError, ValidationPipe } from '@nestjs/common';
 import { API_ERROR_CODES, ApiException, ApiFieldErrorDto } from './api-error';
 
 /** Плоский список ошибок: вложенные поля получают путь `venues.0.quad`. */
@@ -14,6 +14,17 @@ export function flattenValidationErrors(errors: ValidationError[], prefix = ''):
 }
 
 class DtoValidationPipe extends ValidationPipe {
+  override async transform(value: unknown, metadata: ArgumentMetadata) {
+    if (metadata.type === 'body' && !metadata.data && this.toValidate(metadata) &&
+        (value === null || typeof value !== 'object' || Array.isArray(value))) {
+      const message = 'Тело запроса должно быть объектом';
+      throw new ApiException(HttpStatus.BAD_REQUEST, API_ERROR_CODES.VALIDATION_FAILED, message, [
+        { field: 'body', messages: [message] },
+      ]);
+    }
+    return super.transform(value, metadata);
+  }
+
   protected override transformPrimitive(value: unknown): unknown {
     // Именованные query/param сохраняют значения, полученные от Express.
     return value;

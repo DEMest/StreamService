@@ -23,7 +23,7 @@ export const OPENAPI_PATH = '/v1/openapi.json';
  */
 export const CLIENT_VERSION_HEADER = 'X-Client-Version';
 
-const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
+export const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
 
 /**
  * Маршруты, которые не входят в публичный контракт, даже если описаны по
@@ -108,7 +108,7 @@ export function withReachableSchemas(doc: OpenAPIObject, keep: string[] = []): O
 }
 
 /** `SearchController.find` → `searchFind`: читаемые имена методов в клиентах. */
-function operationId(controllerKey: string, methodKey: string): string {
+export function operationId(controllerKey: string, methodKey: string): string {
   const controller = controllerKey.replace(/Controller$/, '');
   return controller.charAt(0).toLowerCase() + controller.slice(1) + methodKey.charAt(0).toUpperCase() + methodKey.slice(1);
 }

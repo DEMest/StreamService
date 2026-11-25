@@ -45,7 +45,10 @@ export interface components {
             id: string;
             /** @description Состояние записи: `processing`, `ready`, `failed`. */
             status: string;
-            /** @description Размер `download.mp4`, байты. */
+            /**
+             * Format: int64
+             * @description Размер `download.mp4`, байты.
+             */
             fileSize: number | null;
             /** @description Длительность, целые секунды. */
             duration: number | null;

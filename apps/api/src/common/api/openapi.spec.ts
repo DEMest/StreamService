@@ -1,11 +1,12 @@
-import { INestApplication, Type } from '@nestjs/common';
-import { PATH_METADATA } from '@nestjs/common/constants';
-import { ModulesContainer } from '@nestjs/core';
-import { OpenAPIObject } from '@nestjs/swagger';
+import { Body, INestApplication, Type } from '@nestjs/common';
+import { PARAMTYPES_METADATA, PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
+import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
+import { MetadataScanner, ModulesContainer } from '@nestjs/core';
+import { getSchemaPath, OpenAPIObject } from '@nestjs/swagger';
 import { DECORATORS } from '@nestjs/swagger/dist/constants';
 import { readFileSync } from 'fs';
 import { createPreviewApp, OPENAPI_FILE } from './generate-openapi';
-import { buildOpenApiDocument, isNonContractPath, serializeOpenApiDocument } from './openapi';
+import { buildOpenApiDocument, HTTP_METHODS, isNonContractPath, operationId, serializeOpenApiDocument } from './openapi';
 
 /**
  * Контроллеры, написанные до правил контракта (docs/api-contract.md): тела и
@@ -42,10 +43,21 @@ function underNonContractPrefix(controller: Type): boolean {
   return paths.every((p) => isNonContractPath(p));
 }
 
-const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'patch'] as const;
-
 /** Эндпоинты контракта, у которых ответ или тело — не схема, а пустое место. */
-function undescribedOperations(doc: OpenAPIObject): string[] {
+function undescribedOperations(doc: OpenAPIObject, controllers: Type[]): string[] {
+  const bodyTypes = new Map<string, Type>();
+  const scanner = new MetadataScanner();
+  for (const controller of controllers) {
+    for (const method of scanner.getAllMethodNames(controller.prototype)) {
+      const args = Reflect.getMetadata(ROUTE_ARGS_METADATA, controller, method) ?? {};
+      const types = Reflect.getMetadata(PARAMTYPES_METADATA, controller.prototype, method) ?? [];
+      for (const [key, arg] of Object.entries<{ index: number }>(args)) {
+        if (key.split(':')[0] !== String(RouteParamtypes.BODY)) continue;
+        const operation = Reflect.getMetadata(DECORATORS.API_OPERATION, controller.prototype[method]);
+        bodyTypes.set(operation?.operationId ?? operationId(controller.name, method), types[arg.index]);
+      }
+    }
+  }
   const out: string[] = [];
   for (const [path, item] of Object.entries(doc.paths)) {
     for (const method of HTTP_METHODS) {
@@ -53,13 +65,19 @@ function undescribedOperations(doc: OpenAPIObject): string[] {
       if (!op) continue;
       const name = `${method.toUpperCase()} ${path}`;
       const success = Object.entries(op.responses ?? {}).filter(([status]) => /^2\d\d$/.test(status));
-      const described = success.some(
-        ([status, res]) => status === '204' || !!(res as { content?: unknown }).content,
+      const described = success.length > 0 && success.every(([status, res]) =>
+        status === '204' || '$ref' in res || Object.values(res.content ?? {}).some((media) => media.schema),
       );
       if (!described) out.push(`${name}: ответ без схемы (нет @ApiOkResponse({ type }) и т.п.)`);
       const body = op.requestBody as { content?: Record<string, { schema?: { $ref?: string } }> } | undefined;
       const bodySchemas = Object.values(body?.content ?? {}).map((c) => c.schema);
-      if (bodySchemas.some((s) => !s?.$ref)) out.push(`${name}: тело — не класс-DTO`);
+      const dto = bodyTypes.get(op.operationId);
+      if (bodyTypes.has(op.operationId) && (!dto || dto === Object || !bodySchemas.length ||
+          bodySchemas.some((s) => s?.$ref !== getSchemaPath(dto)))) {
+        out.push(`${name}: тело — не класс-DTO`);
+      } else if (bodySchemas.some((s) => !s?.$ref)) {
+        out.push(`${name}: тело без схемы DTO`);
+      }
     }
   }
   return out;
@@ -118,7 +136,19 @@ describe('контракт OpenAPI', () => {
 
   it('у каждого эндпоинта контракта ответ и тело описаны схемами', () => {
     // Тег без классов дал бы сайту и приложениям пустые типы.
-    expect(undescribedOperations(buildOpenApiDocument(app))).toEqual([]);
+    expect(undescribedOperations(buildOpenApiDocument(app), controllers)).toEqual([]);
+  });
+
+  it('замечает @Body с интерфейсом, даже если Swagger пропустил requestBody', () => {
+    class ExampleController {
+      create(@Body() _body: { title: string }) {}
+    }
+    const doc: OpenAPIObject = {
+      openapi: '3.0.0',
+      info: { title: 'test', version: '1' },
+      paths: { '/example': { post: { operationId: 'exampleCreate', responses: { '204': { description: '' } } } } },
+    };
+    expect(undescribedOperations(doc, [ExampleController])).toEqual(['POST /example: тело — не класс-DTO']);
   });
 
   it('в документе есть пилот — поиск — и нет админки и служебных адресов', () => {
@@ -132,7 +162,7 @@ describe('контракт OpenAPI', () => {
 
   it('поиск описывает запись эфира как объект или null', () => {
     const { schemas } = buildOpenApiDocument(app).components ?? {};
-    expect(schemas).toHaveProperty('RecordingSummaryDto');
+    expect(schemas?.RecordingSummaryDto).toHaveProperty('properties.fileSize.format', 'int64');
     expect(schemas?.SearchBroadcastHitDto).toHaveProperty('properties.recording', {
       oneOf: [
         { $ref: '#/components/schemas/RecordingSummaryDto' },

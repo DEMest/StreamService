@@ -67,6 +67,11 @@ class LegacyAndNewController {
     return { body, isInstance: body instanceof CreateThingDto };
   }
 
+  @Post('optional')
+  optional(@Body() body: ListQueryDto) {
+    return body;
+  }
+
   @Get('list')
   list(@Query() q: ListQueryDto) {
     return { limit: q.limit, limitType: typeof q.limit, keys: Object.keys(q).sort() };
@@ -224,6 +229,13 @@ describe('HTTP-слой API: ошибки, валидация, OpenAPI', () => {
       expect(body.code).toBe('VALIDATION_FAILED');
       expect(typeof body.message).toBe('string');
       expect(body.fields.map((f: { field: string }) => f.field).sort()).toEqual(['count', 'name', 'nested.quad']);
+    });
+
+    it('DTO с необязательными полями принимает пустой объект и отклоняет массив', async () => {
+      expect((await post('/t/optional', {})).status).toBe(201);
+      const bad = await post('/t/optional', []);
+      expect(bad.status).toBe(400);
+      expect(await bad.json()).toMatchObject({ code: 'VALIDATION_FAILED', fields: [{ field: 'body' }] });
     });
 
     it('класс-DTO: незнакомые поля отбрасываются, а не ломают запрос', async () => {

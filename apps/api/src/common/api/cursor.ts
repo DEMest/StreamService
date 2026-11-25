@@ -76,7 +76,9 @@ export function encodeCursor(position: Record<string, unknown>): string {
 export function decodeCursor<T>(raw: string, isPosition: (value: unknown) => value is T): T {
   let value: unknown;
   try {
-    value = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    const bytes = Buffer.from(raw, 'base64url');
+    // Декодер Node пропускает посторонние символы и принимает лишний padding.
+    if (bytes.toString('base64url') === raw) value = JSON.parse(bytes.toString('utf8'));
   } catch {
     value = undefined;
   }

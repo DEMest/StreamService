@@ -133,6 +133,7 @@
           },
           "fileSize": {
             "type": "integer",
+            "format": "int64",
             "nullable": true,
             "description": "Размер `download.mp4`, байты."
           },
