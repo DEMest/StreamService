@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiExtraModels, ApiProperty, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
 import { RecordingSummaryDto } from '../recording/recording-summary';
 
@@ -55,6 +55,7 @@ export class SearchStreamHitDto {
   isLive: boolean;
 }
 
+@ApiExtraModels(RecordingSummaryDto)
 export class SearchBroadcastHitDto {
   @ApiProperty()
   id: string;
@@ -71,7 +72,14 @@ export class SearchBroadcastHitDto {
   @ApiProperty({ description: 'Есть стоп-кадр записи.' })
   hasPreview: boolean;
 
-  @ApiProperty({ type: () => RecordingSummaryDto, nullable: true })
+  // В OpenAPI 3.0 nullable рядом с allOf не разрешает null для схемы по ссылке.
+  @ApiProperty({
+    type: Object,
+    oneOf: [
+      { $ref: getSchemaPath(RecordingSummaryDto) },
+      { type: 'object', nullable: true, enum: [null] },
+    ],
+  })
   recording: RecordingSummaryDto | null;
 
   @ApiProperty()

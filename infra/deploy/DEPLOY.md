@@ -1,5 +1,25 @@
 # Деплой StreamService (liga-live.ru)
 
+## Резервная выкатка по SSH
+
+Если домашний раннер недоступен, на отдельной Linux-машине проверить нужный
+коммит из `main` через `pnpm install --frozen-lockfile`, `pnpm check:api`
+и `pnpm check:web`. Сохранить полный SHA проверенного коммита.
+
+На HostKey из каталога `/home/rootuser/StreamService`:
+
+```bash
+sha='ВСТАВИТЬ_ПРОВЕРЕННЫЙ_SHA'
+[[ "$sha" =~ ^[0-9a-f]{40}$ ]] \
+  && git fetch origin main --quiet \
+  && git merge-base --is-ancestor "$sha" origin/main \
+  && script=$(git show "$sha:infra/deploy/deploy.sh") \
+  && DEPLOY_SHA="$sha" bash -c "$script"
+```
+
+Скрипт принимает один запуск за раз, проверяет активные эфиры и здоровье
+сервисов. После завершения сверить `.deployed` с этим SHA и проверить сайт снаружи.
+
 ## 1. Сертификаты
 
 Сейчас это **Let's Encrypt с автопродлением**, а не ручная установка из панели

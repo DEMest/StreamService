@@ -60,7 +60,12 @@
     "contact": {}
   },
   "tags": [],
-  "servers": [],
+  "servers": [
+    {
+      "url": "/api",
+      "description": "Публичный API через сайт"
+    }
+  ],
   "components": {
     "schemas": {
       "SearchOrgHitDto": {
@@ -167,10 +172,16 @@
             "description": "Есть стоп-кадр записи."
           },
           "recording": {
-            "nullable": true,
-            "allOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/RecordingSummaryDto"
+              },
+              {
+                "type": "object",
+                "nullable": true,
+                "enum": [
+                  null
+                ]
               }
             ]
           },

@@ -16,6 +16,8 @@ import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
 import type { Response } from 'express';
 import { AddressInfo } from 'net';
+import { SearchController } from '../../search/search.controller';
+import { SearchService } from '../../search/search.service';
 import { ApiException } from './api-error';
 import { configureApi } from './configure-api';
 import { CursorQueryDto } from './cursor';
@@ -145,7 +147,13 @@ describe('HTTP-слой API: ошибки, валидация, OpenAPI', () => {
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      controllers: [LegacyAndNewController, TaggedController, AdminThingsController],
+      controllers: [LegacyAndNewController, TaggedController, AdminThingsController, SearchController],
+      providers: [
+        {
+          provide: SearchService,
+          useValue: { search: (query: string) => ({ query, organizations: [], streams: [], broadcasts: [] }) },
+        },
+      ],
     }).compile();
     app = moduleRef.createNestApplication({ logger: false });
     configureApi(app);
@@ -247,8 +255,20 @@ describe('HTTP-слой API: ошибки, валидация, OpenAPI', () => {
 
     it("старый @Query('x'): значение как было", async () => {
       expect(await (await fetch(`${base}/t/legacy-query?x=abc`)).json()).toEqual({ x: 'abc' });
+      expect(await (await fetch(`${base}/t/legacy-query?x=a&x=b`)).json()).toEqual({ x: ['a', 'b'] });
       expect(await (await fetch(`${base}/t/legacy-query`)).json()).toEqual({ x: null });
     });
+  });
+
+  it('поиск сохраняет ответ и кэш для строки и отклоняет повторённый q', async () => {
+    const ok = await fetch(`${base}/v1/public/search?q=liga&extra=1`);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get('cache-control')).toBe('public, max-age=30');
+    expect(await ok.json()).toEqual({ query: 'liga', organizations: [], streams: [], broadcasts: [] });
+
+    const bad = await fetch(`${base}/v1/public/search?q=a&q=b`);
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ code: 'VALIDATION_FAILED', fields: [{ field: 'q' }] });
   });
 
   describe(OPENAPI_PATH, () => {
@@ -257,7 +277,7 @@ describe('HTTP-слой API: ошибки, валидация, OpenAPI', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('application/json');
       const doc = await res.json();
-      expect(Object.keys(doc.paths)).toEqual(['/tagged']);
+      expect(Object.keys(doc.paths)).toEqual(['/tagged', '/v1/public/search']);
       expect(doc.components.schemas).toHaveProperty('ThingDto');
       expect(doc.components.schemas).toHaveProperty('ApiErrorDto');
       expect(doc.components.schemas).toHaveProperty('ApiFieldErrorDto');

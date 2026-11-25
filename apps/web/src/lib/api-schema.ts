@@ -59,7 +59,7 @@ export interface components {
             endedAt: string | null;
             /** @description Есть стоп-кадр записи. */
             hasPreview: boolean;
-            recording: components["schemas"]["RecordingSummaryDto"] | null;
+            recording: components["schemas"]["RecordingSummaryDto"] | (never | null);
             orgSlug: string;
             orgName: string;
             streamSlug: string;

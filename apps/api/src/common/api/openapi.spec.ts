@@ -123,9 +123,21 @@ describe('контракт OpenAPI', () => {
 
   it('в документе есть пилот — поиск — и нет админки и служебных адресов', () => {
     const doc = buildOpenApiDocument(app);
+    expect(doc.servers?.[0].url).toBe('/api');
     expect(doc.paths['/v1/public/search']?.get?.responses?.['200']).toBeDefined();
     expect(doc.components?.schemas).toHaveProperty('SearchResultsDto');
     expect(doc.components?.schemas).toHaveProperty('ApiErrorDto');
     expect(Object.keys(doc.paths).filter(isNonContractPath)).toEqual([]);
+  });
+
+  it('поиск описывает запись эфира как объект или null', () => {
+    const { schemas } = buildOpenApiDocument(app).components ?? {};
+    expect(schemas).toHaveProperty('RecordingSummaryDto');
+    expect(schemas?.SearchBroadcastHitDto).toHaveProperty('properties.recording', {
+      oneOf: [
+        { $ref: '#/components/schemas/RecordingSummaryDto' },
+        { type: 'object', nullable: true, enum: [null] },
+      ],
+    });
   });
 });

@@ -13,6 +13,13 @@ export function flattenValidationErrors(errors: ValidationError[], prefix = ''):
   return out;
 }
 
+class DtoValidationPipe extends ValidationPipe {
+  protected override transformPrimitive(value: unknown): unknown {
+    // Именованные query/param сохраняют значения, полученные от Express.
+    return value;
+  }
+}
+
 /**
  * Глобальная валидация запросов.
  *
@@ -29,7 +36,7 @@ export function flattenValidationErrors(errors: ValidationError[], prefix = ''):
  *   (`?limit=20` приходит числом через `@Type(() => Number)`).
  */
 export function createValidationPipe(): ValidationPipe {
-  return new ValidationPipe({
+  return new DtoValidationPipe({
     whitelist: true,
     transform: true,
     exceptionFactory: (errors) => {

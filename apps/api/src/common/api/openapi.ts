@@ -117,6 +117,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
   const config = new DocumentBuilder()
     .setTitle('Лига Лайв API')
     .setVersion('1')
+    .addServer('/api', 'Публичный API через сайт')
     .setDescription(
       'Контракт API для сайта и приложений. В `/v1` поля только добавляются; клиент пропускает ' +
         'незнакомые поля и значения перечислений. Ошибки — `ApiErrorDto`, ветвиться по `code`. ' +
