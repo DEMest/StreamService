@@ -4,6 +4,114 @@
  */
 
 export interface paths {
+    "/v1/public/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Лента опубликованных турниров
+         * @description Сначала турниры с более поздней датой афиши.
+         */
+        get: operations["eventFeedListEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/events/{eventId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Шапка турнира и ковры */
+        get: operations["eventFeedGetEvent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/events/{eventId}/bouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Лента схваток турнира
+         * @description Идущие, затем завершившиеся за последние 15 минут от новых к старым, затем остальные по расписанию.
+         */
+        get: operations["eventFeedListBouts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/events/{eventId}/poster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Афиша турнира */
+        get: operations["eventFeedGetPoster"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/events/{eventId}/athletes/{athleteId}/photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Фотография участника турнира */
+        get: operations["eventFeedGetAthletePhoto"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/events/{eventId}/venues/{venueId}/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Полный стоп-кадр открытого эфира ковра или его превью */
+        get: operations["eventFeedGetVenueThumbnail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/public/search": {
         parameters: {
             query?: never;
@@ -25,6 +133,154 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ApiFieldErrorDto: {
+            /**
+             * @description Путь к полю запроса: `limit`, `venues.0.quad`
+             * @example limit
+             */
+            field: string;
+            /**
+             * @example [
+             *       "limit must not be greater than 100"
+             *     ]
+             */
+            messages: string[];
+        };
+        ApiErrorDto: {
+            /** @example 404 */
+            statusCode: number;
+            /**
+             * @description Машинный код ошибки, SCREAMING_SNAKE_CASE. Конкретный (`EVENT_NOT_FOUND`) или общий по статусу (`NOT_FOUND`). Незнакомый код клиент обрабатывает по `statusCode`.
+             * @example NOT_FOUND
+             */
+            code: string;
+            /**
+             * @description Текст для человека. Не для разбора кодом.
+             * @example Турнир не найден
+             */
+            message: string;
+            /** @description Ошибки по полям — только у `VALIDATION_FAILED`. */
+            fields?: components["schemas"]["ApiFieldErrorDto"][];
+        };
+        EventAthleteDto: {
+            id: string;
+            firstName: string;
+            lastName: string;
+            school: string | null;
+            birthYear: number | null;
+            photoUrl: string | null;
+        };
+        BoutScoreDto: {
+            id: string;
+            /**
+             * @description Неизвестное значение показывается как waiting.
+             * @enum {string}
+             */
+            status: "waiting" | "live" | "finished";
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            endedAt: string | null;
+            redAthlete: components["schemas"]["EventAthleteDto"] | (never | null);
+            blueAthlete: components["schemas"]["EventAthleteDto"] | (never | null);
+            redScore: number;
+            blueScore: number;
+        };
+        EventVenueSummaryDto: {
+            id: string;
+            number: number;
+            name: string | null;
+            liveBout: components["schemas"]["BoutScoreDto"] | (never | null);
+        };
+        EventFeedCardDto: {
+            id: string;
+            title: string;
+            sport: string;
+            birthYearFrom: number | null;
+            birthYearTo: number | null;
+            /** @description Уровень турнира: international, regional или local. Для неизвестного значения используется оформление local. */
+            level: string;
+            /** Format: date */
+            startsOn: string;
+            /** Format: date */
+            endsOn: string;
+            timeZone: string | null;
+            city: string | null;
+            address: string | null;
+            regionCode: string | null;
+            posterUrl: string | null;
+            isLive: boolean;
+            /** @description Ковры и текущие схватки идущего турнира. */
+            venues: components["schemas"]["EventVenueSummaryDto"][];
+        };
+        EventFeedPageDto: {
+            items: components["schemas"]["EventFeedCardDto"][];
+            /** @description Курсор следующей порции; `null` — это последняя порция. */
+            nextCursor: string | null;
+        };
+        EventVenueDto: {
+            id: string;
+            number: number;
+            name: string | null;
+            liveBout: components["schemas"]["BoutScoreDto"] | (never | null);
+            /** @description HLS только для открытого эфира ковра. */
+            hlsUrl: string | null;
+            /** @description Стоп-кадр эфира или загруженное превью потока, если доступно. */
+            thumbnailUrl: string | null;
+            /** @description Четверть кадра. Без кадрирования — null. */
+            quad: number | null;
+        };
+        EventDetailDto: {
+            id: string;
+            title: string;
+            sport: string;
+            birthYearFrom: number | null;
+            birthYearTo: number | null;
+            /** @description Уровень турнира: international, regional или local. Для неизвестного значения используется оформление local. */
+            level: string;
+            /** Format: date */
+            startsOn: string;
+            /** Format: date */
+            endsOn: string;
+            timeZone: string | null;
+            city: string | null;
+            address: string | null;
+            regionCode: string | null;
+            posterUrl: string | null;
+            isLive: boolean;
+            venues: components["schemas"]["EventVenueDto"][];
+        };
+        BoutCardDto: {
+            id: string;
+            /**
+             * @description Неизвестное значение показывается как waiting.
+             * @enum {string}
+             */
+            status: "waiting" | "live" | "finished";
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            endedAt: string | null;
+            redAthlete: components["schemas"]["EventAthleteDto"] | (never | null);
+            blueAthlete: components["schemas"]["EventAthleteDto"] | (never | null);
+            redScore: number;
+            blueScore: number;
+            /** Format: date-time */
+            scheduledAt: string | null;
+            sequence: number | null;
+            weightClass: string | null;
+            venueId: string;
+            venueNumber: number;
+            /** @description HLS открытого эфира ковра, если он идёт. */
+            hlsUrl: string | null;
+            thumbnailUrl: string | null;
+            quad: number | null;
+        };
+        BoutFeedPageDto: {
+            items: components["schemas"]["BoutCardDto"][];
+            /** @description Курсор следующей порции; `null` — это последняя порция. */
+            nextCursor: string | null;
+        };
         SearchOrgHitDto: {
             orgSlug: string;
             orgName: string;
@@ -76,35 +332,6 @@ export interface components {
             streams: components["schemas"]["SearchStreamHitDto"][];
             broadcasts: components["schemas"]["SearchBroadcastHitDto"][];
         };
-        ApiFieldErrorDto: {
-            /**
-             * @description Путь к полю запроса: `limit`, `venues.0.quad`
-             * @example limit
-             */
-            field: string;
-            /**
-             * @example [
-             *       "limit must not be greater than 100"
-             *     ]
-             */
-            messages: string[];
-        };
-        ApiErrorDto: {
-            /** @example 404 */
-            statusCode: number;
-            /**
-             * @description Машинный код ошибки, SCREAMING_SNAKE_CASE. Конкретный (`EVENT_NOT_FOUND`) или общий по статусу (`NOT_FOUND`). Незнакомый код клиент обрабатывает по `statusCode`.
-             * @example NOT_FOUND
-             */
-            code: string;
-            /**
-             * @description Текст для человека. Не для разбора кодом.
-             * @example Турнир не найден
-             */
-            message: string;
-            /** @description Ошибки по полям — только у `VALIDATION_FAILED`. */
-            fields?: components["schemas"]["ApiFieldErrorDto"][];
-        };
     };
     responses: never;
     parameters: never;
@@ -114,6 +341,272 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    eventFeedListEvents: {
+        parameters: {
+            query?: {
+                /** @description `nextCursor` из предыдущей порции. Не передан — первая порция. */
+                cursor?: string;
+                /** @description Сколько элементов в порции. */
+                limit?: number;
+                /** @description Режим ленты. Фильтрация появится в #142. */
+                mode?: "live" | "archive";
+                /** @description Поиск по названию и городу. Фильтрация появится в #142. */
+                q?: string;
+                /** @description Вид спорта. Фильтрация появится в #142. */
+                sport?: string;
+                /** @description Код региона. Фильтрация появится в #142. */
+                regionCode?: string;
+                /** @description Фамилия спортсмена. Фильтрация появится в #142. */
+                lastName?: string;
+                /** @description Весовая категория. Фильтрация появится в #142. */
+                weightClass?: string;
+                /** @description Год рождения. Фильтрация появится в #142. */
+                birthYear?: number;
+            };
+            header?: {
+                /** @description Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт. */
+                "X-Client-Version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventFeedPageDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorDto"];
+                };
+            };
+        };
+    };
+    eventFeedGetEvent: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт. */
+                "X-Client-Version"?: string;
+            };
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventDetailDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorDto"];
+                };
+            };
+        };
+    };
+    eventFeedListBouts: {
+        parameters: {
+            query?: {
+                /** @description `nextCursor` из предыдущей порции. Не передан — первая порция. */
+                cursor?: string;
+                /** @description Сколько элементов в порции. */
+                limit?: number;
+                /** @description Фамилия спортсмена. Фильтрация появится в #143. */
+                q?: string;
+                /** @description Номер ковра. Фильтрация появится в #143. */
+                venueNumber?: number;
+                /** @description Весовая категория. Фильтрация появится в #143. */
+                weightClass?: string;
+                /** @description Школа. Фильтрация появится в #143. */
+                school?: string;
+                /** @description Год рождения. Фильтрация появится в #143. */
+                birthYear?: number;
+            };
+            header?: {
+                /** @description Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт. */
+                "X-Client-Version"?: string;
+            };
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoutFeedPageDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorDto"];
+                };
+            };
+        };
+    };
+    eventFeedGetPoster: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт. */
+                "X-Client-Version"?: string;
+            };
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorDto"];
+                };
+            };
+        };
+    };
+    eventFeedGetAthletePhoto: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт. */
+                "X-Client-Version"?: string;
+            };
+            path: {
+                eventId: string;
+                athleteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorDto"];
+                };
+            };
+        };
+    };
+    eventFeedGetVenueThumbnail: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт. */
+                "X-Client-Version"?: string;
+            };
+            path: {
+                eventId: string;
+                venueId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorDto"];
+                };
+            };
+        };
+    };
     searchFind: {
         parameters: {
             query?: {

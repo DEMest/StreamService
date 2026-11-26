@@ -55,8 +55,8 @@ export class ThumbnailService {
     });
   }
 
-  async getSnapshot(slug: string, mode: string): Promise<Buffer | null> {
-    const cached = this.getCached(slug);
+  async getSnapshot(slug: string, mode: string, cacheKey = slug): Promise<Buffer | null> {
+    const cached = this.getCached(cacheKey);
     if (cached) return cached;
 
     const hlsPath = `/hls/live/${slug}/hd/index.m3u8`;
@@ -67,7 +67,7 @@ export class ThumbnailService {
 
     try {
       const buf = await this.captureFrame(hlsPath, mode);
-      this.setCache(slug, buf);
+      this.setCache(cacheKey, buf);
       return buf;
     } catch (err) {
       this.logger.warn(`Frame capture failed for ${slug} (${mode}): ${err}`);
