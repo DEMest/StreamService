@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ThumbnailService } from '../thumbnail/thumbnail.service';
 import { ImageService } from '../storage/image.service';
 import { toRecordingSummary } from '../recording/recording-summary';
-import { canView, mediaUrlPrefix } from '../stream/stream-access';
+import { canView, liveHlsUrl, mediaUrlPrefix } from '../stream/stream-access';
 
 /**
  * DTO `/v1/public/orgs/:orgSlug/streams/:streamSlug/stream` для viewer'а.
@@ -266,20 +266,10 @@ export class PublicService {
       throw new NotFoundException('No live stream');
     }
 
-    const prefix = mediaUrlPrefix(orgSlug, streamSlug, stream);
-    let hlsUrl = `${prefix}/live/hls/master.m3u8`;
-    const cdnOrigin = process.env.LIVE_HLS_CDN_ORIGIN?.trim();
-    const cdnStreams = process.env.LIVE_HLS_CDN_STREAM?.split(',').map((entry) => entry.trim());
-
-    if (stream.isPublic && streamSlug && cdnStreams?.includes(`${orgSlug}/${streamSlug}`)
-      && cdnOrigin && URL.canParse(cdnOrigin)) {
-      const url = new URL(cdnOrigin);
-      if (url.protocol === 'https:' && (cdnOrigin === url.origin || cdnOrigin === `${url.origin}/`)) {
-        hlsUrl = url.origin + hlsUrl;
-      }
-    }
-
-    return { hlsUrl, feedMode: stream.feedMode as 'single' | 'composite' };
+    return {
+      hlsUrl: liveHlsUrl(orgSlug, streamSlug, stream),
+      feedMode: stream.feedMode as 'single' | 'composite',
+    };
   }
 
   /**

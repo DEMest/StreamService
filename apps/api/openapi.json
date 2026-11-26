@@ -1,6 +1,544 @@
 {
   "openapi": "3.0.0",
   "paths": {
+    "/v1/public/events": {
+      "get": {
+        "description": "Сначала турниры с более поздней датой афиши.",
+        "operationId": "eventFeedListEvents",
+        "parameters": [
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "`nextCursor` из предыдущей порции. Не передан — первая порция.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Сколько элементов в порции.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "mode",
+            "required": false,
+            "in": "query",
+            "description": "Режим ленты. Фильтрация появится в #142.",
+            "schema": {
+              "enum": [
+                "live",
+                "archive"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Поиск по названию и городу. Фильтрация появится в #142.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "sport",
+            "required": false,
+            "in": "query",
+            "description": "Вид спорта. Фильтрация появится в #142.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "regionCode",
+            "required": false,
+            "in": "query",
+            "description": "Код региона. Фильтрация появится в #142.",
+            "schema": {
+              "maxLength": 32,
+              "type": "string"
+            }
+          },
+          {
+            "name": "lastName",
+            "required": false,
+            "in": "query",
+            "description": "Фамилия спортсмена. Фильтрация появится в #142.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "weightClass",
+            "required": false,
+            "in": "query",
+            "description": "Весовая категория. Фильтрация появится в #142.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "birthYear",
+            "required": false,
+            "in": "query",
+            "description": "Год рождения. Фильтрация появится в #142.",
+            "schema": {
+              "minimum": 1900,
+              "maximum": 2100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Client-Version",
+            "required": false,
+            "description": "Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventFeedPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Лента опубликованных турниров",
+        "tags": [
+          "event-feed"
+        ]
+      }
+    },
+    "/v1/public/events/{eventId}": {
+      "get": {
+        "operationId": "eventFeedGetEvent",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Client-Version",
+            "required": false,
+            "description": "Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDetailDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Шапка турнира и ковры",
+        "tags": [
+          "event-feed"
+        ]
+      }
+    },
+    "/v1/public/events/{eventId}/bouts": {
+      "get": {
+        "description": "Идущие, затем завершившиеся за последние 15 минут от новых к старым, затем остальные по расписанию.",
+        "operationId": "eventFeedListBouts",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "`nextCursor` из предыдущей порции. Не передан — первая порция.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Сколько элементов в порции.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Фамилия спортсмена. Фильтрация появится в #143.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "venueNumber",
+            "required": false,
+            "in": "query",
+            "description": "Номер ковра. Фильтрация появится в #143.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 2147483647,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "weightClass",
+            "required": false,
+            "in": "query",
+            "description": "Весовая категория. Фильтрация появится в #143.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "school",
+            "required": false,
+            "in": "query",
+            "description": "Школа. Фильтрация появится в #143.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "birthYear",
+            "required": false,
+            "in": "query",
+            "description": "Год рождения. Фильтрация появится в #143.",
+            "schema": {
+              "minimum": 1900,
+              "maximum": 2100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Client-Version",
+            "required": false,
+            "description": "Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoutFeedPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Лента схваток турнира",
+        "tags": [
+          "event-feed"
+        ]
+      }
+    },
+    "/v1/public/events/{eventId}/poster": {
+      "get": {
+        "operationId": "eventFeedGetPoster",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Client-Version",
+            "required": false,
+            "description": "Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Афиша турнира",
+        "tags": [
+          "event-feed"
+        ]
+      }
+    },
+    "/v1/public/events/{eventId}/athletes/{athleteId}/photo": {
+      "get": {
+        "operationId": "eventFeedGetAthletePhoto",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "athleteId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Client-Version",
+            "required": false,
+            "description": "Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Фотография участника турнира",
+        "tags": [
+          "event-feed"
+        ]
+      }
+    },
+    "/v1/public/events/{eventId}/venues/{venueId}/thumbnail": {
+      "get": {
+        "operationId": "eventFeedGetVenueThumbnail",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "venueId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Client-Version",
+            "required": false,
+            "description": "Платформа и версия приложения: `ios/1.4.0`, `android/1.4.0`. Сайт не передаёт.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Полный стоп-кадр открытого эфира ковра или его превью",
+        "tags": [
+          "event-feed"
+        ]
+      }
+    },
     "/v1/public/search": {
       "get": {
         "operationId": "searchFind",
@@ -68,6 +606,569 @@
   ],
   "components": {
     "schemas": {
+      "ApiFieldErrorDto": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "Путь к полю запроса: `limit`, `venues.0.quad`",
+            "example": "limit"
+          },
+          "messages": {
+            "example": [
+              "limit must not be greater than 100"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "field",
+          "messages"
+        ]
+      },
+      "ApiErrorDto": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "example": 404
+          },
+          "code": {
+            "type": "string",
+            "description": "Машинный код ошибки, SCREAMING_SNAKE_CASE. Конкретный (`EVENT_NOT_FOUND`) или общий по статусу (`NOT_FOUND`). Незнакомый код клиент обрабатывает по `statusCode`.",
+            "example": "NOT_FOUND"
+          },
+          "message": {
+            "type": "string",
+            "description": "Текст для человека. Не для разбора кодом.",
+            "example": "Турнир не найден"
+          },
+          "fields": {
+            "description": "Ошибки по полям — только у `VALIDATION_FAILED`.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiFieldErrorDto"
+            }
+          }
+        },
+        "required": [
+          "statusCode",
+          "code",
+          "message"
+        ]
+      },
+      "EventAthleteDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "school": {
+            "type": "string",
+            "nullable": true
+          },
+          "birthYear": {
+            "type": "integer",
+            "nullable": true
+          },
+          "photoUrl": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "firstName",
+          "lastName",
+          "school",
+          "birthYear",
+          "photoUrl"
+        ]
+      },
+      "BoutScoreDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "live",
+              "finished"
+            ],
+            "description": "Неизвестное значение показывается как waiting."
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "redAthlete": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventAthleteDto"
+              },
+              {
+                "type": "object",
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "blueAthlete": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventAthleteDto"
+              },
+              {
+                "type": "object",
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "redScore": {
+            "type": "integer"
+          },
+          "blueScore": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "startedAt",
+          "endedAt",
+          "redAthlete",
+          "blueAthlete",
+          "redScore",
+          "blueScore"
+        ]
+      },
+      "EventVenueSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "liveBout": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BoutScoreDto"
+              },
+              {
+                "type": "object",
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "name",
+          "liveBout"
+        ]
+      },
+      "EventFeedCardDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "sport": {
+            "type": "string"
+          },
+          "birthYearFrom": {
+            "type": "integer",
+            "nullable": true
+          },
+          "birthYearTo": {
+            "type": "integer",
+            "nullable": true
+          },
+          "level": {
+            "type": "string",
+            "description": "Уровень турнира: international, regional или local. Для неизвестного значения используется оформление local."
+          },
+          "startsOn": {
+            "type": "string",
+            "format": "date"
+          },
+          "endsOn": {
+            "type": "string",
+            "format": "date"
+          },
+          "timeZone": {
+            "type": "string",
+            "nullable": true
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "address": {
+            "type": "string",
+            "nullable": true
+          },
+          "regionCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "posterUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "isLive": {
+            "type": "boolean"
+          },
+          "venues": {
+            "description": "Ковры и текущие схватки идущего турнира.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventVenueSummaryDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "sport",
+          "birthYearFrom",
+          "birthYearTo",
+          "level",
+          "startsOn",
+          "endsOn",
+          "timeZone",
+          "city",
+          "address",
+          "regionCode",
+          "posterUrl",
+          "isLive",
+          "venues"
+        ]
+      },
+      "EventFeedPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventFeedCardDto"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Курсор следующей порции; `null` — это последняя порция."
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ]
+      },
+      "EventVenueDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "liveBout": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BoutScoreDto"
+              },
+              {
+                "type": "object",
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "hlsUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "HLS только для открытого эфира ковра."
+          },
+          "thumbnailUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Стоп-кадр эфира или загруженное превью потока, если доступно."
+          },
+          "quad": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "nullable": true,
+            "description": "Четверть кадра. Без кадрирования — null."
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "name",
+          "liveBout",
+          "hlsUrl",
+          "thumbnailUrl",
+          "quad"
+        ]
+      },
+      "EventDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "sport": {
+            "type": "string"
+          },
+          "birthYearFrom": {
+            "type": "integer",
+            "nullable": true
+          },
+          "birthYearTo": {
+            "type": "integer",
+            "nullable": true
+          },
+          "level": {
+            "type": "string",
+            "description": "Уровень турнира: international, regional или local. Для неизвестного значения используется оформление local."
+          },
+          "startsOn": {
+            "type": "string",
+            "format": "date"
+          },
+          "endsOn": {
+            "type": "string",
+            "format": "date"
+          },
+          "timeZone": {
+            "type": "string",
+            "nullable": true
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "address": {
+            "type": "string",
+            "nullable": true
+          },
+          "regionCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "posterUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "isLive": {
+            "type": "boolean"
+          },
+          "venues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventVenueDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "sport",
+          "birthYearFrom",
+          "birthYearTo",
+          "level",
+          "startsOn",
+          "endsOn",
+          "timeZone",
+          "city",
+          "address",
+          "regionCode",
+          "posterUrl",
+          "isLive",
+          "venues"
+        ]
+      },
+      "BoutCardDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "live",
+              "finished"
+            ],
+            "description": "Неизвестное значение показывается как waiting."
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "redAthlete": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventAthleteDto"
+              },
+              {
+                "type": "object",
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "blueAthlete": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventAthleteDto"
+              },
+              {
+                "type": "object",
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "redScore": {
+            "type": "integer"
+          },
+          "blueScore": {
+            "type": "integer"
+          },
+          "scheduledAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "sequence": {
+            "type": "integer",
+            "nullable": true
+          },
+          "weightClass": {
+            "type": "string",
+            "nullable": true
+          },
+          "venueId": {
+            "type": "string"
+          },
+          "venueNumber": {
+            "type": "integer"
+          },
+          "hlsUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "HLS открытого эфира ковра, если он идёт."
+          },
+          "thumbnailUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "quad": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "startedAt",
+          "endedAt",
+          "redAthlete",
+          "blueAthlete",
+          "redScore",
+          "blueScore",
+          "scheduledAt",
+          "sequence",
+          "weightClass",
+          "venueId",
+          "venueNumber",
+          "hlsUrl",
+          "thumbnailUrl",
+          "quad"
+        ]
+      },
+      "BoutFeedPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BoutCardDto"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Курсор следующей порции; `null` — это последняя порция."
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ]
+      },
       "SearchOrgHitDto": {
         "type": "object",
         "properties": {
@@ -244,60 +1345,6 @@
           "organizations",
           "streams",
           "broadcasts"
-        ]
-      },
-      "ApiFieldErrorDto": {
-        "type": "object",
-        "properties": {
-          "field": {
-            "type": "string",
-            "description": "Путь к полю запроса: `limit`, `venues.0.quad`",
-            "example": "limit"
-          },
-          "messages": {
-            "example": [
-              "limit must not be greater than 100"
-            ],
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "field",
-          "messages"
-        ]
-      },
-      "ApiErrorDto": {
-        "type": "object",
-        "properties": {
-          "statusCode": {
-            "type": "integer",
-            "example": 404
-          },
-          "code": {
-            "type": "string",
-            "description": "Машинный код ошибки, SCREAMING_SNAKE_CASE. Конкретный (`EVENT_NOT_FOUND`) или общий по статусу (`NOT_FOUND`). Незнакомый код клиент обрабатывает по `statusCode`.",
-            "example": "NOT_FOUND"
-          },
-          "message": {
-            "type": "string",
-            "description": "Текст для человека. Не для разбора кодом.",
-            "example": "Турнир не найден"
-          },
-          "fields": {
-            "description": "Ошибки по полям — только у `VALIDATION_FAILED`.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ApiFieldErrorDto"
-            }
-          }
-        },
-        "required": [
-          "statusCode",
-          "code",
-          "message"
         ]
       }
     }
