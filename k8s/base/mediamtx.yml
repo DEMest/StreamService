@@ -1,0 +1,30 @@
+api: true
+apiAddress: :9997
+metrics: true
+metricsAddress: :9998
+
+hls: false
+
+# Запись включается ТОЛЬКО явно через API-patch пути (source of truth — БД).
+# Глобальный yes приводил к записи «вопреки настройке» после рестартов/rotate-key.
+record: no
+recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
+recordFormat: fmp4
+recordSegmentDuration: 3h
+
+authMethod: http
+authHTTPAddress: http://api:3001/v1/internal/mediamtx/auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+
+authInternalUsers:
+  - user: api
+    pass: mediamtxpass
+    permissions:
+      - action: api
+
+pathDefaults:
+  runOnReady: /on-ready.sh
+  runOnReadyRestart: no
+  runOnNotReady: /on-not-ready.sh
