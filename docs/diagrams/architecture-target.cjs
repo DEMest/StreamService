@@ -171,12 +171,12 @@ function build(L) {
     }),
     L.box({
       x: 760, y: 640, w: 210, h: 140, kind: 'changed',
-      title: 'web-api + mobile-api',
+      title: 'Единый API (NestJS)',
       lines: [
-        'web-api: сайт, admin, ads, SEO',
-        'mobile-api: приложение, Bearer,',
-        'push-токены, версии контракта',
-        'общий пакет: схема и правила',
+        'сайт и нативные клиенты',
+        'HttpOnly cookie / Bearer',
+        'версионированный OpenAPI',
+        'общие данные и правила',
         'stateless → N реплик (HPA)',
       ],
     }),
@@ -195,7 +195,7 @@ function build(L) {
       x: 1240, y: 640, w: 210, h: 140, kind: 'app',
       title: 'web (Next.js) + PWA',
       lines: [
-        'SSR, /api/* → web-api',
+        'SSR, /api/* → общий API',
         'плеер hls.js + <canvas>',
         'N реплик',
         'PWA + Web Push — шаг 0',
@@ -257,7 +257,7 @@ function build(L) {
     L.box({
       x: 1540, y: 400, w: 150, h: 160, kind: 'changed',
       title: 'Ingress (nginx)',
-      lines: ['TLS, cert-manager', '/ → web', '/api → web-api', '/m → mobile-api', '/socket.io → chat', 'limit_req, WAF-lite', 'хосты admin., ads.'],
+      lines: ['TLS, cert-manager', '/ → web', '/api → общий API', 'api. → тот же API', '/socket.io → chat', 'limit_req, WAF-lite', 'хосты admin., ads.'],
     }),
     L.box({
       x: 2005, y: 180, w: 260, h: 150, kind: 'edge',
@@ -269,7 +269,7 @@ function build(L) {
       title: 'Приложение (iOS / Android)',
       lines: [
         'Swift (SwiftUI) / Kotlin',
-        '(Compose), через mobile-api',
+        '(Compose), через общий API',
         'AVPlayer / Media3 ExoPlayer;',
         'кроп квадранта — view',
         'зритель и организатор,',
@@ -302,7 +302,7 @@ function build(L) {
       lines: [
         '1. API больше не отдаёт HLS: пакетировщик пишет сегменты в origin-хранилище, зрителям раздаёт CDN.   2. Монолит → ядро + сервисы на шине событий (ingest-control, archive-worker, notifier, chat-gateway, ai-commentary).',
         '3. Один хост и Compose → кластер с пулами media / app; медиа-поды не рестартуют под эфиром (правило deploy.sh переезжает в PDB).   4. Наблюдаемость: метрики, логи, ошибки, UI по подам и узлам.',
-        '5. Сайт ходит в web-api, приложение (Swift, Kotlin) — в mobile-api; база, хранилище и правила общие.   6. AI-комментатор читает копию p480 и пишет в чат / отдельную аудиодорожку — основной фид по-прежнему никто не трогает.',
+        '5. Сайт и приложения используют один API и общий контракт OpenAPI.   6. AI-комментатор читает копию p480 и пишет в чат / отдельную аудиодорожку — основной фид по-прежнему никто не трогает.',
       ],
     }),
   );
